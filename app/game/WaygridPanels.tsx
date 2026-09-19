@@ -29,6 +29,7 @@ type SharedProps = Readonly<{
   onClose: () => void;
   onDepositSelected: () => void;
   inventory?: ReactNode;
+  feedback?: string;
 }>;
 
 export type WaygridItemPanelProps = SharedProps & Readonly<{
@@ -79,7 +80,7 @@ function PanelHeader({ title, eyebrow, onClose, children }: Readonly<{ title: st
   );
 }
 
-export function WaygridItemPanel({ entries, utilization, cellCounts, onClose, onDepositSelected, onWithdraw, inventory }: WaygridItemPanelProps) {
+export function WaygridItemPanel({ entries, utilization, cellCounts, onClose, onDepositSelected, onWithdraw, inventory, feedback }: WaygridItemPanelProps) {
   const searchId = useId();
   const [query, setQuery] = useState("");
   const [exact, setExact] = useState(false);
@@ -90,12 +91,13 @@ export function WaygridItemPanel({ entries, utilization, cellCounts, onClose, on
   return (
     <section className="menu-overlay inventory-overlay waygrid-overlay" role="dialog" aria-modal="true" aria-label="Waygrid Vault">
       <div className="mc-window waygrid-window item-waygrid-window">
-        <PanelHeader title="Waygrid Vault" eyebrow="SEARCHABLE STORAGE · AREA CRAFTING READY" onClose={onClose}>
+        <PanelHeader title="Waygrid Vault" eyebrow="50 J / ITEM TRANSFER · ADJACENT POWER REQUIRED" onClose={onClose}>
           <CellLedger counts={cellCounts} />
         </PanelHeader>
         <div className="waygrid-toolbar">
           <label htmlFor={searchId}><span>Find an item</span><input id={searchId} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search the whole network…" autoComplete="off" /></label>
           <button type="button" onClick={onDepositSelected}>Deposit selected stack</button>
+          {feedback && <p className="waygrid-feedback" role="status" aria-live="polite">{feedback}</p>}
         </div>
         <div className="waygrid-item-list" aria-live="polite">
           {filtered.map((entry) => (
@@ -115,7 +117,7 @@ export function WaygridItemPanel({ entries, utilization, cellCounts, onClose, on
   );
 }
 
-export function WaygridCreaturePanel({ entries, utilization, cellCounts, healProgress, onClose, onDepositSelected, onWithdraw, renderPortrait, inventory }: WaygridCreaturePanelProps) {
+export function WaygridCreaturePanel({ entries, utilization, cellCounts, healProgress, onClose, onDepositSelected, onWithdraw, renderPortrait, inventory, feedback }: WaygridCreaturePanelProps) {
   const searchId = useId();
   const [query, setQuery] = useState("");
   const [exact, setExact] = useState(false);
@@ -126,12 +128,13 @@ export function WaygridCreaturePanel({ entries, utilization, cellCounts, healPro
   return (
     <section className="menu-overlay inventory-overlay waygrid-overlay creature-waygrid-overlay" role="dialog" aria-modal="true" aria-label="Creature Archive">
       <div className="mc-window waygrid-window">
-        <PanelHeader title="Creature Archive" eyebrow="ATTUNED COLLECTION · PASSIVE RECOVERY" onClose={onClose}>
+        <PanelHeader title="Creature Archive" eyebrow="500 J / ORB TRANSFER · ADJACENT POWER REQUIRED" onClose={onClose}>
           <CellLedger counts={cellCounts} />
         </PanelHeader>
         <div className="waygrid-toolbar">
           <label htmlFor={searchId}><span>Find a creature</span><input id={searchId} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search names or species…" autoComplete="off" /></label>
           <button type="button" onClick={onDepositSelected}>Archive selected orb</button>
+          {feedback && <p className="waygrid-feedback" role="status" aria-live="polite">{feedback}</p>}
         </div>
         <div className="waygrid-creature-list" aria-live="polite">
           {filtered.map((entry) => {

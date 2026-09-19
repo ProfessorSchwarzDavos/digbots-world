@@ -2340,7 +2340,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
         },
         onOverlayRequest: (kind: OverlayKind, key?: string) => {
           if (!startedRef.current) return;
-          if (kind === "wayworks") setToast("");
+          if (kind === "wayworks" || kind === "waygrid-items" || kind === "waygrid-creatures") setToast("");
           if (kind === "spell-wheel" && key === "close") {
             setOverlay(null);
             engine.activate();
@@ -5131,6 +5131,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
       {overlay === "waygrid-items" && (
         <div onPointerMove={trackCursor}>
           <WaygridItemPanel
+            feedback={toast}
             entries={hud.activeWaygridItems?.entries ?? []}
             utilization={hud.activeWaygridItems?.utilization ?? { used: 0, capacity: 0, percentage: 0, label: "0/0" }}
             cellCounts={hud.activeWaygridItems?.cellCounts ?? [0, 0, 0]}
@@ -5145,6 +5146,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
       {overlay === "waygrid-creatures" && (
         <div onPointerMove={trackCursor}>
           <WaygridCreaturePanel
+            feedback={toast}
             entries={hud.activeWaygridCreatures?.entries ?? []}
             utilization={hud.activeWaygridCreatures?.utilization ?? { used: 0, capacity: 0, percentage: 0, label: "0/0" }}
             cellCounts={hud.activeWaygridCreatures?.cellCounts ?? [0, 0, 0]}

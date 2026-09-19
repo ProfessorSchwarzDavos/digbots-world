@@ -6,6 +6,7 @@ import { WayworksPanel, type WayworksPanelProps } from "../app/game/WayworksPane
 import { BlockId, Item } from "../app/game/data";
 import { wayworksMetadataSummary } from "../app/game/wayworks-ui";
 import { createMachine } from "../app/game/wayworks";
+import { WaygridItemPanel, WaygridCreaturePanel } from "../app/game/WaygridPanels";
 
 const base: WayworksPanelProps = {
   name: "Workshop Battery", kind: "battery", energyJ: 12_345, capacityJ: 100_000,
@@ -94,4 +95,13 @@ test("resource and machine metadata never masquerade as creature data", () => {
   assert.equal(wayworksMetadataSummary({ item: Item.GasCylinder, count: 1, metadata: { wayworksResource: { kind: "chemical", resource: "oxygen", quantity: 1000 } } }), "1 standard L oxygen");
   assert.equal(wayworksMetadataSummary({ item: Item.GasCylinder, count: 1 }), "Empty container");
   assert.equal(wayworksMetadataSummary({ item: BlockId.FluidTank, count: 1, metadata: { wayworks: createMachine("fluid-tank", "L", "owner") } }), "Sealed machine stores and modules");
+});
+
+test("Waygrid declares finite power costs and keeps action failures visible in its modal", () => {
+  const props = { entries: [], utilization: { used: 0, capacity: 100, percentage: 0, label: "0/100" },
+    cellCounts: [1, 0, 0] as const, onClose: () => {}, onDepositSelected: () => {}, onWithdraw: () => {}, feedback: "Connect an adjacent charged battery." };
+  const item = renderToStaticMarkup(createElement(WaygridItemPanel, props));
+  const creature = renderToStaticMarkup(createElement(WaygridCreaturePanel, { ...props, healProgress: 0 }));
+  assert.match(item, /50 J \/ ITEM TRANSFER/); assert.match(creature, /500 J \/ ORB TRANSFER/);
+  for (const html of [item, creature]) assert.match(html, /class="waygrid-feedback" role="status" aria-live="polite">Connect an adjacent charged battery\./);
 });

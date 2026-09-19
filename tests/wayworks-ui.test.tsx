@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { WayworksPanel, type WayworksPanelProps } from "../app/game/WayworksPanel";
@@ -104,4 +105,9 @@ test("Waygrid declares finite power costs and keeps action failures visible in i
   const creature = renderToStaticMarkup(createElement(WaygridCreaturePanel, { ...props, healProgress: 0 }));
   assert.match(item, /50 J \/ ITEM TRANSFER/); assert.match(creature, /500 J \/ ORB TRANSFER/);
   for (const html of [item, creature]) assert.match(html, /class="waygrid-feedback" role="status" aria-live="polite">Connect an adjacent charged battery\./);
+});
+
+test("full-screen narrow Waygrid has no outer padding beyond the viewport", () => {
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(css, /@media \(max-width: 720px\)\s*\{\s*\.waygrid-overlay\s*\{\s*padding: 0;\s*\}\s*\.waygrid-window\s*\{\s*width: 100vw; height: 100dvh;/);
 });

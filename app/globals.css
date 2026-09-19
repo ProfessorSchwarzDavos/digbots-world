@@ -5850,6 +5850,7 @@ input:focus-visible {
 .apiary-worker-slot { width: 100%; min-width: 0; aspect-ratio: 1; border-color: #c49136; background: radial-gradient(circle, #f5ce5b2e, #2f2113 70%); }
 
 @media (max-width: 720px) {
+  .waygrid-overlay { padding: 0; }
   .waygrid-window { width: 100vw; height: 100dvh; max-height: 100dvh; border-width: 0; }
   .waygrid-header { min-height: 66px; padding: 9px; }
   .waygrid-cells { display: none; }

@@ -1,0 +1,23 @@
+.life-support-icon{width:36px;height:36px;flex:none;filter:drop-shadow(0 2px 1px #0008)}
+.life-support-icon.small{width:26px;height:26px}
+.equipment-slot .life-support-icon{width:22px;height:22px}
+.inventory-craft-services{display:grid;grid-template-columns:minmax(250px,1fr) minmax(250px,1fr);gap:12px;align-items:start;margin-bottom:12px}
+.inventory-craft-services .life-support-panel{max-width:none;margin-top:16px}
+.inventory-craft-services .crafting-workspace{margin-bottom:0}
+.life-support-help,.life-support-panel{font-size:11px;line-height:1.45;color:#cbd8d6;max-width:310px}
+.life-support-panel{padding:10px;border:1px solid #8ca7a166;border-radius:8px;background:#111e24e8;text-align:left}
+.life-support-panel header{display:flex;align-items:center;gap:6px;color:#e3d0a0}
+.life-support-panel p{margin:7px 0}.life-support-panel small{display:block;line-height:1.5}
+.life-support-socket{display:flex;gap:5px;margin:5px 0}.life-support-socket>button:first-child{display:flex;align-items:center;gap:5px;flex:1;text-align:left}
+.life-support-panel button,.eva-controls button{font:inherit;min-height:32px;color:#e8efed;background:#243b43;border:1px solid #76958d;border-radius:5px;padding:5px 8px;cursor:pointer}
+.life-support-panel button:focus-visible,.eva-controls button:focus-visible{outline:3px solid #ffe095;outline-offset:2px}
+.life-support-actions{display:flex;flex-wrap:wrap;gap:5px;margin:7px 0}
+.life-support-hud{position:absolute;left:18px;top:100px;width:255px;display:grid;gap:5px;padding:12px;background:#101d26ed;border:1px solid #8ba8a3;border-left:4px solid #91cdbb;border-radius:7px;color:#e2efea;box-shadow:0 5px 22px #0005;font-size:11px;pointer-events:auto;z-index:12}
+.life-support-heading{display:flex;align-items:center;gap:10px}.life-support-heading>b{font-size:24px;color:#b6e7dd}.life-support-heading>strong{font-size:20px;font-variant-numeric:tabular-nums}.life-support-heading>span{margin-left:auto}
+.life-support-hud meter{width:100%;height:8px;accent-color:#8ecebe}.life-support-status{font-size:11px;letter-spacing:.035em}.life-support-hud.level-low{border-left-color:#e3c779}.life-support-hud.level-critical,.life-support-hud.level-danger{border-left-color:#ed9a7d}.life-support-hud.level-danger .life-support-status{color:#ffc0a7}
+.eva-controls{display:flex;flex-wrap:wrap;gap:4px;border-top:1px solid #829b9444;padding-top:7px}.eva-controls button{min-height:29px;padding:4px 6px;font-size:10px}.eva-controls button[aria-pressed=true]{background:#35534d}
+@media(max-width:700px){.life-support-hud{left:8px;top:170px;width:calc(100% - 16px);box-sizing:border-box;padding:8px;font-size:10px}.life-support-heading>strong{font-size:17px}.eva-controls button{min-height:36px}.life-support-panel{max-width:none}}
+@media(max-width:700px){.game-shell:has(.life-support-hud)>.toast-message{top:auto;bottom:165px}}
+@media(max-width:1000px){.inventory-craft-services{grid-template-columns:minmax(200px,1fr) minmax(210px,1fr);gap:8px}.inventory-craft-services .crafting-workspace{grid-template-columns:auto 25px 44px;gap:5px;padding:6px}}
+@media(max-width:760px){.inventory-craft-services{grid-template-columns:1fr}.inventory-craft-services .life-support-panel{margin-top:0}}
+@media(prefers-reduced-motion:reduce){.life-support-hud,.life-support-panel{animation:none;transition:none}}

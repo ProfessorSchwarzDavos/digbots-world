@@ -47,6 +47,7 @@ const EQUIPMENT_ITEMS = new Set<ItemCode>([Item.Saddle, Item.Sailboat, Item.Wild
 export function fallbackInventoryIconKind(item: ItemCode): string {
   const definition = ITEMS[item];
   if (!definition) return "crafted-component";
+  if (definition.lifeSupportKind) return `life-support-${definition.lifeSupportKind}`;
   if (definition.placeBlock !== undefined) return "voxel-block";
   if (item === Item.String) return "thread";
   if (item === Item.RawCopper) return "ore-chunk";
@@ -59,6 +60,7 @@ export function fallbackInventoryIconKind(item: ItemCode): string {
 export function itemPresentationFamily(item: ItemCode): ItemPresentationFamily {
   const definition = ITEMS[item];
   if (!definition) return "crafted-component";
+  if (definition.lifeSupportKind) return "equipment";
   if (definition.heldModel) return `authored-${definition.heldModel}`;
   if (definition.worldTextureBlock !== undefined) {
     const block = BLOCKS[definition.worldTextureBlock];

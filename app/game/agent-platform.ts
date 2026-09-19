@@ -62,7 +62,7 @@ export const AGENT_COMMAND_KINDS = [
   "observe", "inspect_area", "inspect_target", "wiki_lookup", "bestiary_lookup", "recipe_lookup",
   "move_to", "move_relative", "follow_player", "face", "wait", "stop",
   "chat_read", "chat_send", "speak", "emote",
-  "inventory_get", "inventory_move", "inventory_drop", "agent_inventory_open_for_host",
+  "inventory_get", "inventory_move", "inventory_drop", "inventory_equip", "inventory_life_support", "agent_inventory_open_for_host",
   "interact", "open_container", "container_get", "container_transfer", "use_workstation",
   "harvest_area", "gather_resource", "build_plan", "build_commit", "build_cancel",
   "memory_pin", "memory_list", "memory_remove", "task_pin", "task_update", "waypoint_pin",
@@ -216,6 +216,8 @@ export type AgentObservationV1 = Readonly<{
     liquid: string | null;
     light: number;
     inventory: Readonly<{ used: number; capacity: number; slots?: readonly AgentInventorySlot[] }>;
+    equipment?: Readonly<Record<string, unknown>>;
+    lifeSupport?: Readonly<Record<string, unknown>>;
     command: AgentCommandResult | null;
   }>;
   world: Readonly<{
@@ -324,6 +326,7 @@ const COMMAND_CAPABILITY: Readonly<Partial<Record<AgentCommandKind, AgentCapabil
   move_to: "move.self", move_relative: "move.self", follow_player: "move.self", face: "move.self", wait: "move.self", stop: "move.self",
   chat_send: "chat.send", speak: "voice.send", emote: "chat.send",
   inventory_get: "inventory.self.read", inventory_move: "inventory.self.write", inventory_drop: "inventory.self.write",
+  inventory_equip: "inventory.self.write", inventory_life_support: "inventory.self.write",
   agent_inventory_open_for_host: "inventory.self.read",
   interact: "interact.basic", open_container: "container.read", container_get: "container.read", container_transfer: "container.write",
   use_workstation: "interact.basic", harvest_area: "harvest", gather_resource: "harvest",
@@ -394,6 +397,8 @@ function validatePlainJson(value: unknown, depth = 0): boolean {
 
 function validateCommandArguments(kind: AgentCommandKind, args: Record<string, unknown>): boolean {
   if (!validatePlainJson(args)) return false;
+  if (kind === "inventory_equip" && (!["head", "chest", "legs", "feet", "back"].includes(String(args.slot)) || !isInteger(args.inventorySlot, 0, 35) || !isInteger(args.expectedInventoryRevision))) return false;
+  if (kind === "inventory_life_support" && (!isInteger(args.inventorySlot, 0, 35) || !isInteger(args.expectedInventoryRevision) || !isRecord(args.operation))) return false;
   if ((kind === "move_to" || kind === "face") && !validateVector(args.target)) return false;
   if (kind === "move_relative" && !validateVector(args.delta)) return false;
   if (kind === "follow_player" && (!isId(args.playerId) || (args.minDistance !== undefined && !isFiniteNumber(args.minDistance, 1, 16)) || (args.maxDistance !== undefined && !isFiniteNumber(args.maxDistance, 1.5, 32)))) return false;

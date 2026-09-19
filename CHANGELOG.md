@@ -8,7 +8,9 @@ Named releases summarize player-visible changes and the compatibility work that 
 - Save & Quit now waits for durable browser storage; recovery/export remains available when saving fails. Generic/Rust saves are not imported automatically.
 - Scoped multiplayer protocol4 and agent protocol2 to the admitted location/epoch/revision; preserved host-owned custody and blocked conflicting request replay within the bounded response window.
 - Added frozen environment/sky policies, persistent universe time and local body clocks, analytic orbital positions, phase-aware bodies/rings, eclipse math and roof-aware rendering. Host snapshots now include the frozen celestial catalog.
-- Generalized shared gravity for player, creature, projectile, drop and related motion, including zero-G inertia/contact push-off and location-owned saved drift. Added explicitly synthetic, local-only environment fixtures; no ordinary off-world travel or life-support equipment is implied.
+- Generalized shared gravity for player, creature, projectile, drop and related motion, including zero-G inertia/contact push-off and location-owned saved drift. Added explicitly synthetic, local-only environment fixtures; ordinary off-world travel remains unfinished.
+- Added an independent back slot, sealed helmet, finite oxygen tanks and twin-socket rigs, Pressure Weave, a vacuum-incompatible Dive Harness, measured finite-container refill/service, interruptible swaps and contextual oxygen/hazard feedback. Exact tank and supply contents persist through inventory, saves, drops and host transactions.
+- Added finite six-axis EVA propulsion, crouch/contact magnetic boots, location-owned anchor/reel and cargo tether controls, and smooth stable-up/free-roll camera comfort. Machine-powered oxygen production and pressurized habitats remain later work.
 - This is a partially verified local foundation checkpoint. Additional destinations, the remaining expansion, and comprehensive integration verification are unfinished; no release or deployment is implied.
 
 ## 1.12.0 - Field Archive - 2026-08-01

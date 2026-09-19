@@ -3,6 +3,8 @@ import { createWaystarCatalog, validateCelestialCatalog, type CelestialCatalogSn
 import { bodyEnvironment, gravityAcceleration, gravityGait, contactPushOffSpeed, effectiveFallDistance, type BodyEnvironment } from "./celestial-environment";
 import { localBodyClock, secondsFromLocalClock, sampleCelestialSky, type CelestialSkySample } from "./celestial-ephemeris";
 import { CelestialSkyRenderer } from "./celestial-sky";
+import { EMPTY_LIFE_SUPPORT, normalizeLifeSupportState, stepLifeSupport, operateLifeSupport, maneuverImpulse, constrainTether, lifeSupportResourceTotals, validLifeSupportOperation, type LifeSupportState, type LifeSupportHud, type LifeSupportOperation, type EvaTether } from "./life-support";
+import { craftLifeSupportSupply } from "./life-support-crafting";
 import { isSharedModelGeometry, sharedModelGeometryDiagnostics } from "./shared-model-geometry";
 import { CreatureLodBatcher, type CreatureLodInstance } from "./creature-lod-batcher";
 import { CreatureArticulatedBatcher, type ArticulatedCreatureInstance } from "./creature-articulated-batcher";
@@ -1328,6 +1330,8 @@ export type HudState = {
   onlinePlayers: number;
   playerVariant: PlayerVariant;
   oxygen: number;
+  lifeSupport?: LifeSupportHud;
+  eva?: { boots: boolean; contact: boolean; thrust: boolean; tether: number | null; stableUp: boolean; armed: boolean };
   maxOxygen: number;
   submerged: boolean;
   averageFps: number;
@@ -1517,6 +1521,7 @@ export type WorldSave = {
   trash?: InventorySlot | null;
   craftGrid?: Array<InventorySlot | null>;
   equipment?: Partial<Record<EquipmentSlot, InventorySlot | null>>;
+  lifeSupport?: LifeSupportState;
   offhand?: InventorySlot | null;
   bestiary?: Partial<BestiaryProgress>;
   saplings?: Record<string, number>;
@@ -2752,6 +2757,7 @@ const STRUCTURE_LOOT_ITEMS: Readonly<Record<string, ItemCode>> = Object.freeze({
   "tome-hearthward": Item.TomeHearthward,
   "shadow-shard": Item.ShadowShard,
   "gear-cluster": Item.GearCluster,
+  "field-oxygen-reserve": Item.FieldOxygenReserve,
   "deepgear-alloy": Item.DeepgearAlloy,
   "flintlock-ball": Item.FlintlockBall,
   "wayfarer-potion": Item.WayfarerPotion,
@@ -3531,7 +3537,7 @@ function blankFurnace(): FurnaceState {
 }
 
 function blankEquipment(): Record<EquipmentSlot, InventorySlot | null> {
-  return { head: null, chest: null, legs: null, feet: null };
+  return { head: null, chest: null, legs: null, feet: null, back: null };
 }
 
 export function offhandItemKind(item: ItemCode | null | undefined): "shield" | "light" | null {
@@ -3712,6 +3718,7 @@ export function normalizeMultiplayerPlayerState(
     race: appearance.race,
     colors: { ...appearance.colors },
     inventory: inventory.map(networkItemStack),
+    craftGrid: Array.from({ length: 9 }, (_, index) => networkItemStack(inventorySlotFromNetwork(value?.craftGrid?.[index] ?? null))),
     cursor: networkItemStack(inventorySlotFromNetwork(value?.cursor ?? null)),
     trash: networkItemStack(inventorySlotFromNetwork(value?.trash ?? null)),
     equipment: Object.fromEntries((Object.keys(equipment) as EquipmentSlot[]).map((slot) => [slot, networkItemStack(equipment[slot])])) as PlayerSessionSnapshot["equipment"],
@@ -3722,6 +3729,7 @@ export function normalizeMultiplayerPlayerState(
     xp: Math.max(0, Number(value?.xp) || 0),
     level: Math.max(0, Math.trunc(Number(value?.level) || 0)),
     skills: normalizeSkillState(value?.skills),
+    lifeSupport: normalizeLifeSupportState(value?.lifeSupport),
   };
 }
 
@@ -4002,7 +4010,22 @@ export class VoxelEngine {
   private clockLocalTime?: number;
   private clockLocalDay?: number;
   private zeroGPushHeld = false;
-  private vacuumDamageAccumulator = 0;
+  lifeSupportState: LifeSupportState = { ...EMPTY_LIFE_SUPPORT };
+  lifeSupportHud?: LifeSupportHud;
+  private lifeSupportAlarm = "";
+  private equipmentSwap: { slot: EquipmentSlot; button: "left" | "right"; shift: boolean; seconds: number; signature: string } | null = null;
+  private socketSwap: { operation: LifeSupportOperation; seconds: number; signature: string } | null = null;
+  private completingEquipmentSwap = false;
+  evaBootsEnabled = true;
+  evaContact = false;
+  evaThrust = false;
+  evaTether: EvaTether | null = null;
+  evaStableUp = true;
+  private evaRoll = 0;
+  evaEnabled = false;
+  private evaTetherLine?: THREE.Line;
+  private evaCargoLine: { point: THREE.Vector3; remaining: number } | null = null;
+  private remoteLifeSupportElapsed = 0;
   private celestialCreatureVelocity = new Map<number, THREE.Vector3>();
   rain: THREE.LineSegments;
   directional: THREE.DirectionalLight;
@@ -4464,6 +4487,7 @@ export class VoxelEngine {
   agentChat = new AgentChatRing();
   private localChatSequence = 0;
   agentInventories = new Map<string, Array<InventorySlot | null>>();
+  agentEquipment = new Map<string, Record<EquipmentSlot, InventorySlot | null>>();
   agentInventoryRevisions = new Map<string, number>();
   agentReturningMaterials = new Map<string, InventorySlot[]>();
   private locationTransitioning = false;
@@ -4863,6 +4887,9 @@ export class VoxelEngine {
       this.openOverlay("map");
       return;
     }
+    if (!event.repeat && ["KeyI", "KeyN", "KeyT", "KeyU", "KeyO"].includes(event.code) && this.usesFieldLifeSupport()) {
+      this.evaControl(event.code === "KeyI" ? "thrust" : event.code === "KeyN" ? "boots" : event.code === "KeyT" ? "tether" : event.code === "KeyO" ? "cargo" : "comfort"); return;
+    }
     if (event.code === "KeyJ" && !event.repeat) {
       this.openOverlay("quests");
       return;
@@ -5207,6 +5234,7 @@ export class VoxelEngine {
     this.removeAllRemotePlayers();
     this.clearAgentWorkRuntime();
     this.agentInventories.clear();
+    this.agentEquipment.clear();
     this.agentInventoryRevisions.clear();
     this.agentReturningMaterials.clear();
     this.agentVoiceAssembler.clear();
@@ -5950,6 +5978,7 @@ export class VoxelEngine {
     this.saveExtensions = { ...extensions };
     for (const [id, record] of Object.entries(agentCustody.agents)) {
       this.agentInventories.set(id, record.inventory.map(cloneSlot));
+      this.agentEquipment.set(id, { ...blankEquipment(), ...structuredClone(record.equipment ?? {}) });
       this.agentInventoryRevisions.set(id, record.revision);
       this.agentReturningMaterials.set(id, record.returning.map((slot) => cloneSlot(slot)!));
       this.deliverAgentReturningMaterials(id);
@@ -6005,7 +6034,10 @@ export class VoxelEngine {
     this.inventory = blankInventory();
     for (let index = 0; index < Math.min(INVENTORY_SIZE, save.inventory?.length ?? 0); index += 1) this.inventory[index] = normalizeCaptureOrbInventorySlot(save.inventory[index]);
     this.equipment = blankEquipment();
-    for (const slot of ["head", "chest", "legs", "feet"] as EquipmentSlot[]) this.equipment[slot] = normalizeCaptureOrbInventorySlot(save.equipment?.[slot] ?? null);
+    for (const slot of ["head", "chest", "legs", "feet", "back"] as EquipmentSlot[]) this.equipment[slot] = normalizeCaptureOrbInventorySlot(save.equipment?.[slot] ?? null);
+    this.lifeSupportState = normalizeLifeSupportState(save.lifeSupport);
+    this.evaTether = locationPlayer?.tether ? structuredClone(locationPlayer.tether) : null;
+    this.equipmentSwap = null;
     const savedOffhand = normalizeCaptureOrbInventorySlot(save.offhand ?? null);
     this.offhand = savedOffhand && offhandItemKind(savedOffhand.item) ? savedOffhand : null;
     this.bestiary = blankBestiary();
@@ -6452,6 +6484,17 @@ export class VoxelEngine {
       case "cave-liquid": this.primeCaveLiquidAudit(); break;
       case "tree-fall": this.primeTreeFallAudit(); break;
       case "creature-collision": this.primeCreatureCollisionAudit(); break;
+      case "life-support": {
+        this.inventory = blankInventory();
+        [Item.FieldBreatherHelmet, Item.LightOxygenTank, Item.ExpeditionOxygenTank, Item.TwinTankHarness,
+          Item.PressureWeaveChest, Item.PressureWeaveLegs, Item.PressureWeaveBoots, Item.EvaManeuverRig,
+          Item.AurelianSpellRig, Item.DiveHarness, Item.MagneticBoots, Item.TetherSpool, Item.FieldOxygenReserve,
+          Item.EvaPowerCell, Item.ScrubberCartridge, Item.FieldOxygenReserve].forEach((item, index) => {
+          this.inventory[index] = { item, count: 1, ...(ITEMS[item].maxDurability ? { durability: ITEMS[item].maxDurability } : {}) };
+        });
+        this.paused = true; this.configureLocalEnvironmentTest({ platform: true, face: "horizon" });
+        await this.saveNow(false); break;
+      }
       default: break;
     }
     return created ? { ok: true as const, world: created } : { ok: false as const, code: "world_create_failed" };
@@ -7417,6 +7460,8 @@ export class VoxelEngine {
         && Boolean(captureOrbFromInventorySlot(this.selectedSlot())?.creature),
       offhandItem: this.offhand?.item,
       shieldRaised: this.offhandUseHeld,
+      evaThrust: this.evaThrust,
+      lifeSupportSwap: Boolean(this.equipmentSwap || this.socketSwap),
       crouching: this.crouching,
       sprinting: this.sprinting,
       action: this.mineHeld || this.attackCooldown > 0 ? "mine" : this.heldUse > 0 ? "use" : "none",
@@ -7458,6 +7503,7 @@ export class VoxelEngine {
       ...(identity.race ? { race: identity.race } : {}),
       ...(identity.colors ? { colors: { ...identity.colors } } : {}),
       inventory: this.inventory.map(networkItemStack),
+      craftGrid: (this.craftGrid ?? Array(9).fill(null)).map(networkItemStack),
       cursor: networkItemStack(this.cursor),
       trash: networkItemStack(this.trash),
       equipment: Object.fromEntries((Object.keys(this.equipment) as EquipmentSlot[])
@@ -7469,6 +7515,7 @@ export class VoxelEngine {
       xp: this.xp,
       level: this.level,
       skills: this.skillState,
+      lifeSupport: this.lifeSupportState,
     }, playerId, this.playerVariant);
   }
 
@@ -7478,14 +7525,16 @@ export class VoxelEngine {
     const normalized = normalizeMultiplayerPlayerState(state, state.playerId, state.variant);
     this.multiplayerPlayerStateRevision = normalized.revision;
     this.inventory = normalized.inventory.map(inventorySlotFromNetwork);
+    this.craftGrid = (normalized.craftGrid ?? Array(9).fill(null)).map(inventorySlotFromNetwork);
     this.cursor = inventorySlotFromNetwork(normalized.cursor ?? null);
     this.trash = inventorySlotFromNetwork(normalized.trash ?? null);
     this.equipment = Object.fromEntries((Object.keys(normalized.equipment) as EquipmentSlot[])
-      .map((slot) => [slot, inventorySlotFromNetwork(normalized.equipment[slot])])) as Record<EquipmentSlot, InventorySlot | null>;
+      .map((slot) => [slot, inventorySlotFromNetwork(normalized.equipment[slot] ?? null)])) as Record<EquipmentSlot, InventorySlot | null>;
     const networkOffhand = inventorySlotFromNetwork(normalized.offhand ?? null);
     this.offhand = networkOffhand && offhandItemKind(networkOffhand.item) ? networkOffhand : null;
     this.selected = preserveSelected ? locallySelected : normalized.selected;
     this.health = normalized.health;
+    this.lifeSupportState = normalizeLifeSupportState(normalized.lifeSupport);
     this.hunger = normalized.hunger;
     this.xp = normalized.xp;
     this.level = normalized.level;
@@ -7704,7 +7753,7 @@ export class VoxelEngine {
       maxCount: () => id.startsWith("exhibit:") ? 1 : 65_535,
       canUsePlayerTarget: (owner, index, stack) => {
         if (owner === "offhand") return Boolean(offhandItemKind(stack.item));
-        const equipmentSlot = (["head", "chest", "legs", "feet"] as EquipmentSlot[])[index];
+        const equipmentSlot = (["head", "chest", "legs", "feet", "back"] as EquipmentSlot[])[index];
         return Boolean(equipmentSlot && ITEMS[stack.item]?.equipmentSlot === equipmentSlot);
       },
     });
@@ -7975,6 +8024,12 @@ export class VoxelEngine {
         return;
       }
       const next = normalizeMultiplayerPlayerState(action.state, peer.identity.id, action.state.variant);
+      const resources = (state: PlayerSessionSnapshot) => lifeSupportResourceTotals([...state.inventory, ...(state.craftGrid ?? []), state.cursor, state.trash, ...Object.values(state.equipment), state.offhand].map(slot => inventorySlotFromNetwork(slot ?? null)));
+      const beforeResources = resources(current), afterResources = resources(next);
+      if (Object.keys(beforeResources).some(key => afterResources[key as keyof typeof afterResources] > beforeResources[key as keyof typeof beforeResources] + .001)) {
+        this.multiplayer.sendPlayerState({ ...action, state: current, status: "rejected", reason: "Finite life-support resources must be transferred by the host." }, peer.identity.id); return;
+      }
+      next.lifeSupport = current.lifeSupport;
       this.multiplayerPlayerStates.set(peer.identity.id, next);
       this.saveSoon();
       this.sendAuthoritativePlayerState(peer.identity.id, action.requestId);
@@ -7988,6 +8043,10 @@ export class VoxelEngine {
   private handleRemoteInventoryAction(action: InventoryAction, peer: PeerInfo) {
     if (!this.multiplayer) return;
     if (this.multiplayer.role === "guest" && (action.status === "accepted" || action.status === "rejected")) {
+      if ((action.kind === "life-support" || action.kind === "craft") && action.actorId === this.multiplayer.identity.id && action.playerState) {
+        this.applyLocalPlayerSessionSnapshot(action.playerState, true);
+        this.updateCraftResult();
+      }
       if (action.kind === "collect" && action.dropId !== undefined) {
         const pending = this.pendingGuestDropRequests.get(action.dropId);
         (this.multiplayerDiagnostics ??= new MultiplayerDiagnosticsRing()).record({
@@ -8017,6 +8076,31 @@ export class VoxelEngine {
     }
     if (this.multiplayer.role !== "host" || action.status === "accepted" || !peer.identity) return;
     if (action.actorId !== peer.identity.id) return;
+    if (action.kind === "craft" && action.recipeId) {
+      const current = this.ensureHostPlayerSession(peer.identity);
+      const pose = this.remotePlayers.get(peer.identity.id)?.target;
+      let hasTable = false;
+      if (pose) for (let x = -5; x <= 5 && !hasTable; x++) for (let y = -3; y <= 3 && !hasTable; y++) for (let z = -5; z <= 5; z++) {
+        if (x * x + y * y + z * z <= 25 && this.world.getBlock(Math.round(pose.x) + x, Math.round(pose.y) + y, Math.round(pose.z) + z) === BlockId.CraftingTable) { hasTable = true; break; }
+      }
+      if (action.expectedRevision !== current.revision || !hasTable || this.multiplayerPeerActiveContainers.has(peer.identity.id)) {
+        this.multiplayer.sendInventoryAction({ ...action, playerState: current, status: "rejected", reason: "Use a nearby crafting table and retry with the current pack." }, peer.identity.id); return;
+      }
+      const result = craftLifeSupportSupply({ inventory: current.inventory.map(inventorySlotFromNetwork), cursor: inventorySlotFromNetwork(current.cursor ?? null), craftGrid: (current.craftGrid ?? Array(9).fill(null)).map(inventorySlotFromNetwork) }, action.recipeId, Boolean(action.shift));
+      const next = result.ok ? { ...current, inventory: result.inventory.map(networkItemStack), cursor: networkItemStack(result.cursor), craftGrid: result.craftGrid.map(networkItemStack), revision: current.revision + 1 } : current;
+      if (result.ok) { this.multiplayerPlayerStates.set(peer.identity.id, next); this.saveSoon(); }
+      this.multiplayer.sendInventoryAction({ ...action, playerState: next, status: result.ok ? "accepted" : "rejected", reason: result.ok ? `Crafted ${result.crafted} finite supplies.` : "Supply crafting needs the exact ingredients and a free output slot." }, peer.identity.id); return;
+    }
+    if (action.kind === "life-support") {
+      const current = this.ensureHostPlayerSession(peer.identity);
+      if (action.expectedRevision !== current.revision || !action.lifeSupportOperation || this.multiplayerPeerActiveContainers.has(peer.identity.id)) {
+        this.multiplayer.sendInventoryAction({ ...action, playerState: current, status: "rejected", reason: "Close shared containers and retry with the current inventory." }, peer.identity.id); return;
+      }
+      const result = operateLifeSupport(inventorySlotFromNetwork(current.equipment.back ?? null), inventorySlotFromNetwork(current.cursor ?? null), action.lifeSupportOperation);
+      const next = result.ok ? { ...current, equipment: { ...current.equipment, back: networkItemStack(result.back) }, cursor: networkItemStack(result.cursor), revision: current.revision + 1 } : current;
+      if (result.ok) { this.multiplayerPlayerStates.set(peer.identity.id, next); this.saveSoon(); }
+      this.multiplayer.sendInventoryAction({ ...action, playerState: next, status: result.ok ? "accepted" : "rejected", reason: result.reason }, peer.identity.id); return;
+    }
     if (action.kind === "drop") {
       const remote = this.remotePlayers.get(peer.identity.id);
       let current = this.ensureHostPlayerSession(peer.identity);
@@ -8087,7 +8171,10 @@ export class VoxelEngine {
       && pickupReady
       && claimedPickupPoint.distanceToSquared(remotePickupPoint) <= WORLD_DROP_PICKUP_LAG_TOLERANCE ** 2
       && drop.mesh.position.distanceToSquared(claimedPickupPoint) <= WORLD_DROP_PICKUP_RADIUS ** 2);
-    const withinReach = directReach || lagCompensatedReach;
+    const cargoReach = Boolean(action.cargoTether && pickupReady && drop && remotePickupPoint
+      && this.ensureHostPlayerSession(peer.identity).inventory.some(slot => slot?.item === Item.TetherSpool && slot.count > 0)
+      && this.cargoTetherClear(remotePickupPoint, drop.mesh.position));
+    const withinReach = directReach || lagCompensatedReach || cargoReach;
     const serverPickupDistance = drop && remotePickupPoint ? drop.mesh.position.distanceTo(remotePickupPoint) : undefined;
     const claimedPickupDistance = drop && claimedPickupPoint ? drop.mesh.position.distanceTo(claimedPickupPoint) : undefined;
     (this.multiplayerDiagnostics ??= new MultiplayerDiagnosticsRing()).record({
@@ -8256,7 +8343,7 @@ export class VoxelEngine {
     this.cursor = inventorySlotFromNetwork(player.cursor ?? null);
     this.trash = inventorySlotFromNetwork(player.trash ?? null);
     this.equipment = Object.fromEntries((Object.keys(player.equipment) as EquipmentSlot[])
-      .map((slot) => [slot, inventorySlotFromNetwork(player.equipment[slot])])) as Record<EquipmentSlot, InventorySlot | null>;
+      .map((slot) => [slot, inventorySlotFromNetwork(player.equipment[slot] ?? null)])) as Record<EquipmentSlot, InventorySlot | null>;
     this.offhand = inventorySlotFromNetwork(player.offhand ?? null);
     this.selected = player.selected;
     this.emitHud(true);
@@ -12804,16 +12891,18 @@ export class VoxelEngine {
       && this.multiplayerOptimisticContainers?.has(closingChest));
     const closingFacility = this.activeNetworkFacilityId;
     const closingSentientId = this.activeSentient?.id;
-    if (this.cursor && !guestSharedContainer) {
+    // A timed seal exchange retains the cursor as its existing, single owner
+    // while gameplay resumes. Returning it here would cancel every incoming swap.
+    if (this.cursor && !guestSharedContainer && !this.equipmentSwap && !this.socketSwap) {
       const leftover = this.addItem(this.cursor.item, this.cursor.count, this.cursor.durability, undefined, this.cursor.metadata);
-      if (leftover > 0) this.spawnDrop(this.cursor.item, leftover, this.position.clone().add(new THREE.Vector3(0, 1, 0)), this.cursor.durability);
+      if (leftover > 0) this.spawnDrop(this.cursor.item, leftover, this.position.clone().add(new THREE.Vector3(0, 1, 0)), this.cursor.durability, this.cursor.metadata);
       this.cursor = null;
     }
     for (let index = 0; index < this.craftGrid.length; index += 1) {
       const slot = this.craftGrid[index];
       if (!slot) continue;
       const leftover = this.addItem(slot.item, slot.count, slot.durability, undefined, slot.metadata);
-      if (leftover > 0) this.spawnDrop(slot.item, leftover, this.position.clone().add(new THREE.Vector3(0, 1, 0)), slot.durability);
+      if (leftover > 0) this.spawnDrop(slot.item, leftover, this.position.clone().add(new THREE.Vector3(0, 1, 0)), slot.durability, slot.metadata);
       this.craftGrid[index] = null;
     }
     if (closingChest) {
@@ -13108,6 +13197,7 @@ export class VoxelEngine {
     } else {
       const item = commerceItemCode(itemKey) ?? (/^item-\d+$/u.test(itemKey) ? Number(itemKey.slice(5)) as ItemCode : null);
       if (item === null || !ITEMS[item]) { this.rejectCreatureAction(action, peer.id, "That item cannot be sold here."); return; }
+      if (ITEMS[item].lifeSupportKind) { this.rejectCreatureAction(action, peer.id, "Used life-support equipment requires instance-preserving service, not commodity resale."); return; }
       let remaining = quantity;
       for (const slot of inventory) if (slot?.item === item) remaining -= Math.min(remaining, slot.count);
       if (remaining > 0) { this.rejectCreatureAction(action, peer.id, "You do not have that many to sell."); return; }
@@ -13559,7 +13649,13 @@ export class VoxelEngine {
   }
 
   equipmentClick(slot: EquipmentSlot, button: "left" | "right", shift = false) {
-    const equipmentIndex = (["head", "chest", "legs", "feet"] as EquipmentSlot[]).indexOf(slot);
+    if (!this.completingEquipmentSwap && (slot === "back" || slot === "head") && (!this.bodyContext().environment.breathable || this.headSubmerged)) {
+      if (this.equipmentSwap) { this.equipmentSwap = null; this.events.onToast("Equipment swap cancelled; original items retained."); this.emitHud(true); return; }
+      this.equipmentSwap = { slot, button, shift, seconds: 1.5, signature: JSON.stringify([this.equipment[slot], this.cursor]) };
+      this.events.onToast("Seal opening: resume play for the 1.5s swap. Click the slot again to cancel.");
+      this.emitHud(true); return;
+    }
+    const equipmentIndex = (["head", "chest", "legs", "feet", "back"] as EquipmentSlot[]).indexOf(slot);
     const containerOperation: ContainerOperation | null = this.multiplayer?.role === "guest" && this.activeNetworkContainerId
       ? { op: "click", target: { owner: "equipment", slot: equipmentIndex }, button, ...(shift ? { shift: true } : {}) }
       : null;
@@ -13569,7 +13665,7 @@ export class VoxelEngine {
     }
     const equipped = this.equipment[slot];
     if (shift && equipped) {
-      const leftover = this.addItem(equipped.item, equipped.count, equipped.durability);
+      const leftover = this.addItem(equipped.item, equipped.count, equipped.durability, undefined, equipped.metadata);
       if (leftover === 0) this.equipment[slot] = null;
     } else if (!this.cursor && equipped) {
       this.cursor = equipped;
@@ -14151,6 +14247,12 @@ export class VoxelEngine {
   craftOutputClick(shift = false) {
     const match = this.findRecipe();
     if (!match) return;
+    if (this.multiplayer?.role === "guest" && [Item.EvaPowerCell, Item.ScrubberCartridge].includes(match.recipe.output.item as never)) {
+      this.syncInventoryMutationNow();
+      this.multiplayer.sendInventoryAction({ requestId: `supply_craft_${Date.now().toString(36)}`, actorId: this.multiplayer.identity.id, kind: "craft",
+        recipeId: match.recipe.id, shift, expectedRevision: this.multiplayerPlayerStateRevision, status: "request" });
+      return;
+    }
     const output = cloneSlot(match.recipe.output)!;
     output.durability ??= ITEMS[output.item]?.maxDurability;
     if (shift) {
@@ -20104,7 +20206,204 @@ export class VoxelEngine {
     return nearest;
   }
 
+  private usesFieldLifeSupport() {
+    return !this.bodyContext().environment.breathable || Boolean(this.equipment?.back && ITEMS[this.equipment.back.item]?.lifeSupportKind) || this.equipment?.head?.item === Item.FieldBreatherHelmet;
+  }
+
+  private updatePersonalLifeSupport(dt: number) {
+    this.lifeSupportState ??= { ...EMPTY_LIFE_SUPPORT };
+    if (this.equipmentSwap || this.socketSwap) this.heldUse = .7;
+    const socketSwap = this.socketSwap;
+    if (socketSwap) {
+      if (socketSwap.signature !== JSON.stringify([this.equipment.back, this.cursor])) {
+        this.socketSwap = null; this.events.onToast("Socket swap interrupted; original tanks retained.");
+      } else if ((socketSwap.seconds -= dt) <= 0) {
+        this.socketSwap = null; this.completingEquipmentSwap = true;
+        try { this.lifeSupportAction(socketSwap.operation); } finally { this.completingEquipmentSwap = false; }
+      }
+    }
+    const swap = this.equipmentSwap;
+    if (swap) {
+      if (swap.signature !== JSON.stringify([this.equipment[swap.slot], this.cursor])) {
+        this.equipmentSwap = null;
+        this.events.onToast("Swap interrupted: the original items were retained.");
+      } else if ((swap.seconds -= dt) <= 0) {
+        this.equipmentSwap = null; this.completingEquipmentSwap = true;
+        try { this.equipmentClick(swap.slot, swap.button, swap.shift); }
+        finally { this.completingEquipmentSwap = false; }
+      }
+    }
+    const submerged = liquidKindForBlock(this.world.getBlock(Math.floor(this.position.x + .5), Math.floor(this.position.y + this.cameraEyeHeight + .5), Math.floor(this.position.z + .5))) === "water";
+    const result = stepLifeSupport(this.equipment, this.lifeSupportState, this.bodyContext().environment, dt, {
+      submerged: submerged && this.usesFieldLifeSupport(), effort: this.sprinting ? 1 : 0,
+      immune: this.mode === "builder", consume: this.multiplayer?.role !== "guest", swapSeconds: this.equipmentSwap?.seconds ?? this.socketSwap?.seconds ?? 0,
+    });
+    this.lifeSupportHud = result.hud;
+    if (this.multiplayer?.role !== "guest") {
+      this.equipment = { ...this.equipment, ...result.equipment };
+      this.lifeSupportState = result.state;
+      if (result.damage > 0) this.damagePlayer(result.damage, result.hud.hazards.join(" / ").toLowerCase(), true, "ambient");
+    }
+    if (this.usesFieldLifeSupport()) this.oxygenSeconds = result.hud.breathing ? DEFAULT_SWIM_RULES.maxOxygenSeconds : Math.max(0, 12 - result.state.hypoxiaSeconds);
+    const alarm = result.hud.relevant ? `${result.hud.level}:${result.hud.hazards.join(",")}` : "";
+    if (alarm !== this.lifeSupportAlarm) {
+      this.lifeSupportAlarm = alarm;
+      if (result.hud.level !== "safe" || result.hud.hazards.length) {
+        this.audio.play("life-support");
+        this.events.onToast(`⚠ O2 ${result.hud.status} · ${Math.ceil(result.hud.secondsRemaining)}s reserve${result.hud.hazards.length ? ` · ${result.hud.hazards.join(" / ")}` : ""}`);
+      }
+    }
+  }
+
+  private updateRemoteLifeSupport(dt: number) {
+    if (this.multiplayer?.role !== "host") return;
+    this.remoteLifeSupportElapsed += dt;
+    if (this.remoteLifeSupportElapsed < .5) return;
+    const elapsed = Math.min(1, this.remoteLifeSupportElapsed); this.remoteLifeSupportElapsed = 0;
+    for (const [id, remote] of this.remotePlayers) {
+      const current = this.multiplayerPlayerStates.get(id);
+      if (!current || !this.multiplayer.getPeer(id) || remote.model.modelKind === "drone") continue;
+      const pose = remote.target;
+      const equipment = Object.fromEntries(Object.entries(current.equipment).map(([key, slot]) => [key, inventorySlotFromNetwork(slot ?? null)]));
+      const submerged = liquidKindForBlock(this.world.getBlock(Math.round(pose.x), Math.floor(pose.y + 1.9), Math.round(pose.z))) === "water";
+      const result = stepLifeSupport(equipment, normalizeLifeSupportState(current.lifeSupport), this.bodyContext().environment, elapsed,
+        { submerged: submerged && Boolean(equipment.back || equipment.head?.item === Item.FieldBreatherHelmet), effort: pose.sprinting ? 1 : 0, immune: this.mode === "builder", swapSeconds: pose.lifeSupportSwap ? elapsed : 0 });
+      if (pose.evaThrust) result.equipment.back = maneuverImpulse(result.equipment.back, elapsed, submerged, this.mode === "builder").back;
+      if (!result.hud.relevant && !current.lifeSupport?.hypoxiaSeconds) continue;
+      const killed = current.health - result.damage <= 0;
+      const next: PlayerSessionSnapshot = { ...current, equipment: Object.fromEntries(Object.entries(result.equipment).map(([key, slot]) => [key, networkItemStack(slot ?? null)])) as PlayerSessionSnapshot["equipment"],
+        lifeSupport: killed ? { ...EMPTY_LIFE_SUPPORT } : result.state, health: killed ? 10 : current.health - result.damage, revision: current.revision + 1 };
+      if (killed && !this.worldOptions.keepInventory) {
+        for (const slot of [...next.inventory, ...(next.craftGrid ?? []), ...Object.values(next.equipment), next.offhand, next.cursor, next.trash]) {
+          const item = inventorySlotFromNetwork(slot ?? null);
+          if (item) this.spawnDrop(item.item, item.count, new THREE.Vector3(pose.x, pose.y + .5, pose.z), item.durability, item.metadata);
+        }
+        next.inventory = blankInventory().map(networkItemStack); next.craftGrid = Array(9).fill(null); next.equipment = blankEquipment(); next.offhand = null; next.cursor = null; next.trash = null;
+      }
+      this.multiplayerPlayerStates.set(id, next);
+      if (result.damage > 0) this.multiplayer.sendCombatAction({ requestId: `life_damage_${id}_${this.multiplayerTick}`, actorId: this.multiplayer.identity.id, tick: this.multiplayerTick,
+        targetKind: "player", targetId: id, attack: "melee", status: "accepted", resultingHealth: Math.max(0, current.health - result.damage), killed }, id);
+      this.sendAuthoritativePlayerState(id); this.saveSoon();
+    }
+  }
+
+  lifeSupportAction(operation: LifeSupportOperation) {
+    if (this.equipmentSwap) { this.events.onToast("Finish or cancel the current equipment swap first."); return false; }
+    if (this.socketSwap) { this.socketSwap = null; this.events.onToast("Socket swap cancelled; original tanks retained."); this.emitHud(true); return false; }
+    if (!this.completingEquipmentSwap && operation.kind === "socket" && (!this.bodyContext().environment.breathable || this.headSubmerged)) {
+      const preview = operateLifeSupport(this.equipment.back, this.cursor, operation);
+      if (!preview.ok) { this.events.onToast(preview.reason); return false; }
+      this.socketSwap = { operation, seconds: 1.5, signature: JSON.stringify([this.equipment.back, this.cursor]) };
+      this.events.onToast("Socket seal opening: resume play for 1.5s. Press a service control again to cancel."); this.emitHud(true); return true;
+    }
+    if (this.multiplayer?.role === "guest") {
+      this.multiplayer.sendInventoryAction({ requestId: `life_${Date.now().toString(36)}`, actorId: this.multiplayer.identity.id,
+        kind: "life-support", lifeSupportOperation: operation, expectedRevision: this.multiplayerPlayerStateRevision, status: "request" });
+      return true;
+    }
+    const result = operateLifeSupport(this.equipment.back, this.cursor, operation);
+    if (result.ok) { this.equipment.back = result.back; this.cursor = result.cursor; this.saveSoon(); this.audio.play("ui"); }
+    this.events.onToast(result.reason); this.emitHud(true); return result.ok;
+  }
+
+  private cargoTetherClear(origin: THREE.Vector3, target: THREE.Vector3) {
+    const direction = target.clone().sub(origin), distance = direction.length();
+    return distance > .01 && distance <= 6 && !this.castVoxel(origin, direction.normalize(), Math.max(0, distance - .25));
+  }
+
+  evaControl(control: "thrust" | "boots" | "tether" | "comfort" | "cargo") {
+    if (control === "cargo") {
+      if (this.countItem(Item.TetherSpool) < 1) { this.events.onToast("Carry a Tether Spool to collect loose cargo."); return; }
+      const origin = this.position.clone().add(new THREE.Vector3(0, .8, 0));
+      const forward = this.camera.getWorldDirection(new THREE.Vector3());
+      const drop = this.drops.filter(item => item.pickupDelay <= 0 && this.cargoTetherClear(origin, item.mesh.position)
+        && item.mesh.position.clone().sub(origin).normalize().dot(forward) > .6)
+        .sort((left, right) => left.mesh.position.distanceToSquared(origin) - right.mesh.position.distanceToSquared(origin))[0];
+      if (!drop) { this.events.onToast("Aim at loose cargo within 6 blocks with a clear line."); return; }
+      this.evaCargoLine = { point: drop.mesh.position.clone(), remaining: .45 };
+      if (this.multiplayer?.role === "guest") {
+        this.multiplayer.sendInventoryAction({ requestId: `cargo_${Date.now().toString(36)}`, actorId: this.multiplayer.identity.id,
+          kind: "collect", dropId: drop.id, cargoTether: true, status: "request" });
+      } else {
+        const before = drop.count;
+        drop.count = this.addItem(drop.item, drop.count, drop.durability, undefined, drop.metadata);
+        if (drop.count <= 0) this.removeDrop(this.drops.indexOf(drop), "collected");
+        this.events.onToast(drop.count < before ? "Cargo reeled into your pack." : "Make room in your pack for cargo.");
+        this.audio.play("pickup"); this.saveSoon(); this.emitHud(true);
+      }
+      return;
+    }
+    if (control === "thrust") this.evaEnabled = !this.evaEnabled;
+    if (control === "boots") this.evaBootsEnabled = !this.evaBootsEnabled;
+    if (control === "comfort") this.evaStableUp = !this.evaStableUp;
+    if (control === "tether") {
+      if (this.evaTether) this.evaTether = null;
+      else {
+        if (this.countItem(Item.TetherSpool) < 1) { this.events.onToast("Carry a Tether Spool to anchor a line."); return; }
+        const direction = this.camera.getWorldDirection(new THREE.Vector3());
+        const hit = this.castVoxel(this.camera.position, direction, 24);
+        if (!hit || !BLOCKS[hit.type]?.solid) { this.events.onToast("Aim at a solid anchor within 24 blocks."); return; }
+        const anchor = [hit.x, hit.y, hit.z] as [number, number, number];
+        this.evaTether = { anchor, length: Math.max(1.5, Math.min(32, this.position.distanceTo(new THREE.Vector3(...anchor)))) };
+      }
+      this.saveSoon();
+    }
+    this.events.onToast(control === "thrust" ? `EVA thrust ${this.evaEnabled ? "armed — WASD / Space / Shift uses gas and charge" : "off"}`
+      : control === "boots" ? `Magnetic boots ${this.evaBootsEnabled ? "enabled — hold Shift against a hull" : "off"}`
+      : control === "comfort" ? `Camera ${this.evaStableUp ? "stable-up" : "free roll — [ and ]"}`
+      : this.evaTether ? "Tether anchored — hold Y to reel toward nearby cargo." : "Tether released.");
+    this.emitHud(true);
+  }
+
+  private updateEvaMotion(dt: number, zeroG: boolean, submerged: boolean) {
+    this.evaContact = false; this.evaThrust = false;
+    if (!zeroG && !submerged || this.mode === "builder" && this.creativeFlying) { this.evaRoll = 0; return; }
+    const contact = new THREE.Vector3(); let normal: THREE.Vector3 | null = null;
+    for (const offset of [[0, -.08, 0], [0, .08, 0], [-.08, 0, 0], [.08, 0, 0], [0, 0, -.08], [0, 0, .08]]) {
+      contact.copy(this.position).add(new THREE.Vector3(...offset));
+      if (this.collidesAt(contact)) { normal = new THREE.Vector3(...offset).normalize().negate(); break; }
+    }
+    if (zeroG && normal && this.evaBootsEnabled && (this.keys.has("ShiftLeft") || this.keys.has("ShiftRight")) && this.equipment.feet?.item === Item.MagneticBoots && !this.keys.has("Space")) {
+      this.evaContact = true;
+      const walk = new THREE.Vector3(-Math.sin(this.yaw) * ((this.keys.has("KeyW") ? 1 : 0) - (this.keys.has("KeyS") ? 1 : 0)) + Math.cos(this.yaw) * ((this.keys.has("KeyD") ? 1 : 0) - (this.keys.has("KeyA") ? 1 : 0)), 0,
+        -Math.cos(this.yaw) * ((this.keys.has("KeyW") ? 1 : 0) - (this.keys.has("KeyS") ? 1 : 0)) - Math.sin(this.yaw) * ((this.keys.has("KeyD") ? 1 : 0) - (this.keys.has("KeyA") ? 1 : 0)));
+      walk.addScaledVector(normal, -walk.dot(normal));
+      if (walk.lengthSq() > 0) walk.normalize().multiplyScalar(2);
+      this.velocity.copy(walk).addScaledVector(normal, -.15);
+    } else if (this.evaEnabled) {
+      const forward = (this.keys.has("KeyW") ? 1 : 0) - (this.keys.has("KeyS") ? 1 : 0);
+      const right = (this.keys.has("KeyD") ? 1 : 0) - (this.keys.has("KeyA") ? 1 : 0);
+      const up = (this.keys.has("Space") ? 1 : 0) - (this.keys.has("ShiftLeft") || this.keys.has("ShiftRight") ? 1 : 0);
+      const direction = new THREE.Vector3(-Math.sin(this.yaw) * forward + Math.cos(this.yaw) * right, up, -Math.cos(this.yaw) * forward - Math.sin(this.yaw) * right);
+      if (direction.lengthSq() > 0) {
+        const thrust = maneuverImpulse(this.equipment.back, dt, submerged, this.mode === "builder");
+        if (this.multiplayer?.role !== "guest") this.equipment.back = thrust.back;
+        this.velocity.addScaledVector(direction.normalize(), thrust.acceleration * dt); this.evaThrust = thrust.acceleration > 0;
+      }
+    }
+    if (zeroG && !this.evaStableUp) this.evaRoll += ((this.keys.has("BracketLeft") ? 1 : 0) - (this.keys.has("BracketRight") ? 1 : 0)) * dt;
+    else this.evaRoll *= Math.exp(-dt * 5);
+  }
+
+  private updateEvaTether(dt: number) {
+    if (!this.evaTether) return;
+    const [x, y, z] = this.evaTether.anchor;
+    if (this.countItem(Item.TetherSpool) < 1 || !BLOCKS[this.world.getBlock(x, y, z) ?? BlockId.Air]?.solid) { this.evaTether = null; return; }
+    const constraint = constrainTether(this.position.toArray(), this.velocity.toArray(), this.evaTether, dt, this.keys.has("KeyY"));
+    const target = new THREE.Vector3(...constraint.position);
+    // Reeling follows collision-safe small steps; it cannot pull through a hull.
+    const displacement = target.sub(this.position), steps = Math.ceil(displacement.length() / .1);
+    for (let i = 0; i < Math.min(steps, 320); i++) {
+      const candidate = this.position.clone().addScaledVector(displacement, 1 / Math.max(1, steps));
+      if (this.collidesAt(candidate)) break;
+      this.position.copy(candidate);
+    }
+    this.velocity.fromArray(constraint.velocity);
+    this.evaTether = constraint.tether;
+  }
+
   updatePlayer(dt: number) {
+    this.updatePersonalLifeSupport(dt);
     if (this.mode !== "builder") this.creativeFlying = false;
     if (this.mode === "builder") {
       this.health = 10;
@@ -20149,7 +20448,6 @@ export class VoxelEngine {
     const rightAmount = (this.keys.has("KeyD") ? 1 : 0) - (this.keys.has("KeyA") ? 1 : 0);
     const bodyEnvironment = this.bodyContext().environment;
     const gravityG = bodyEnvironment.gravityG;
-    const oxygenBeforeMovement = this.oxygenSeconds;
     const moving = forwardAmount !== 0 || rightAmount !== 0;
     const creativeFlight = this.mode === "builder" && this.creativeFlying;
     const liquidSampleX = Math.floor(this.position.x + 0.5);
@@ -20208,7 +20506,8 @@ export class VoxelEngine {
     const speed = creativeFlight
       ? (this.sprinting ? 15.5 : 9.5) * timedMovement * explorationMultiplier
       : (this.crouching ? 2.15 : this.sprinting ? 6.35 : 4.35)
-        * liquidSpeed * raceMovement * timedMovement * explorationMultiplier * shieldMovement;
+        * liquidSpeed * raceMovement * timedMovement * explorationMultiplier * shieldMovement
+        * (this.lifeSupportState?.hypoxiaSeconds > 6 && this.mode === "survival" ? .55 : 1);
     const length = Math.hypot(forwardAmount, rightAmount) || 1;
     const f = forwardAmount / length;
     const r = rightAmount / length;
@@ -20319,9 +20618,11 @@ export class VoxelEngine {
       this.waterSurfaceBobActive = swim.state.surfaceBobActive ?? false;
       if (inHoney) this.velocity.y *= Math.max(0, 1 - 3.6 * dt);
       else if (inSyrup) this.velocity.y *= Math.max(0, 1 - 2.1 * dt);
-      this.oxygenSeconds = swim.state.oxygenSeconds;
-      this.drowningAccumulator = swim.state.drowningAccumulator;
-      if (swim.damage > 0 && this.mode === "survival") this.damagePlayer(swim.damage, "drowning", true, "ambient");
+      if (!this.usesFieldLifeSupport()) {
+        this.oxygenSeconds = swim.state.oxygenSeconds;
+        this.drowningAccumulator = swim.state.drowningAccumulator;
+        if (swim.damage > 0 && this.mode === "survival") this.damagePlayer(swim.damage, "drowning", true, "ambient");
+      }
     } else if (inLava) {
       this.fallVelocity = 0;
       this.fallDistance = 0;
@@ -20358,13 +20659,7 @@ export class VoxelEngine {
     }
 
     if (!zeroGDrift) this.zeroGPushHeld = false;
-    if (!bodyEnvironment.breathable && !this.headSubmerged && this.mode === "survival") {
-      this.oxygenSeconds = Math.max(0, oxygenBeforeMovement - dt);
-      if (this.oxygenSeconds === 0) {
-        this.vacuumDamageAccumulator += dt;
-        if (this.vacuumDamageAccumulator >= 1.5) { this.vacuumDamageAccumulator -= 1.5; this.damagePlayer(1, "the unbreathable atmosphere", true, "ambient"); }
-      }
-    } else this.vacuumDamageAccumulator = 0;
+    this.updateEvaMotion(dt, zeroGDrift, inWater);
     this.moveWithCollisions(this.velocity.x * dt, 0, 0);
     const verticalStart = this.position.y;
     this.moveWithCollisions(0, this.velocity.y * dt, 0);
@@ -20372,6 +20667,7 @@ export class VoxelEngine {
       this.fallDistance += Math.max(0, verticalStart - this.position.y);
     }
     this.moveWithCollisions(0, 0, this.velocity.z * dt);
+    this.updateEvaTether(dt);
     const wasGrounded = this.grounded;
     this.groundProbe.set(this.position.x, this.position.y - 0.055, this.position.z);
     this.grounded = creativeFlight || zeroGDrift ? false : this.collidesAt(this.groundProbe);
@@ -20787,14 +21083,21 @@ export class VoxelEngine {
     this.crouching = false;
     this.creativeFlying = false;
     this.lastCreativeJumpTap = -Infinity;
+    this.lifeSupportState = { ...EMPTY_LIFE_SUPPORT }; this.lifeSupportAlarm = "";
+    this.oxygenSeconds = DEFAULT_SWIM_RULES.maxOxygenSeconds;
+    this.evaTether = null; this.evaEnabled = false; this.evaThrust = false; this.evaContact = false; this.evaRoll = 0;
+    this.evaCargoLine = null;
+    this.equipmentSwap = null; this.socketSwap = null; this.completingEquipmentSwap = false;
     const lostInventory = announce && this.mode === "survival" && !this.worldOptions.keepInventory;
     if (lostInventory) {
       for (const slot of this.inventory) if (slot) this.spawnDrop(slot.item, slot.count, deathPosition, slot.durability, slot.metadata);
       for (const slot of Object.values(this.equipment)) if (slot) this.spawnDrop(slot.item, slot.count, deathPosition, slot.durability, slot.metadata);
       if (this.offhand) this.spawnDrop(this.offhand.item, this.offhand.count, deathPosition, this.offhand.durability, this.offhand.metadata);
+      for (const slot of [this.cursor, this.trash, ...(this.craftGrid ?? [])]) if (slot) this.spawnDrop(slot.item, slot.count, deathPosition, slot.durability, slot.metadata);
       this.inventory = blankInventory();
       this.equipment = blankEquipment();
       this.offhand = null;
+      this.cursor = null; this.trash = null; this.craftGrid = Array(9).fill(null);
     }
     this.position.copy(this.spawn);
     this.velocity.set(0, 0, 0);
@@ -23213,6 +23516,7 @@ export class VoxelEngine {
       const definition = ITEMS[item];
       const catalogItem = playerCommerceItem(item);
       if (!definition || !catalogItem) return false;
+      if (definition.lifeSupportKind) { this.events.onToast("Life-support items cannot be sold as resettable commodity stock."); return false; }
       const result = sellToMerchant(this.goldWallet, merchant, catalogItem, quantity, command);
       if (!result.applied) {
         this.events.onToast(result.reason === "merchant-cannot-pay" ? "That merchant's purse is too light for this lot." : "The trade could not be completed.");
@@ -30614,7 +30918,10 @@ export class VoxelEngine {
   clearEntities() {
     this.celestialCreatureVelocity?.clear();
     this.universeTimeSeconds = undefined; this.clockLocalTime = undefined; this.clockLocalDay = undefined;
-    this.zeroGPushHeld = false; this.vacuumDamageAccumulator = 0;
+    this.zeroGPushHeld = false; this.evaTether = null; this.equipmentSwap = null; this.socketSwap = null; this.evaRoll = 0;
+    this.evaCargoLine = null;
+    this.lifeSupportState = { ...EMPTY_LIFE_SUPPORT }; this.lifeSupportHud = undefined; this.lifeSupportAlarm = "";
+    if (this.evaTetherLine) { this.evaTetherLine.removeFromParent(); this.evaTetherLine.geometry.dispose(); (this.evaTetherLine.material as THREE.Material).dispose(); this.evaTetherLine = undefined; }
     this.seatedAt = null;
     this.butterflies.clear();
     while (this.mobs.length) this.removeMob(this.mobs.length - 1);
@@ -31417,10 +31724,10 @@ export class VoxelEngine {
   }
 
   equipmentAppearanceFromCodes(codes?: Partial<Record<EquipmentSlot, ItemCode>>): PlayerEquipmentAppearance {
-    return Object.fromEntries(((["head", "chest", "legs", "feet"] as EquipmentSlot[]).map((slot) => {
+    return { ...Object.fromEntries(((["head", "chest", "legs", "feet", "back"] as EquipmentSlot[]).map((slot) => {
       const item = codes?.[slot];
       return [slot, item === undefined ? null : (ITEMS[item]?.color ?? null)] as const;
-    }))) as PlayerEquipmentAppearance;
+    }))), sealedHelmet: codes?.head === Item.FieldBreatherHelmet, backKind: codes?.back === undefined ? undefined : ITEMS[codes.back]?.lifeSupportKind } as PlayerEquipmentAppearance;
   }
 
   syncAvatarHeldItem(model: BlockPlayerModel, item: ItemCode, remoteId?: string, filledCaptureOrb = false) {
@@ -31583,6 +31890,16 @@ export class VoxelEngine {
   }
 
   updateGameplayCamera(dt: number) {
+    if (this.evaCargoLine && (this.evaCargoLine.remaining -= dt) <= 0) this.evaCargoLine = null;
+    const tetherEnd = this.evaCargoLine?.point ?? (this.evaTether ? new THREE.Vector3(...this.evaTether.anchor) : null);
+    if (tetherEnd) {
+      if (!this.evaTetherLine) {
+        this.evaTetherLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xd4c391 }));
+        this.evaTetherLine.name = "eva-location-tether"; this.scene.add(this.evaTetherLine);
+      }
+      this.evaTetherLine.geometry.setFromPoints([this.position.clone().add(new THREE.Vector3(0, 1, 0)), tetherEnd]);
+    }
+    if (this.evaTetherLine) this.evaTetherLine.visible = Boolean(tetherEnd);
     const targetFov = this.aimingRanged ? Math.max(42, this.settings.fov * 0.68) : this.settings.fov;
     const nextFov = this.camera.fov + (targetFov - this.camera.fov) * (1 - Math.exp(-dt * 14));
     if (Math.abs(nextFov - this.camera.fov) > 0.01) {
@@ -31594,7 +31911,7 @@ export class VoxelEngine {
     this.cameraEyeHeight += (targetEye - this.cameraEyeHeight) * (1 - Math.exp(-dt * 16));
     if (this.cameraMode === "first") {
       this.camera.position.set(this.position.x, this.position.y + this.cameraEyeHeight, this.position.z);
-      this.camera.rotation.set(this.pitch, this.yaw, 0);
+      this.camera.rotation.set(this.pitch, this.yaw, this.evaRoll);
       this.heldRoot.visible = true;
       this.offhandRoot.visible = true;
       return;
@@ -31687,7 +32004,7 @@ export class VoxelEngine {
         } else if (item === Item.Banana) {
           addBox([0.1, 0.34, 0.09], [-0.08, 0, 0], 0xf4d34f, [0, 0, -0.5]);
           addBox([0.1, 0.34, 0.09], [0.08, 0.04, 0], 0xf4d34f, [0, 0, 0.5]);
-        } else if (definition.heldModel || definition.iconKind === "shield" || item === BlockId.CraftingTable || item === Item.DeepgearLanternItem || definition.useKind === "net" || (definition.useKind === "release-creature" && definition.creatureKind
+        } else if (definition.heldModel || definition.lifeSupportKind || definition.iconKind === "shield" || item === BlockId.CraftingTable || item === Item.DeepgearLanternItem || definition.useKind === "net" || (definition.useKind === "release-creature" && definition.creatureKind
           && BUTTERFLY_ORDER.includes(definition.creatureKind as ButterflyKind))) {
           const selectedSlot = this.selectedSlot();
           const filledCaptureOrb = item === Item.CaptureOrb && Boolean(captureOrbFromInventorySlot(selectedSlot)?.creature);
@@ -31695,9 +32012,12 @@ export class VoxelEngine {
           if (productionHeld) {
             productionHeld.name = `first-person-${productionHeld.name}`;
             const workingTool = definition.useKind === "net";
-            productionHeld.position.set(-0.02, -0.08, workingTool ? -0.2 : -0.08);
+            productionHeld.position.set(-0.02, definition.lifeSupportKind ? 0.05 : -0.08, workingTool ? -0.2 : -0.08);
+            if (definition.lifeSupportKind) productionHeld.rotateY(Math.PI);
             const firstPersonScale = workingTool
               ? 0.86
+              : definition.lifeSupportKind
+                ? 0.72
               : definition.heldModel === "capture-orb"
                 ? 1.05
                 : definition.heldModel === "dragon-egg"
@@ -31926,6 +32246,7 @@ export class VoxelEngine {
       chunkWorkReport = this.world.update(this.position.x, this.position.z, this.position.y, this.velocity.x, this.velocity.z);
       chunkWorkMilliseconds = performance.now() - chunkWorkStartedAt;
       if (this.running && !this.paused) this.updateBoats(dt);
+      if (this.running && !this.paused) this.updateRemoteLifeSupport(dt);
       if (this.running && !this.paused && (this.locked || this.touchMode)) {
         this.accumulator = Math.min(this.accumulator + dt, PHYSICS_STEP * 4);
         while (this.accumulator >= PHYSICS_STEP) {
@@ -32201,11 +32522,11 @@ export class VoxelEngine {
   }
 
   private serializeAgentCustody(): AgentCustodySave {
-    const agents: Record<string, { inventory: Array<InventorySlot | null>; revision: number; returning: InventorySlot[] }> = {};
+    const agents: Record<string, { inventory: Array<InventorySlot | null>; equipment?: Record<EquipmentSlot, InventorySlot | null>; revision: number; returning: InventorySlot[] }> = {};
     for (const id of new Set([...this.agentInventories.keys(), ...this.agentReturningMaterials.keys(), ...this.agentBuildJobs.keys()])) {
       const returning = (this.agentReturningMaterials.get(id) ?? []).map((slot) => cloneSlot(slot)!);
       for (const [item, count] of this.agentBuildJobs.get(id)?.reserved ?? []) if (count > 0) returning.push({ item, count });
-      agents[id] = { inventory: (this.agentInventories.get(id) ?? blankInventory()).map(cloneSlot), revision: this.agentInventoryRevisions.get(id) ?? 0, returning };
+      agents[id] = { inventory: (this.agentInventories.get(id) ?? blankInventory()).map(cloneSlot), equipment: structuredClone((this.agentEquipment ??= new Map()).get(id) ?? blankEquipment()), revision: this.agentInventoryRevisions.get(id) ?? 0, returning };
     }
     return validateAgentCustody({ schema: 1, agents });
   }
@@ -32406,7 +32727,24 @@ export class VoxelEngine {
     }
     if (command.kind === "inventory_get" || command.kind === "agent_inventory_open_for_host") {
       const inventory = this.agentInventories.get(command.agentId) ?? [];
-      return completed("inventory_ready", "Host-owned drone inventory returned.", { revision: this.agentInventoryRevisions.get(command.agentId) ?? 0, slots: inventory.map((slot, index) => slot ? { index, item: slot.item, name: ITEMS[slot.item]?.name, count: slot.count } : null) });
+      return completed("inventory_ready", "Host-owned drone inventory and equipment returned.", { revision: this.agentInventoryRevisions.get(command.agentId) ?? 0, equipment: structuredClone(this.agentEquipment.get(command.agentId) ?? blankEquipment()), slots: inventory.map((slot, index) => slot ? { ...cloneSlot(slot), index, name: ITEMS[slot.item]?.name } : null) });
+    }
+    if (command.kind === "inventory_equip" || command.kind === "inventory_life_support") {
+      const inventory = this.agentInventories.get(command.agentId) ?? [];
+      const index = Number(args.inventorySlot), equipment = this.agentEquipment.get(command.agentId) ?? blankEquipment();
+      if (!Number.isInteger(index) || index < 0 || index >= inventory.length || args.expectedInventoryRevision !== (this.agentInventoryRevisions.get(command.agentId) ?? 0)) return blocked("equipment_revision_stale", "Refresh the drone inventory before this atomic equipment operation.");
+      if (command.kind === "inventory_equip") {
+        const key = String(args.slot) as EquipmentSlot;
+        if (!Object.hasOwn(equipment, key) || inventory[index] && (inventory[index]!.count !== 1 || ITEMS[inventory[index]!.item]?.equipmentSlot !== key)) return blocked("equipment_incompatible", "That item does not fit the requested equipment slot.");
+        [equipment[key], inventory[index]] = [cloneSlot(inventory[index]), cloneSlot(equipment[key])];
+      } else {
+        if (!validLifeSupportOperation(args.operation)) return blocked("life_support_invalid", "Use a bounded socket, refill, or service operation.");
+        const result = operateLifeSupport(equipment.back, inventory[index], args.operation);
+        if (!result.ok) return blocked("life_support_unavailable", result.reason);
+        equipment.back = result.back; inventory[index] = result.cursor;
+      }
+      this.agentEquipment.set(command.agentId, equipment);
+      return completed("equipment_committed", "The host committed exact item custody; invulnerable drone diagnostics remain visible.", { equipment: structuredClone(equipment), revision: this.bumpAgentInventoryRevision(command.agentId) });
     }
     if (command.kind === "inventory_move") {
       const inventory = this.agentInventories.get(command.agentId) ?? [];
@@ -32918,6 +33256,8 @@ export class VoxelEngine {
           capacity: inventory.length,
           slots: inventory.map((slot, index) => slot ? { index, item: slot.item, name: ITEMS[slot.item]?.name, count: slot.count, ...(slot.durability !== undefined ? { durability: slot.durability } : {}) } : null),
         },
+        equipment: structuredClone(isLocalAgent ? this.equipment : this.agentEquipment.get(agentId) ?? blankEquipment()),
+        lifeSupport: { ...stepLifeSupport(isLocalAgent ? this.equipment : this.agentEquipment.get(agentId) ?? blankEquipment(), EMPTY_LIFE_SUPPORT, this.bodyContext().environment, 0, { submerged: currentLiquid === "water", immune: true }).hud, invulnerable: true },
         command: record?.currentCommand ?? null,
       },
       world: {
@@ -32990,6 +33330,8 @@ export class VoxelEngine {
         velocity: [Number(this.velocity.x.toFixed(2)), Number(this.velocity.y.toFixed(2)), Number(this.velocity.z.toFixed(2))],
         yaw: Number(this.yaw.toFixed(3)), pitch: Number(this.pitch.toFixed(3)),
         health: this.health, hunger: this.hunger, oxygen: Number(this.oxygenSeconds.toFixed(2)),
+        lifeSupport: this.lifeSupportHud, equipment: structuredClone(this.equipment),
+        eva: { armed: this.evaEnabled, thrust: this.evaThrust, boots: this.evaBootsEnabled, contact: this.evaContact, tether: this.evaTether, stableUp: this.evaStableUp, roll: this.evaRoll },
         variant: this.playerVariant, camera: this.cameraMode, mode: this.mode, sprinting: this.sprinting, crouching: this.crouching, flying: this.mode === "builder" && this.creativeFlying, submerged: this.headSubmerged,
         input: { jumpHeld: this.keys.has("Space"), forwardHeld: this.keys.has("KeyW") },
         surfaceBreach: {
@@ -33063,6 +33405,7 @@ export class VoxelEngine {
       this.advanceUniverseClock(dt);
       this.updateBoats(dt);
       this.updatePlayer(dt);
+      this.updateRemoteLifeSupport(dt);
       this.updateMobs(dt);
       this.updateProjectiles(dt);
       this.updateLiquids(dt);
@@ -33087,6 +33430,8 @@ export class VoxelEngine {
     const refreshInterval = this.gameplayOverlayOpen ? HUD_OVERLAY_REFRESH_MS : HUD_VISUAL_REFRESH_MS;
     if (!force && now - this.lastHudTime < refreshInterval) return;
     this.lastHudTime = now;
+    this.lifeSupportHud = stepLifeSupport(this.equipment, this.lifeSupportState ?? EMPTY_LIFE_SUPPORT, this.bodyContext().environment, 0,
+      { submerged: this.headSubmerged && this.usesFieldLifeSupport(), immune: this.mode === "builder", consume: false, swapSeconds: this.equipmentSwap?.seconds ?? this.socketSwap?.seconds ?? 0 }).hud;
     this.updateCraftResult();
     const totalMinutes = Math.floor((this.worldTime % 1) * 24 * 60);
     const hours = Math.floor(totalMinutes / 60);
@@ -33201,6 +33546,8 @@ export class VoxelEngine {
       onlinePlayers: 1 + (this.multiplayer?.getPeers().filter((peer) => peer.state === "connected").length ?? 0),
       playerVariant: this.playerVariant,
       oxygen: this.oxygenSeconds,
+      lifeSupport: this.lifeSupportHud,
+      eva: { boots: this.evaBootsEnabled, contact: this.evaContact, thrust: this.evaThrust, tether: this.evaTether?.length ?? null, stableUp: this.evaStableUp, armed: this.evaEnabled },
       maxOxygen: (this.potionBuffs.tidebreath ?? 0) > this.worldSimulationSeconds()
         ? 300
         : this.countItem(Item.BreatherCharm) > 0 ? 24 : DEFAULT_SWIM_RULES.maxOxygenSeconds,
@@ -33627,8 +33974,10 @@ export class VoxelEngine {
       leads: serializeLeadAnchors(this.leadAnchors, new Set(this.mobs.map((mob) => mob.id))),
       agentPlatform: normalizeAgentWorldSave(this.agentWorldState),
       agentCustody: this.serializeAgentCustody(),
+      lifeSupport: { ...this.lifeSupportState },
       locationPlayerState: { schema: 1, creativeFlying: this.creativeFlying, boatId: this.mountedBoatId,
         creatureId: this.mountedCreatureId, creatureSeat: this.mountedCreatureSeat,
+        ...(this.evaTether ? { tether: structuredClone(this.evaTether) } : {}),
         ...(this.bodyContext().environment.gravityG === 0 ? { velocity: this.velocity.toArray() as [number, number, number] } : {}) },
       agentWorldFingerprint: this.agentWorldFingerprint,
       ...(this.agentTestWorld ? { agentTestWorld: true } : {}),

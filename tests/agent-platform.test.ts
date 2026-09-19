@@ -56,6 +56,8 @@ describe("agent platform contracts", () => {
       running: true,
       titleMode: false,
       updateBoats: () => undefined,
+      advanceUniverseClock: () => undefined,
+      updateDayNight: () => undefined,
       updatePlayer: () => { playerUpdates += 1; },
       updateMobs: () => undefined,
       updateProjectiles: () => undefined,

@@ -9,7 +9,7 @@ export const WORLD_SAVE_OWNERS = Object.freeze({
   version: "universe", generatorVersion: "location", generatorProfile: "location", lastSavedGameVersion: "universe",
   seed: "location", mode: "universe", edits: "location", blockFacings: "location", player: "player", spawn: "location",
   startingSettlementId: "location", inventory: "player", cursor: "player", trash: "player", craftGrid: "player",
-  equipment: "player", offhand: "player", bestiary: "player", saplings: "location", veinRegrowth: "location",
+  equipment: "player", lifeSupport: "player", offhand: "player", bestiary: "player", saplings: "location", veinRegrowth: "location",
   selected: "player", health: "player", hunger: "player", xp: "player", level: "player", time: "universe", day: "universe", universeTimeSeconds: "universe",
   weather: "location", furnaces: "location", wheatMills: "location", chests: "location", contextualLoot: "location",
   roadEvents: "location", surfaceRoadGraph: "location", apiaries: "location", morphLooms: "location", orbRacks: "location",

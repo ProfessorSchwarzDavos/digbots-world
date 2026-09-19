@@ -1,4 +1,5 @@
 import type { DragonState } from "./dragons";
+import { validLifeSupportItem, validLifeSupportOperation, EMPTY_LIFE_SUPPORT, type LifeSupportOperation, type LifeSupportState } from "./life-support";
 import type { CharacterColors, CharacterSkillAllocation } from "./character-profiles";
 import type { FactionRace } from "./factions";
 import type { SkillState } from "./skills";
@@ -121,7 +122,9 @@ export type PlayerPose = {
   colors?: CharacterColors;
   swimming?: number;
   seated?: number;
-  equipment?: Partial<Record<"head" | "chest" | "legs" | "feet", number>>;
+  equipment?: Partial<Record<"head" | "chest" | "legs" | "feet" | "back", number>>;
+  evaThrust?: boolean;
+  lifeSupportSwap?: boolean;
   boatId?: string;
   boatSeat?: number;
   /** Ephemeral helm intent. The host integrates the hull only for seat zero. */
@@ -333,13 +336,18 @@ export type InventoryEndpoint = {
 export type InventoryAction = {
   requestId: string;
   actorId: string;
-  kind: "move" | "split" | "swap" | "collect" | "equip" | "drop" | "craft";
+  kind: "move" | "split" | "swap" | "collect" | "equip" | "drop" | "craft" | "life-support";
+  lifeSupportOperation?: LifeSupportOperation;
+  recipeId?: string;
+  shift?: boolean;
   from?: InventoryEndpoint;
   to?: InventoryEndpoint;
   count?: number;
   expectedRevision?: number;
   /** World-drop collection is resolved by the host rather than the guest. */
   dropId?: number;
+  /** Bounded six-block pickup requires a host-owned spool and clear line. */
+  cargoTether?: boolean;
   /**
    * Guest-observed pickup point. The host never trusts this as authority: it
    * only uses it for bounded lag compensation against the latest accepted
@@ -420,11 +428,14 @@ export type PlayerSessionSnapshot = {
   race?: FactionRace;
   colors?: CharacterColors;
   inventory: ItemStackSnapshot[];
+  /** Current clients retain staged ingredients in host-owned custody. */
+  craftGrid?: ItemStackSnapshot[];
   /** Optional for protocol-v1 compatibility; current clients include the carried cursor stack. */
   cursor?: ItemStackSnapshot;
   /** Recoverable last-discarded stack; optional for older peers. */
   trash?: ItemStackSnapshot;
-  equipment: Record<"head" | "chest" | "legs" | "feet", ItemStackSnapshot>;
+  equipment: Record<"head" | "chest" | "legs" | "feet", ItemStackSnapshot> & { back?: ItemStackSnapshot };
+  lifeSupport?: LifeSupportState;
   offhand?: ItemStackSnapshot;
   selected: number;
   health: number;
@@ -861,7 +872,7 @@ function validateBlockEdit(value: unknown): value is BlockEdit {
 function validatePose(value: unknown): value is PlayerPose {
   const validEquipment = value && isRecord(value) && value.equipment !== undefined
     ? isRecord(value.equipment)
-      && Object.keys(value.equipment).every((slot) => ["head", "chest", "legs", "feet"].includes(slot))
+      && Object.keys(value.equipment).every((slot) => ["head", "chest", "legs", "feet", "back"].includes(slot))
       && Object.values(value.equipment).every((item) => isInteger(item, 0, 65_535))
     : true;
   return isRecord(value)
@@ -893,6 +904,8 @@ function validatePose(value: unknown): value is PlayerPose {
     && (value.colors === undefined || validateCharacterColors(value.colors))
     && (value.swimming === undefined || isFiniteNumber(value.swimming, 0, 1))
     && (value.seated === undefined || isFiniteNumber(value.seated, 0, 1))
+    && (value.evaThrust === undefined || typeof value.evaThrust === "boolean")
+    && (value.lifeSupportSwap === undefined || typeof value.lifeSupportSwap === "boolean")
     && (value.boatId === undefined || isId(value.boatId))
     && (value.boatSeat === undefined || isInteger(value.boatSeat, 0, 1))
     && (value.boatForward === undefined || isFiniteNumber(value.boatForward, -1, 1))
@@ -1211,7 +1224,8 @@ function validateItemStack(value: unknown): value is ItemStackSnapshot {
     && isInteger(value.item, 0, 65_535)
     && isInteger(value.count, 1, 65_535)
     && (value.durability === undefined || isInteger(value.durability, 0, 1_000_000))
-    && validateBoundedMetadata(value.metadata));
+    && validateBoundedMetadata(value.metadata)
+    && validLifeSupportItem(value as { item: number; count: number; metadata?: unknown }));
 }
 
 function validateInventorySnapshot(value: unknown): value is InventorySnapshot {
@@ -1295,10 +1309,13 @@ function validatePlayerSessionSnapshot(value: unknown): value is PlayerSessionSn
     && Array.isArray(value.inventory)
     && value.inventory.length === 36
     && value.inventory.every(validateItemStack)
+    && (value.craftGrid === undefined || Array.isArray(value.craftGrid) && value.craftGrid.length === 9 && value.craftGrid.every(validateItemStack))
     && (value.cursor === undefined || validateItemStack(value.cursor))
     && (value.trash === undefined || validateItemStack(value.trash))
     && (value.offhand === undefined || validateItemStack(value.offhand))
     && equipmentSlots.every((slot) => validateItemStack(equipment[slot]))
+    && (equipment.back === undefined || validateItemStack(equipment.back))
+    && (value.lifeSupport === undefined || isRecord(value.lifeSupport) && Object.keys(EMPTY_LIFE_SUPPORT).every(key => isFiniteNumber((value.lifeSupport as Record<string, unknown>)[key], 0, 86400)))
     && isInteger(value.selected, 0, 8)
     && isFiniteNumber(value.health, 0, 10)
     && isFiniteNumber(value.hunger, 0, 10)
@@ -1403,13 +1420,17 @@ export function validatePayload<K extends MultiplayerMessageType>(type: K, value
     case "inventory-action":
       return isId(value.requestId)
         && isId(value.actorId)
-        && ["move", "split", "swap", "collect", "equip", "drop", "craft"].includes(value.kind as string)
+        && ["move", "split", "swap", "collect", "equip", "drop", "craft", "life-support"].includes(value.kind as string)
+        && (value.kind === "life-support" ? validLifeSupportOperation(value.lifeSupportOperation) : value.lifeSupportOperation === undefined)
+        && (value.recipeId === undefined || value.kind === "craft" && typeof value.recipeId === "string" && value.recipeId.length <= 80)
+        && (value.shift === undefined || value.kind === "craft" && typeof value.shift === "boolean")
         && (value.from === undefined || validateEndpoint(value.from))
         && (value.to === undefined || validateEndpoint(value.to))
         && (value.count === undefined || isInteger(value.count, 1, 65_535))
         && (value.expectedRevision === undefined || isInteger(value.expectedRevision, 0, Number.MAX_SAFE_INTEGER))
         && (value.expectedPlayerRevision === undefined || isInteger(value.expectedPlayerRevision, 0, Number.MAX_SAFE_INTEGER))
         && (value.dropId === undefined || isInteger(value.dropId, 0, Number.MAX_SAFE_INTEGER))
+        && (value.cargoTether === undefined || value.kind === "collect" && typeof value.cargoTether === "boolean")
         && (value.pickupAt === undefined || (isRecord(value.pickupAt)
           && isFiniteNumber(value.pickupAt.x, -COORDINATE_LIMIT, COORDINATE_LIMIT)
           && isFiniteNumber(value.pickupAt.y, -4096, 4096)

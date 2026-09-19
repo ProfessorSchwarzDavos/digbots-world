@@ -436,7 +436,7 @@ test("filled Capture Orb appearance propagates through local and remote third-pe
   engine.attackCooldown = 0;
   engine.heldUse = 0;
   engine.playerVariant = "male";
-  engine.equipment = { head: null, chest: null, legs: null, feet: null };
+  engine.equipment = { head: null, chest: null, legs: null, feet: null, back: null };
   const pose = (engine as unknown as { localNetworkPose(): PlayerPose }).localNetworkPose();
   assert.equal(pose.heldItem, Item.CaptureOrb);
   assert.equal(pose.heldItemFilled, true);

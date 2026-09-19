@@ -13,7 +13,7 @@ test("every WorldSave field has exactly one explicit owner, checked against sour
   assert.ok(type && ts.isTypeLiteralNode(type.type));
   const fields = type.type.members.map((member) => member.name!.getText(source)).sort();
   assert.deepEqual(Object.keys(WORLD_SAVE_OWNERS).sort(), fields);
-  assert.equal(fields.length, 90);
+  assert.equal(fields.length, 91);
 });
 
 test("all optional fields, absent/null/empty and unknown metadata survive partition round trips", () => {

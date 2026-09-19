@@ -109,7 +109,7 @@ test("Creature Camp selection is orb-stable and renaming preserves every other s
   engine.digitalCreatureArchive = createDigitalCreatureArchive();
   engine.trash = null;
   engine.craftGrid = Array.from({ length: 9 }, () => null);
-  engine.equipment = { head: null, chest: null, legs: null, feet: null };
+  engine.equipment = { head: null, chest: null, legs: null, feet: null, back: null };
   engine.events = { onToast: () => undefined } as unknown as VoxelEngine["events"];
   engine.syncOrbRackVisuals = () => undefined;
 

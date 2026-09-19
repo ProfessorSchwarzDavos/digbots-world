@@ -801,6 +801,21 @@ export const Item = {
   CardforgeCase: 603,
   CardforgeBooster: 604,
   LooseCard: 605,
+  FieldBreatherHelmet: 606,
+  LightOxygenTank: 607,
+  ExpeditionOxygenTank: 608,
+  TwinTankHarness: 609,
+  PressureWeaveChest: 610,
+  PressureWeaveLegs: 611,
+  PressureWeaveBoots: 612,
+  EvaManeuverRig: 613,
+  AurelianSpellRig: 614,
+  DiveHarness: 615,
+  MagneticBoots: 616,
+  TetherSpool: 617,
+  FieldOxygenReserve: 618,
+  EvaPowerCell: 619,
+  ScrubberCartridge: 620,
 } as const;
 
 const ITEM_ID_COMPATIBILITY_ALIASES: ReadonlyMap<number, ReadonlySet<string>> = new Map([
@@ -835,7 +850,8 @@ export type Weather = "clear" | "rain";
 export type RenderLayer = "opaque" | "cutout" | "transparent" | "translucentSolid" | "emissive" | "none";
 export type ToolKind = "pickaxe" | "axe" | "shovel" | "sword" | "crossbow" | "spear" | "bow" | "firearm" | "staff";
 export type BlockTool = "pickaxe" | "axe" | "shovel" | "hand";
-export type EquipmentSlot = "head" | "chest" | "legs" | "feet";
+export type EquipmentSlot = "head" | "chest" | "legs" | "feet" | "back";
+export const EQUIPMENT_SLOTS: readonly EquipmentSlot[] = Object.freeze(["head", "chest", "legs", "feet", "back"]);
 
 /** Save-stable legacy cell, now authored as embedded luminous crystal seams. */
 export const STAR_CRYSTAL_ORE_TILE = 42;
@@ -956,6 +972,8 @@ export type ItemDefinition = {
   rarity?: "legendary";
   legendaryEffect?: string;
   equipmentSlot?: EquipmentSlot;
+  /** Authored life-support silhouette and capability lookup, never an oxygen flag. */
+  lifeSupportKind?: "helmet" | "tank" | "harness" | "weave" | "rig" | "spell-rig" | "dive" | "boots" | "tether" | "reserve" | "cell" | "scrubber";
   armor?: number;
   food?: number;
   fuel?: number;
@@ -1528,6 +1546,21 @@ for (const crate of [BlockId.MoonberryCrate, BlockId.SunberryCrate, BlockId.Appl
 }
 
 Object.assign(ITEMS, {
+  [Item.FieldBreatherHelmet]: { ...armorItem(Item.FieldBreatherHelmet, "Field Breather Helmet", "#d3d6ca", "head", 1, 340), lifeSupportKind: "helmet" },
+  [Item.LightOxygenTank]: { id: Item.LightOxygenTank, name: "Light O2 Tank", color: "#a8cec1", maxStack: 1, equipmentSlot: "back", lifeSupportKind: "tank" },
+  [Item.ExpeditionOxygenTank]: { id: Item.ExpeditionOxygenTank, name: "Expedition O2 Tank", color: "#74a9a8", maxStack: 1, equipmentSlot: "back", lifeSupportKind: "tank" },
+  [Item.TwinTankHarness]: { id: Item.TwinTankHarness, name: "Twin-Tank Harness", color: "#977955", maxStack: 1, equipmentSlot: "back", lifeSupportKind: "harness" },
+  [Item.PressureWeaveChest]: { ...armorItem(Item.PressureWeaveChest, "Pressure Weave Jacket", "#c2c8bd", "chest", 3, 700), lifeSupportKind: "weave" },
+  [Item.PressureWeaveLegs]: { ...armorItem(Item.PressureWeaveLegs, "Pressure Weave Leggings", "#9baaa8", "legs", 2, 650), lifeSupportKind: "weave" },
+  [Item.PressureWeaveBoots]: { ...armorItem(Item.PressureWeaveBoots, "Pressure Weave Boots", "#7f9295", "feet", 2, 600), lifeSupportKind: "weave" },
+  [Item.EvaManeuverRig]: { id: Item.EvaManeuverRig, name: "EVA Maneuver Rig", color: "#d0b17c", maxStack: 1, equipmentSlot: "back", lifeSupportKind: "rig" },
+  [Item.AurelianSpellRig]: { id: Item.AurelianSpellRig, name: "Aurelian Spell-Rig", color: "#b1a1d6", maxStack: 1, equipmentSlot: "back", lifeSupportKind: "spell-rig" },
+  [Item.DiveHarness]: { id: Item.DiveHarness, name: "Dive Harness", color: "#699ba8", maxStack: 1, equipmentSlot: "back", lifeSupportKind: "dive" },
+  [Item.MagneticBoots]: { ...armorItem(Item.MagneticBoots, "Magnetic EVA Boots", "#b59b70", "feet", 2, 600), lifeSupportKind: "boots" },
+  [Item.TetherSpool]: { id: Item.TetherSpool, name: "EVA Tether Spool", color: "#d8b66a", maxStack: 1, lifeSupportKind: "tether" },
+  [Item.FieldOxygenReserve]: { id: Item.FieldOxygenReserve, name: "Sealed Field O2 Reserve", color: "#dae0d7", maxStack: 1, lifeSupportKind: "reserve" },
+  [Item.EvaPowerCell]: { id: Item.EvaPowerCell, name: "EVA Power Cell", color: "#c5a369", maxStack: 1, lifeSupportKind: "cell" },
+  [Item.ScrubberCartridge]: { id: Item.ScrubberCartridge, name: "CO2 Scrubber Cartridge", color: "#b7c3a2", maxStack: 1, lifeSupportKind: "scrubber" },
   [Item.Stick]: { id: Item.Stick, name: "Stick", color: "#9a6b3b", maxStack: 64, fuel: 5 },
   [Item.Coal]: { id: Item.Coal, name: "Coal", color: "#34383a", maxStack: 64, fuel: 80 },
   [Item.RawIron]: { id: Item.RawIron, name: "Raw Iron", color: "#a56f52", maxStack: 64 },
@@ -2401,6 +2434,22 @@ const anyDragonScale: ItemCode[] = [Item.FireDragonScale, Item.IceDragonScale, I
 const anyDragonHeart: ItemCode[] = [Item.FireDragonHeart, Item.IceDragonHeart, Item.SteelDragonHeart, Item.SeaDragonHeart, Item.GoldDragonHeart, Item.SilverDragonHeart];
 
 export const RECIPES: Recipe[] = [
+  ...([
+    ["field-breather", Item.FieldBreatherHelmet, [Item.IronIngot, BlockId.Glass, Item.IronIngot, Item.Fiber, Item.GearCluster, Item.Fiber]],
+    ["light-o2-tank", Item.LightOxygenTank, [Item.IronIngot, Item.IronIngot, Item.IronIngot, Item.Fiber, Item.GearCluster, Item.Fiber]],
+    ["expedition-o2-tank", Item.ExpeditionOxygenTank, [Item.DeepgearAlloy, Item.DeepgearAlloy, Item.DeepgearAlloy, Item.Fiber, Item.GearCluster, Item.Fiber]],
+    ["twin-tank-harness", Item.TwinTankHarness, [Item.Fiber, Item.IronIngot, Item.Fiber, Item.Fiber, Item.GearCluster, Item.Fiber]],
+    ["pressure-weave-jacket", Item.PressureWeaveChest, [Item.Fiber, Item.DeepgearAlloy, Item.Fiber, Item.Fiber, Item.Beeswax, Item.Fiber]],
+    ["pressure-weave-legs", Item.PressureWeaveLegs, [Item.Fiber, Item.Beeswax, Item.Fiber, Item.DeepgearAlloy, 0, Item.DeepgearAlloy]],
+    ["pressure-weave-boots", Item.PressureWeaveBoots, [Item.Fiber, 0, Item.Fiber, Item.DeepgearAlloy, 0, Item.DeepgearAlloy]],
+    ["eva-rig", Item.EvaManeuverRig, [Item.DeepgearAlloy, Item.GearCluster, Item.DeepgearAlloy, Item.IronIngot, Item.CrystalShard, Item.IronIngot]],
+    ["aurelian-spell-rig", Item.AurelianSpellRig, [Item.CrystalShard, Item.LumenPearl, Item.CrystalShard, Item.DeepgearAlloy, Item.NocturneHeart, Item.DeepgearAlloy]],
+    ["dive-harness", Item.DiveHarness, [Item.Fiber, Item.GlowScale, Item.Fiber, Item.IronIngot, Item.GearCluster, Item.IronIngot]],
+    ["magnetic-boots", Item.MagneticBoots, [Item.DeepgearAlloy, 0, Item.DeepgearAlloy, Item.CrystalShard, 0, Item.CrystalShard]],
+    ["eva-tether", Item.TetherSpool, [Item.Fiber, Item.GearCluster, Item.Fiber, Item.IronIngot, Item.Fiber, Item.IronIngot]],
+    ["eva-power-cell", Item.EvaPowerCell, [Item.IronIngot, Item.CrystalShard, Item.IronIngot, Item.DeepgearAlloy, Item.CrystalShard, Item.DeepgearAlloy]],
+    ["co2-scrubber", Item.ScrubberCartridge, [Item.Charcoal, Item.Fiber, Item.Charcoal, Item.IronIngot, Item.Beeswax, Item.IronIngot]],
+  ] as Array<[string, ItemCode, Ingredient[]]>).map(([id, item, pattern]): Recipe => ({ id, name: ITEMS[item].name, width: 3, height: 2, pattern, output: { item, count: 1 }, table: true })),
   { id: "star-crystal-block", name: "Star Crystal Block", width: 3, height: 3, pattern: Array<ItemCode>(9).fill(Item.CrystalShard), output: { item: BlockId.CrystalBlock, count: 1 }, table: true },
   { id: "star-crystal-block-open", name: "Star Crystals", width: 1, height: 1, pattern: [BlockId.CrystalBlock], output: { item: Item.CrystalShard, count: 9 }, table: false },
   { id: "shellfruit-crate", name: "Shellfruit Crate", width: 3, height: 3, pattern: Array<ItemCode>(9).fill(Item.Shellfruit), output: { item: BlockId.ShellfruitCrate, count: 1 }, table: true },

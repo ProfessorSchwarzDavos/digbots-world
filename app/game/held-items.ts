@@ -93,6 +93,79 @@ export function createAvatarHeldItemModel(item: ItemCode, options: { filledCaptu
     group.userData.worldTextureBlock = definition.worldTextureBlock;
     group.scale.setScalar(0.88);
     group.rotation.set(0.08, 0.32, -0.12);
+  } else if (definition.lifeSupportKind && definition.lifeSupportKind !== "weave") {
+    const kind = definition.lifeSupportKind;
+    const primary = new THREE.Color(definition.color);
+    const dark = primary.clone().multiplyScalar(0.5).getHex();
+    const light = primary.clone().lerp(new THREE.Color(0xffffff), 0.35).getHex();
+    const brass = 0xb99a62;
+    const ceramic = 0xdce1d7;
+    const charcoal = 0x34464a;
+    const addOxygenCylinder = (name: string, x: number, height: number, radius: number, centerY = 0.04) => {
+      addCylinder(radius, height, [x, centerY, 0.04], ceramic).name = `${name}-body`;
+      for (const bandY of [centerY - height * 0.29, centerY + height * 0.29]) {
+        addCylinder(radius + 0.008, 0.035, [x, bandY, 0.04], brass).name = `${name}-band-${bandY < centerY ? "lower" : "upper"}`;
+      }
+      addCylinder(radius * 0.45, 0.07, [x, centerY + height / 2 + 0.035, 0.04], charcoal).name = `${name}-valve`;
+    };
+    if (kind === "helmet") {
+      addBox([0.49, 0.31, 0.43], [0, 0.07, 0], primary.getHex()).name = "life-support-helmet-shell";
+      addBox([0.53, 0.075, 0.47], [0, -0.12, 0], brass).name = "life-support-helmet-seal";
+      const visor = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.19, 0.026), new THREE.MeshLambertMaterial({ color: 0x8fcbd5, transparent: true, opacity: 0.75, depthWrite: false }));
+      visor.name = "life-support-helmet-visor";
+      visor.position.set(0, 0.075, -0.235);
+      group.add(visor);
+      addBox([0.46, 0.04, 0.04], [0, 0.18, -0.235], charcoal).name = "life-support-helmet-visor-brow";
+    } else if (kind === "tank") {
+      addOxygenCylinder("life-support-single-cylinder", 0, 0.55, 0.155);
+      addBox([0.38, 0.42, 0.055], [0, 0.03, 0.2], dark).name = "life-support-single-back-plate";
+      addBox([0.42, 0.055, 0.32], [0, -0.09, 0.08], brass).name = "life-support-single-retaining-strap";
+    } else if (kind === "harness" || kind === "rig" || kind === "spell-rig" || kind === "dive") {
+      const dive = kind === "dive";
+      addBox([0.47, 0.49, 0.065], [0, 0.025, 0.17], dark).name = `life-support-${kind}-frame`;
+      for (const side of [-1, 1]) {
+        addBox([0.065, 0.49, 0.075], [side * 0.22, 0.025, 0.19], charcoal).name = `life-support-${kind}-harness-strap-${side}`;
+        if (!dive) addOxygenCylinder(`life-support-${kind}-cylinder-${side}`, side * 0.145, 0.5, 0.105);
+      }
+      if (dive) {
+        addOxygenCylinder("life-support-dive-cylinder", 0, 0.35, 0.135, 0.01);
+        addBox([0.28, 0.1, 0.11], [0, 0.24, 0.06], charcoal).name = "life-support-dive-regulator";
+        for (const side of [-1, 1]) addBox([0.035, 0.31, 0.035], [side * 0.19, 0.015, 0.04], charcoal).name = `life-support-dive-hose-${side}`;
+      } else if (kind === "rig" || kind === "spell-rig") {
+        for (const side of [-1, 1]) {
+          const x = side * 0.145;
+          addCylinder(0.105, 0.12, [x, -0.29, 0.04], charcoal).name = `life-support-${kind}-thruster-${side}`;
+          addCylinder(0.112, 0.025, [x, -0.36, 0.04], brass).name = `life-support-${kind}-nozzle-rim-${side}`;
+          addCylinder(0.065, 0.012, [x, -0.38, 0.04], kind === "spell-rig" ? 0xab91e5 : 0x192a2f, [0, 0, 0], kind === "spell-rig").name = `life-support-${kind}-nozzle-port-${side}`;
+        }
+        if (kind === "spell-rig") addBox([0.15, 0.15, 0.04], [0, 0.025, -0.09], 0xab91e5, [0, 0, Math.PI / 4], true).name = "life-support-spell-rig-focus";
+      }
+    } else if (kind === "boots") {
+      for (const side of [-1, 1]) {
+        const x = side * 0.16;
+        addBox([0.26, 0.24, 0.4], [x, 0, 0], primary.getHex()).name = `life-support-magnetic-boot-${side}`;
+        addBox([0.28, 0.055, 0.42], [x, -0.11, 0], charcoal).name = `life-support-magnetic-sole-${side}`;
+        for (const y of [-0.035, 0.075]) addBox([0.28, 0.035, 0.42], [x, y, 0], brass).name = `life-support-magnetic-band-${side}-${y}`;
+      }
+    } else if (kind === "tether") {
+      addCylinder(0.16, 0.19, [0, 0.02, 0], dark, [Math.PI / 2, 0, 0]).name = "life-support-tether-wound-line";
+      for (const z of [-0.12, 0.12]) addCylinder(0.23, 0.035, [0, 0.02, z], brass, [Math.PI / 2, 0, 0]).name = `life-support-tether-spool-flange-${z}`;
+      addCylinder(0.07, 0.3, [0, 0.02, 0], charcoal, [Math.PI / 2, 0, 0]).name = "life-support-tether-axle";
+      addBox([0.1, 0.08, 0.16], [0.26, 0.05, 0], light).name = "life-support-tether-clip";
+    } else if (kind === "reserve") {
+      addOxygenCylinder("life-support-field-reserve", 0, 0.4, 0.12);
+      addBox([0.21, 0.07, 0.07], [0, 0.04, -0.12], primary.getHex()).name = "life-support-reserve-label";
+    } else if (kind === "cell") {
+      addCylinder(0.135, 0.37, [0, 0.03, 0], dark).name = "life-support-power-cell-body";
+      for (const y of [-0.14, 0.2]) addCylinder(0.15, 0.065, [0, y, 0], brass).name = `life-support-power-cell-terminal-${y}`;
+      addBox([0.13, 0.27, 0.035], [0, 0.03, -0.135], 0xd9bd76, [0, 0, 0], true).name = "life-support-power-cell-charge-strip";
+    } else if (kind === "scrubber") {
+      addBox([0.37, 0.39, 0.23], [0, 0.02, 0], primary.getHex()).name = "life-support-scrubber-casing";
+      for (const y of [-0.1, 0, 0.1]) addBox([0.29, 0.035, 0.035], [0, y, -0.13], charcoal).name = `life-support-scrubber-vent-${y}`;
+      addBox([0.41, 0.06, 0.27], [0, 0.24, 0], brass).name = "life-support-scrubber-latch";
+    }
+    group.scale.setScalar(0.8);
+    group.rotation.set(0.1, 0.27, -0.08);
   } else if (definition.heldModel === "dragon-saddle") {
     addBox([0.58, 0.1, 0.76], [0, -0.08, 0], 0x522b27).name = "dragonflight-saddle-quilted-pad";
     addBox([0.48, 0.17, 0.62], [0, 0.02, -0.02], 0x8b4f38).name = "dragonflight-saddle-seat";

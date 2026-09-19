@@ -10,7 +10,7 @@ This branch is the independently maintained **TypeScript/Three.js edition** and 
 
 TypeScript worlds, profiles, cache, rendezvous, and multiplayer identifiers use the `blockwild-typescript-*` namespace. Normal startup does not import or remove generic or Rust-edition data. The explicit raw previous-data download covers allowlisted localStorage strings only; it is not a whole Rust IndexedDB backup, and no automatic cross-edition import exists.
 
-Local, unreleased Celestial Frontiers work now includes transactional location saves and an [environment/sky/gravity foundation](docs/CELESTIAL_ENVIRONMENT.md). Ordinary play remains Home-only; off-world developer fixtures are marked synthetic. Travel, destination content, life support and the rest of the expansion are unfinished, with comprehensive integration checks still pending.
+Local, unreleased Celestial Frontiers work now includes transactional location saves, an [environment/sky/gravity foundation](docs/CELESTIAL_ENVIRONMENT.md), and [finite life support and EVA](docs/LIFE_SUPPORT_AND_EVA.md). Ordinary play remains Home-only; off-world developer fixtures are marked synthetic. Travel, destination content, machinery and the rest of the expansion are unfinished, with comprehensive integration checks still pending.
 
 <p align="center">
   <img src="docs/assets/screenshots/2026-08-01-field-archive/2026-08-01-title-screen.png" alt="Blockwild v1.12.0 title screen over a live streamed wilderness" width="920" />

@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "./game/golem-forge.css";
 @import "./game/cardforge.css";
+@import "./game/life-support.css";
 
 :root {
   --font-geist-sans: Arial, Helvetica, sans-serif;

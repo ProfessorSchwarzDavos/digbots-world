@@ -168,7 +168,7 @@ function clickSlot(
   return { applied: false, cursor, moved: 0, reason: "That click did not change either inventory." };
 }
 
-const EQUIPMENT_KEYS = ["head", "chest", "legs", "feet"] as const;
+const EQUIPMENT_KEYS = ["head", "chest", "legs", "feet", "back"] as const;
 
 function clickPlayerAuxiliary(
   operation: Extract<ContainerOperation, { op: "click" }>,
@@ -286,7 +286,7 @@ export function applyContainerOperation(
   let inventory = playerState.inventory.map(fromNetwork);
   let slots = containerSlots.map(fromNetwork);
   let cursor = fromNetwork(playerState.cursor ?? null);
-  let equipment = Object.fromEntries(EQUIPMENT_KEYS.map((key) => [key, fromNetwork(playerState.equipment[key])])) as Record<(typeof EQUIPMENT_KEYS)[number], InventorySlot | null>;
+  let equipment = Object.fromEntries(EQUIPMENT_KEYS.map((key) => [key, fromNetwork(playerState.equipment[key] ?? null)])) as Record<(typeof EQUIPMENT_KEYS)[number], InventorySlot | null>;
   let offhand = fromNetwork(playerState.offhand ?? null);
   let trash = fromNetwork(playerState.trash ?? null);
   let moved = 0;

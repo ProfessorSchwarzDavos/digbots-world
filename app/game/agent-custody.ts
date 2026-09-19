@@ -1,4 +1,5 @@
-import { ITEMS, type InventorySlot } from "./data";
+import { ITEMS, EQUIPMENT_SLOTS, type EquipmentSlot, type InventorySlot } from "./data";
+import { validLifeSupportItem } from "./life-support";
 import { cloneUniverseJson, isUniverseRecord, assertExactKeys } from "./universe-json";
 
 /** Location-owned material custody, never session grants or executable jobs.
@@ -7,6 +8,7 @@ export type AgentCustodySave = Readonly<{
   schema: 1;
   agents: Readonly<Record<string, Readonly<{
     inventory: readonly (InventorySlot | null)[];
+    equipment?: Partial<Record<EquipmentSlot, InventorySlot | null>>;
     revision: number;
     returning: readonly InventorySlot[];
   }>>>;
@@ -23,10 +25,18 @@ export function validateAgentCustody(value: unknown): AgentCustodySave {
     assertExactKeys(entry, ["item", "count", ...("durability" in entry ? ["durability"] : []), ...("metadata" in entry ? ["metadata"] : [])], "Drone custody item");
     if (entry.durability !== undefined && (typeof entry.durability !== "number" || !Number.isFinite(entry.durability))) throw new Error("Invalid drone item durability.");
     if (entry.metadata !== undefined && !isUniverseRecord(entry.metadata)) throw new Error("Invalid drone item metadata.");
+    if (!validLifeSupportItem(entry as InventorySlot)) throw new Error("Invalid drone life-support store.");
   };
   for (const [id, entry] of Object.entries(value.agents)) {
     if (!/^[A-Za-z0-9_.:-]{1,160}$/.test(id) || !isUniverseRecord(entry)) throw new Error("Invalid drone custody identity.");
-    assertExactKeys(entry, ["inventory", "revision", "returning"], "Drone material record");
+    assertExactKeys(entry, ["inventory", "revision", "returning", ...(entry.equipment !== undefined ? ["equipment"] : [])], "Drone material record");
+    if (entry.equipment !== undefined) {
+      if (!isUniverseRecord(entry.equipment) || Object.keys(entry.equipment).some(key => !EQUIPMENT_SLOTS.includes(key as EquipmentSlot))) throw new Error("Invalid drone equipment.");
+      for (const [key, item] of Object.entries(entry.equipment)) {
+        slot(item, true);
+        if (item && ((item as InventorySlot).count !== 1 || ITEMS[(item as InventorySlot).item]?.equipmentSlot !== key)) throw new Error("Incompatible drone equipment.");
+      }
+    }
     if (!Number.isSafeInteger(entry.revision) || Number(entry.revision) < 0 || !Array.isArray(entry.inventory)
       || entry.inventory.length > 256 || !Array.isArray(entry.returning)) throw new Error("Invalid drone material record.");
     entry.inventory.forEach((item) => slot(item, true));

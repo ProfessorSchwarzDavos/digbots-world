@@ -195,6 +195,7 @@ export type MerchantState = AuthorityStampedState & Readonly<{
 }>;
 
 export const COMMERCE_CATALOG: Readonly<Record<string, CommerceItem>> = Object.fromEntries(([
+  { key: "field-oxygen-reserve", name: "Sealed Field O2 Reserve", category: "material", baseValue: 80, stackLimit: 1, tags: ["dwarf", "life-support"] },
   { key: "apple", name: "Apple", category: "food", baseValue: 3, stackLimit: 64, tags: ["fruit"] },
   { key: "moonberry", name: "Moonberry", category: "crop", baseValue: 5, stackLimit: 64, tags: ["berry"] },
   { key: "honey-jar", name: "Honey Jar", category: "honey", baseValue: 14, stackLimit: 12 },
@@ -437,6 +438,7 @@ export const WOOD_ELF_MERCHANT_OFFERS: readonly MerchantOffer[] = [
 ];
 
 export const DWARF_MERCHANT_OFFERS: readonly MerchantOffer[] = [
+  { itemKey: "field-oxygen-reserve", count: 2, professions: ["dwarf-gearwright", "dwarf-provisioner"] },
   { itemKey: "hearthroads-route-folio", count: 1, professions: ["general", "mayor"], rareChance: 0.38 },
   { itemKey: "raw-iron", count: 40, professions: ["dwarf-delver", "dwarf-provisioner"] },
   { itemKey: "raw-gold", count: 16, professions: ["dwarf-delver", "dwarf-provisioner"] },

@@ -11,6 +11,7 @@ export type LocationPlayerState = Readonly<{
   creatureSeat: number | null;
   /** Inertial motion belongs to the location, not the travelling inventory. */
   velocity?: readonly [number, number, number];
+  tether?: { anchor: [number, number, number]; length: number };
 }>;
 
 export function validLocationVelocity(value: unknown): value is [number, number, number] {
@@ -20,7 +21,11 @@ export function validLocationVelocity(value: unknown): value is [number, number,
 export function validateLocationPlayerState(value: unknown): LocationPlayerState | null {
   if (value === undefined) return null;
   if (!isUniverseRecord(value)) throw new Error("Invalid location player binding.");
-  assertExactKeys(value, ["schema", "creativeFlying", "boatId", "creatureId", "creatureSeat", ...(Object.hasOwn(value, "velocity") ? ["velocity"] : [])], "Location player binding");
+  assertExactKeys(value, ["schema", "creativeFlying", "boatId", "creatureId", "creatureSeat", ...(Object.hasOwn(value, "velocity") ? ["velocity"] : []), ...(Object.hasOwn(value, "tether") ? ["tether"] : [])], "Location player binding");
+  if (value.tether !== undefined) {
+    if (!isUniverseRecord(value.tether) || !validLocationVelocity(value.tether.anchor) || typeof value.tether.length !== "number" || !Number.isFinite(value.tether.length) || value.tether.length < 1.5 || value.tether.length > 32) throw new Error("Invalid location tether.");
+    assertExactKeys(value.tether, ["anchor", "length"], "Location tether");
+  }
   if (value.schema !== 1 || typeof value.creativeFlying !== "boolean"
     || (value.boatId !== null && (typeof value.boatId !== "string" || !/^[A-Za-z0-9_.:-]{1,160}$/.test(value.boatId)))
     || (value.creatureId !== null && (!Number.isSafeInteger(value.creatureId) || Number(value.creatureId) < 0))

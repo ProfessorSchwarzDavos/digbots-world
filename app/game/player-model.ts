@@ -48,7 +48,12 @@ export type PlayerColors = {
   accent: THREE.ColorRepresentation;
 };
 
-export type PlayerEquipmentAppearance = Partial<Record<"head" | "chest" | "legs" | "feet", THREE.ColorRepresentation | null>>;
+export type PlayerEquipmentAppearance = Partial<Record<"head" | "chest" | "legs" | "feet" | "back", THREE.ColorRepresentation | null>> & {
+  sealedHelmet?: boolean;
+  backKind?: string;
+};
+type PlayerEquipmentSlot = "head" | "chest" | "legs" | "feet" | "back";
+const PLAYER_EQUIPMENT_SLOTS: readonly PlayerEquipmentSlot[] = ["head", "chest", "legs", "feet", "back"];
 
 export type PlayerModelOptions = {
   playerId?: string;
@@ -83,6 +88,7 @@ export type PlayerModelMaterials = {
   armorChest: THREE.MeshStandardMaterial;
   armorLegs: THREE.MeshStandardMaterial;
   armorFeet: THREE.MeshStandardMaterial;
+  armorBack: THREE.MeshStandardMaterial;
   accent: THREE.MeshStandardMaterial;
 };
 
@@ -318,6 +324,7 @@ export class BlockPlayerModel {
   readonly modelKind: "player" | "drone";
 
   private readonly blockGeometry = new THREE.BoxGeometry(1, 1, 1);
+  private readonly cylinderGeometry = new THREE.CylinderGeometry(0.5, 0.5, 1, 12);
   private readonly ownedMeshes: THREE.Mesh[] = [];
   private readonly boundsBox = new THREE.Box3();
   private readonly boundsMatrix = new THREE.Matrix4();
@@ -340,7 +347,7 @@ export class BlockPlayerModel {
     dwarf: new THREE.Group(),
   };
   private readonly baseHairColor = new THREE.Color(DEFAULT_PLAYER_COLORS.hair);
-  private readonly equipmentMeshes: Record<"head" | "chest" | "legs" | "feet", THREE.Mesh[]> = { head: [], chest: [], legs: [], feet: [] };
+  private readonly equipmentMeshes: Record<PlayerEquipmentSlot, THREE.Mesh[]> = { head: [], chest: [], legs: [], feet: [], back: [] };
   private _variant: PlayerVariant;
   private _race: FactionRace;
   private disposed = false;
@@ -370,6 +377,7 @@ export class BlockPlayerModel {
       armorChest: new THREE.MeshStandardMaterial({ ...materialOptions, color: 0xffffff }),
       armorLegs: new THREE.MeshStandardMaterial({ ...materialOptions, color: 0xffffff }),
       armorFeet: new THREE.MeshStandardMaterial({ ...materialOptions, color: 0xffffff }),
+      armorBack: new THREE.MeshStandardMaterial({ ...materialOptions, color: 0xffffff }),
       accent: new THREE.MeshStandardMaterial({ ...materialOptions, color: colors.accent }),
     };
 
@@ -436,6 +444,7 @@ export class BlockPlayerModel {
     this.nameAnchor.name = "player-name-anchor";
     this.setPlayerName(options.playerName ?? "Player");
     this.blockGeometry.computeBoundingBox();
+    this.cylinderGeometry.computeBoundingBox();
     this.setVariant(this._variant);
     this.setRace(this._race);
     this.setEquipmentAppearance(options.equipment ?? {});
@@ -543,11 +552,17 @@ export class BlockPlayerModel {
       chest: this.materials.armorChest,
       legs: this.materials.armorLegs,
       feet: this.materials.armorFeet,
+      back: this.materials.armorBack,
     };
-    for (const slot of Object.keys(this.equipmentMeshes) as Array<keyof PlayerEquipmentAppearance>) {
+    for (const slot of PLAYER_EQUIPMENT_SLOTS) {
       const color = equipment[slot];
       const visible = color !== null && color !== undefined;
-      for (const mesh of this.equipmentMeshes[slot]) mesh.visible = visible;
+      for (const mesh of this.equipmentMeshes[slot]) {
+        const backKinds = mesh.userData.backKinds as readonly string[] | undefined;
+        mesh.visible = visible
+          && (slot !== "head" || !mesh.userData.sealedVisor || equipment.sealedHelmet === true)
+          && (slot !== "back" || !backKinds || backKinds.includes(equipment.backKind ?? "tank"));
+      }
       if (visible) materials[slot].color.set(color);
     }
     return this;
@@ -700,6 +715,7 @@ export class BlockPlayerModel {
     this.group.removeFromParent();
     this.group.clear();
     this.blockGeometry.dispose();
+    this.cylinderGeometry.dispose();
     for (const material of Object.values(this.materials)) material.dispose();
     for (const material of this.extraMaterials) material.dispose();
     this.ownedMeshes.length = 0;
@@ -929,23 +945,55 @@ export class BlockPlayerModel {
 
   private buildEquipment(options: PlayerModelOptions): void {
     const add = (
-      slot: keyof PlayerEquipmentAppearance,
+      slot: PlayerEquipmentSlot,
       parent: THREE.Object3D,
       name: string,
       size: Vector3Tuple,
       position: Vector3Tuple,
       material: THREE.Material,
+      backKinds?: readonly string[],
     ) => {
       const mesh = this.createBlock(name, size, position, material, options);
       mesh.visible = false;
+      if (backKinds) mesh.userData.backKinds = backKinds;
       this.equipmentMeshes[slot].push(mesh);
       parent.add(mesh);
+      return mesh;
+    };
+    const addCylinder = (
+      name: string,
+      radius: number,
+      height: number,
+      position: Vector3Tuple,
+      material: THREE.Material,
+      backKinds: readonly string[],
+    ) => {
+      const mesh = new THREE.Mesh(this.cylinderGeometry, material);
+      mesh.name = name;
+      mesh.position.set(...position);
+      mesh.scale.set(radius * 2, height, radius * 2);
+      mesh.castShadow = options.castShadow ?? true;
+      mesh.receiveShadow = options.receiveShadow ?? true;
+      mesh.userData.blockPlayerOwned = true;
+      mesh.userData.backKinds = backKinds;
+      mesh.visible = false;
+      this.ownedMeshes.push(mesh);
+      this.equipmentMeshes.back.push(mesh);
+      this.parts.torso.add(mesh);
+      return mesh;
     };
 
     add("head", this.parts.head, "armor-head-cap", [0.59, 0.13, 0.59], [0, 0.5, 0], this.materials.armorHead);
     add("head", this.parts.head, "armor-head-left", [0.07, 0.3, 0.57], [-0.29, 0.34, 0], this.materials.armorHead);
     add("head", this.parts.head, "armor-head-right", [0.07, 0.3, 0.57], [0.29, 0.34, 0], this.materials.armorHead);
     add("head", this.parts.head, "armor-head-back", [0.53, 0.35, 0.07], [0, 0.31, 0.29], this.materials.armorHead);
+    const visor = new THREE.MeshStandardMaterial({ color: 0x83c4d4, metalness: 0.18, roughness: 0.22, transparent: true, opacity: 0.72, depthWrite: false });
+    this.extraMaterials.push(visor);
+    for (const mesh of [
+      add("head", this.parts.head, "sealed-visor", [0.46, 0.19, 0.025], [0, 0.29, -0.305], visor),
+      add("head", this.parts.head, "sealed-visor-brow", [0.5, 0.045, 0.05], [0, 0.41, -0.305], this.materials.armorHead),
+      add("head", this.parts.head, "sealed-visor-chin", [0.5, 0.045, 0.05], [0, 0.18, -0.305], this.materials.armorHead),
+    ]) mesh.userData.sealedVisor = true;
     add("chest", this.parts.torso, "armor-chest", [TORSO_WIDTH + 0.075, TORSO_HEIGHT + 0.045, TORSO_DEPTH + 0.075], [0, TORSO_HEIGHT / 2, 0], this.materials.armorChest);
     add("chest", this.parts.leftArm, "armor-left-shoulder", [ARM_WIDTH + 0.055, 0.33, ARM_WIDTH + 0.055], [0, -0.16, 0], this.materials.armorChest);
     add("chest", this.parts.rightArm, "armor-right-shoulder", [ARM_WIDTH + 0.055, 0.33, ARM_WIDTH + 0.055], [0, -0.16, 0], this.materials.armorChest);
@@ -953,6 +1001,44 @@ export class BlockPlayerModel {
     add("legs", this.parts.rightLeg, "armor-right-leg", [LEG_WIDTH + 0.045, LEG_LENGTH * 0.7, LEG_DEPTH + 0.045], [0, -LEG_LENGTH * 0.35, 0], this.materials.armorLegs);
     add("feet", this.parts.leftLeg, "armor-left-boot", [LEG_WIDTH + 0.06, LEG_LENGTH * 0.34, LEG_DEPTH + 0.11], [0, -LEG_LENGTH * 0.83, -0.025], this.materials.armorFeet);
     add("feet", this.parts.rightLeg, "armor-right-boot", [LEG_WIDTH + 0.06, LEG_LENGTH * 0.34, LEG_DEPTH + 0.11], [0, -LEG_LENGTH * 0.83, -0.025], this.materials.armorFeet);
+
+    const ceramic = new THREE.MeshStandardMaterial({ color: 0xdce1d7, roughness: 0.66, metalness: 0.12, flatShading: true });
+    const brass = new THREE.MeshStandardMaterial({ color: 0xb99a62, roughness: 0.42, metalness: 0.55, flatShading: true });
+    const darkMetal = new THREE.MeshStandardMaterial({ color: 0x34464a, roughness: 0.48, metalness: 0.42, flatShading: true });
+    const spellGlow = new THREE.MeshStandardMaterial({ color: 0x9b8ad6, emissive: 0x493579, emissiveIntensity: 0.55, roughness: 0.38 });
+    this.extraMaterials.push(ceramic, brass, darkMetal, spellGlow);
+    add("back", this.parts.torso, "back-mount-plate", [0.43, 0.57, 0.07], [0, 0.37, 0.21], this.materials.armorBack);
+    for (const side of [-1, 1]) {
+      add("back", this.parts.torso, `back-harness-strap-${side}`, [0.065, 0.59, 0.055], [side * 0.205, 0.37, -0.205], darkMetal);
+      add("back", this.parts.torso, `back-harness-buckle-${side}`, [0.085, 0.065, 0.065], [side * 0.205, 0.31, -0.24], brass);
+    }
+    for (const y of [0.17, 0.55]) add("back", this.parts.torso, `back-mount-crossbar-${y}`, [0.45, 0.055, 0.09], [0, y, 0.26], brass);
+
+    const singleTank = ["tank"] as const;
+    addCylinder("back-single-oxygen-cylinder", 0.155, 0.54, [0, 0.37, 0.35], ceramic, singleTank);
+    for (const y of [0.2, 0.53]) addCylinder(`back-single-cylinder-band-${y}`, 0.161, 0.04, [0, y, 0.35], brass, singleTank);
+    addCylinder("back-single-valve", 0.065, 0.07, [0, 0.68, 0.35], darkMetal, singleTank);
+
+    const twinTanks = ["harness", "rig", "spell-rig"] as const;
+    for (const side of [-1, 1]) {
+      const x = side * 0.145;
+      addCylinder(`back-twin-cylinder-${side}`, 0.102, 0.51, [x, 0.38, 0.345], ceramic, twinTanks);
+      for (const y of [0.2, 0.53]) addCylinder(`back-twin-band-${side}-${y}`, 0.109, 0.035, [x, y, 0.345], brass, twinTanks);
+      addCylinder(`back-twin-valve-${side}`, 0.052, 0.065, [x, 0.67, 0.345], darkMetal, twinTanks);
+      const thrusterKinds = ["rig", "spell-rig"] as const;
+      addCylinder(`back-thruster-housing-${side}`, 0.103, 0.12, [x, 0.09, 0.365], darkMetal, thrusterKinds);
+      addCylinder(`back-thruster-rim-${side}`, 0.112, 0.025, [x, 0.02, 0.365], brass, thrusterKinds);
+      addCylinder(`back-thruster-port-${side}`, 0.069, 0.01, [x, 0.002, 0.365], darkMetal, ["rig"]);
+      addCylinder(`back-spell-thruster-port-${side}`, 0.069, 0.012, [x, 0.002, 0.365], spellGlow, ["spell-rig"]);
+    }
+    add("back", this.parts.torso, "spell-rig-focus", [0.14, 0.14, 0.055], [0, 0.37, 0.46], spellGlow, ["spell-rig"]);
+
+    const dive = ["dive"] as const;
+    addCylinder("back-dive-compact-cylinder", 0.132, 0.35, [0, 0.36, 0.34], ceramic, dive);
+    addCylinder("back-dive-upper-band", 0.14, 0.045, [0, 0.49, 0.34], brass, dive);
+    addCylinder("back-dive-lower-band", 0.14, 0.045, [0, 0.23, 0.34], brass, dive);
+    add("back", this.parts.torso, "back-dive-regulator", [0.24, 0.1, 0.11], [0, 0.59, 0.34], darkMetal, dive);
+    for (const side of [-1, 1]) add("back", this.parts.torso, `back-dive-hose-${side}`, [0.045, 0.36, 0.045], [side * 0.2, 0.37, 0.32], darkMetal, dive);
   }
 
   private applyPose(nextPose: PlayerPoseSnapshot): void {

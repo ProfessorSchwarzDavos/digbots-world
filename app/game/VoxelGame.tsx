@@ -13,6 +13,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import * as THREE from "three";
+import { LifeSupportIcon, LifeSupportPanel, LifeSupportDisplay } from "./life-support-ui";
 import {
   BlockId,
   BLOCKS,
@@ -954,7 +955,7 @@ const INITIAL_HUD: ExtendedHudState = {
   activeWheatMill: null,
   activeChest: null,
   activeChestTitle: "Wildwood Chest",
-  equipment: { head: null, chest: null, legs: null, feet: null },
+  equipment: { head: null, chest: null, legs: null, feet: null, back: null },
   offhand: null,
   shieldRaised: false,
   armor: 0,
@@ -1347,6 +1348,7 @@ function bestiaryObservation(definition: MobDefinition, progress: BestiaryProgre
 
 function itemMetadataSummary(slot: InventorySlot | null) {
   if (!slot?.metadata) return "";
+  if (ITEMS[slot.item]?.lifeSupportKind) return " · Finite life-support stores";
   const orb = captureOrbFromInventorySlot(slot);
   if (orb?.creature) {
     const creature = orb.creature;
@@ -1368,6 +1370,7 @@ function itemMetadataSummary(slot: InventorySlot | null) {
 
 function ItemIcon({ item, slot, small = false }: { item: ItemCode; slot?: InventorySlot | null; small?: boolean }) {
   const definition = ITEMS[item];
+  if (definition?.lifeSupportKind) return <LifeSupportIcon item={item} small={small} />;
   const iconKind = itemIconKind(item);
   const isTool = Boolean(definition?.toolKind) && iconKind.startsWith("tool-");
   const custom = !isTool;
@@ -1742,6 +1745,7 @@ function PlayerAvatarPreview({
   const chest = equipment?.chest?.item;
   const legs = equipment?.legs?.item;
   const feet = equipment?.feet?.item;
+  const back = equipment?.back?.item;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1765,6 +1769,9 @@ function PlayerAvatarPreview({
       chest: chest === undefined ? null : ITEMS[chest]?.color,
       legs: legs === undefined ? null : ITEMS[legs]?.color,
       feet: feet === undefined ? null : ITEMS[feet]?.color,
+      back: back === undefined ? null : ITEMS[back]?.color,
+      sealedHelmet: head === Item.FieldBreatherHelmet,
+      backKind: back === undefined ? undefined : ITEMS[back]?.lifeSupportKind,
     };
     model.setEquipmentAppearance(equipmentAppearance);
     model.group.rotation.y = -0.32;
@@ -1836,7 +1843,7 @@ function PlayerAvatarPreview({
       (floor.material as THREE.Material).dispose();
       releaseAvatarPreviewRenderer();
     };
-  }, [variant, appearance, head, chest, legs, feet, heldItem, offhandItem, compact]);
+  }, [variant, appearance, head, chest, legs, feet, back, heldItem, offhandItem, compact]);
 
   return <canvas ref={canvasRef} className={`player-avatar-preview ${compact ? "compact" : ""}`} aria-label={`${variant === "female" ? "Female" : "Male"} ${appearance?.race ?? "wayfarer"} player model preview`} />;
 }
@@ -4411,6 +4418,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
             </div>
           )}
 
+          <LifeSupportDisplay state={hud.lifeSupport} eva={hud.eva} control={key => engineRef.current?.evaControl(key)} reel={held => engineRef.current?.setVirtualKey("KeyY", held)} />
           <div className="bottom-hud">
             <div className="active-block-name">{selectedName}</div>
             {hud.mode === "survival" && (
@@ -5008,6 +5016,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
                         {renderSlot(hud.equipment.chest, "armor-chest", (shift) => engineRef.current?.equipmentClick("chest", "left", shift), () => engineRef.current?.equipmentClick("chest", "right"), "equipment-slot", "Chest armor")}
                         {renderSlot(hud.equipment.legs, "armor-legs", (shift) => engineRef.current?.equipmentClick("legs", "left", shift), () => engineRef.current?.equipmentClick("legs", "right"), "equipment-slot", "Leg armor")}
                         {renderSlot(hud.equipment.feet, "armor-feet", (shift) => engineRef.current?.equipmentClick("feet", "left", shift), () => engineRef.current?.equipmentClick("feet", "right"), "equipment-slot", "Boots")}
+                        {renderSlot(hud.equipment.back, "armor-back", (shift) => engineRef.current?.equipmentClick("back", "left", shift), () => engineRef.current?.equipmentClick("back", "right"), "equipment-slot", "Back life-support unit")}
                         {renderSlot(hud.offhand, "offhand", (shift) => engineRef.current?.offhandClick("left", shift), () => engineRef.current?.offhandClick("right"), `equipment-slot offhand-slot ${hud.shieldRaised ? "raised" : ""}`, "Offhand shield, torch, or lantern")}
                       </div>
                       <PlayerAvatarPreview variant={activeCharacterProfile.appearance.sex} appearance={activeCharacterProfile.appearance} equipment={hud.equipment} heldItem={selectedSlot?.item} offhandItem={hud.offhand?.item} />
@@ -5025,8 +5034,13 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
                   </div>
                 )}
                 <div className="crafting-and-pack">
+                  <div className={hud.equipment.back ? "inventory-craft-services" : undefined}>
+                  <div>
                   <div className="craft-title">CRAFTING {overlay === "crafting" ? "3×3" : "2×2"}</div>
                   {renderCraftingArea(overlay === "crafting" ? 3 : 2)}
+                  </div>
+                  {hud.equipment.back && <LifeSupportPanel back={hud.equipment.back} cursor={hud.cursor} onAction={op => engineRef.current?.lifeSupportAction(op)} />}
+                  </div>
                   {renderPlayerInventory(true)}
                 </div>
               </div>

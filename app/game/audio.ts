@@ -1,7 +1,7 @@
 import { BLOCKS, BlockId } from "./data";
 
 export type AudioSettings = { volume: number; muted: boolean; musicVolume?: number };
-export type SoundKind = "step" | "mine" | "break" | "place" | "pickup" | "jump" | "fall" | "land" | "hurt" | "ui" | "attack" | "mob" | "craft" | "furnace" | "splash" | "eat";
+export type SoundKind = "step" | "mine" | "break" | "place" | "pickup" | "jump" | "fall" | "land" | "hurt" | "ui" | "attack" | "mob" | "craft" | "furnace" | "splash" | "eat" | "life-support";
 export type MusicScene =
   | "day"
   | "hoppin"
@@ -883,6 +883,9 @@ export class SynthAudio {
     else if (kind === "land") {
       this.noiseBurst(0.11, 210, 0.09);
       this.tone(74, 0.08, 0.03, "sine");
+    } else if (kind === "life-support") {
+      // Helmet-local dual chirp, independent of world distance or left/right view.
+      this.tone(880, .12, .07, "sine"); this.tone(660, .16, .07, "sine", .2);
     } else if (kind === "hurt") this.tone(150, 0.18, 0.09, "sawtooth", 0, 72);
     else if (kind === "ui") this.playSample("uiTap", { gain: 0.68, playbackRate: 0.98 + Math.random() * 0.04 });
     else if (kind === "attack") {

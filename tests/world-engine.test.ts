@@ -1629,7 +1629,7 @@ test("shift-click moves stacks both ways between the player and an open chest", 
   engine.chests = new Map([["0,0,0", [{ item: Item.Coal, count: 60 }, ...Array.from({ length: 26 }, () => null)]]]);
   engine.activeChestKey = "0,0,0";
   engine.activeFurnaceKey = null;
-  engine.equipment = { head: null, chest: null, legs: null, feet: null };
+  engine.equipment = { head: null, chest: null, legs: null, feet: null, back: null };
   engine.audio = { play: () => undefined } as unknown as VoxelEngine["audio"];
   engine.saveSoon = () => undefined;
   engine.emitHud = () => undefined;
@@ -1649,7 +1649,7 @@ test("an open container wins over armor auto-equip when shift-clicking", () => {
   const engine = Object.create(VoxelEngine.prototype) as VoxelEngine;
   engine.inventory = Array.from({ length: 36 }, () => null);
   engine.inventory[0] = { item: Item.HideHood, count: 1, durability: 90 };
-  engine.equipment = { head: null, chest: null, legs: null, feet: null };
+  engine.equipment = { head: null, chest: null, legs: null, feet: null, back: null };
   engine.chests = new Map([["0,0,0", Array.from({ length: 27 }, () => null)]]);
   engine.activeChestKey = "0,0,0";
   engine.activeFurnaceKey = null;
@@ -1715,7 +1715,7 @@ test("shift-click equips armor and armor reduces damage while losing durability"
   const playedSamples: string[] = [];
   engine.inventory = Array.from({ length: 36 }, () => null);
   engine.inventory[0] = { item: Item.IronPlate, count: 1, durability: 100 };
-  engine.equipment = { head: null, chest: null, legs: null, feet: null };
+  engine.equipment = { head: null, chest: null, legs: null, feet: null, back: null };
   engine.activeChestKey = null;
   engine.activeFurnaceKey = null;
   engine.saveSoon = () => undefined;

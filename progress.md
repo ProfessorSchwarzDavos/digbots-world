@@ -1632,3 +1632,25 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   Requirement review also adds finite supplied-heat conversion and declared,
   enforced upgrade compatibility; focused regressions and rebuild pending.
 - Full CF4 requirement handoff/remaining runtime visuals still open. No CF5 work.
+
+## CF4 verified development handoff - 2026-09-19 19:41 UTC
+
+- Runtime source `aa736068026dc2349236304408db7432ba91f5c2`: full workshop,
+  service feedback/metadata, finite supplied-heat conversion, supported upgrades,
+  visible Waygrid transfer costs/errors and corrected narrow panel fit.
+- Exact-source focused suite200/200pass; TypeScript/scopedlint and isolated
+  productionfull-r4 pass, build`15y9-l5eJimluso5KOcHi`. Existing webpack circular
+  chunk warnings retained. Generated tsconfig includes restored, no cleanup.
+- Normal-input environmental/crafting coverage now includes source-water
+  consumption1L/1kJ, adjacent fluid transfer, zero-buffer solar/wind/waterwheel,
+  finite coal/heat conversion, actual sheet-to-cylinder crafting and Waygrid
+  exact50J/item. Disabled power leaves inventory/vault/energy unchanged; restoring
+  it yields9200->8800->8400J for8items deposited and withdrawn.
+- Final390px Waygrid bounds0,0,390,844; readable failure/success feedback.
+  Authored models/helditems/icons and desktop/mobile controls personally reviewed.
+  Final unchanged officialclient passedplaying21instances/20kinds with no captured
+  errors. All browsers/previews/tests/builds/helpers drained, synthetic saves kept.
+- Full traceability, retained failures, downstream obligations and boundedCF5
+  proposal are in the task-local development handoff. CF5 remains unstarted;
+  director acceptance and all deferredCFV gates are not implied. Safety review
+  blocked cross-task handoff transmission; explicit user approval requested.

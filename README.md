@@ -198,6 +198,7 @@ The application does not currently require D1, R2, or a server database. The emp
 - [Engineering overview](docs/ENGINEERING_OVERVIEW.md) — a concise tour of the simulation, content, persistence, multiplayer, validation, and release architecture
 - [Edition maintenance contract](docs/EDITION_MAINTENANCE.md) — branch ownership, switching, CI routing, caches, artifacts, and deployment safeguards
 - [Edition parity matrix](docs/EDITION_PARITY.md) — versioned behavior, compatibility boundaries, evidence, and deliberate porting procedure
+- [Celestial Frontiers foundation](docs/CELESTIAL_FRONTIERS_FOUNDATION.md) — TypeScript update scope, content reconciliation, persistence/authority contracts and phase gates; not a playable-release claim
 - [Building Blockwild with Agentic Autoresearch](BLOCKWILD_AGENTIC_AUTORESEARCH_CASE_STUDY.md) — the human-directed agent workflow, telemetry loop, and optimization case study
 - [Performance comparison log](docs/PERFORMANCE_COMPARISON_LOG.md) — measured browser and deterministic benchmark history
 - [Living Bestiary release contract](docs/LIVING_BESTIARY_RELEASE.md)

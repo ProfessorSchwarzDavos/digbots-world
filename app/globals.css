@@ -649,6 +649,25 @@ input:focus-visible {
   pointer-events: none;
 }
 
+.universe-storage-status {
+  position: absolute;
+  z-index: 120;
+  right: 12px;
+  top: 12px;
+  max-width: min(420px, calc(100% - 24px));
+  padding: 10px 14px;
+  background: #17211e;
+  color: #eee2bf;
+  border-left: 3px solid #c6ab69;
+  font-size: 12px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+
+.universe-storage-status.storage-error {
+  border-left-color: #e48b73;
+}
+
 .save-pulse {
   position: absolute;
   right: 18px;

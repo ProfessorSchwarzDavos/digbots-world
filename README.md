@@ -33,6 +33,12 @@ The current release is **v1.12.0 Field Archive**.
 
 > Blockwild is an active public prototype. Worlds and characters are stored in the browser, so export important saves from the Worlds screen.
 
+## Unreleased: Celestial Frontiers foundations
+
+This branch is developing location-scoped universe saves in the TypeScript-only `blockwild-typescript-universe-v1` IndexedDB database. Existing TypeScript localStorage saves are imported additively with exact source-string backups; generic and Rust data remain outside this path. Save & Quit waits for a committed checkpoint, and failed saves keep the session available for recovery/export.
+
+Home remains the only ordinary playable destination at this checkpoint. Developer-only synthetic locations test ownership and persistence; they are not finished expansion worlds. Multiplayer protocol4 and agent protocol2 require matching location admission scopes and are incompatible with older clients. Full migration, mobile, quota-recovery, retention and integrated release verification are still in progress. See [universe-save development notes](docs/UNIVERSE_SAVES.md); this is a local development checkpoint, not a published release.
+
 ## Scope snapshot
 
 These figures are generated or counted from the v1.12.0 release source, not roadmap promises.

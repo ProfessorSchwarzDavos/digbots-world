@@ -28,6 +28,8 @@ import {
   type AgentVoiceChunk,
 } from "./agent-platform";
 import { TYPESCRIPT_MULTIPLAYER_PROTOCOL } from "./edition";
+import { locationStamp, sameLocationStamp, type LocationStamp } from "./location-address";
+import { canonicalJson } from "./universe-json";
 
 /**
  * Browser-only, host-authoritative WebRTC multiplayer transport for Blockwild.
@@ -43,11 +45,11 @@ import { TYPESCRIPT_MULTIPLAYER_PROTOCOL } from "./edition";
  * events, validates actions as host, and publishes authoritative snapshots.
  */
 
-export const MULTIPLAYER_PROTOCOL_VERSION = 3 as const;
+export const MULTIPLAYER_PROTOCOL_VERSION = 4 as const;
 export const MULTIPLAYER_PROTOCOL_NAME = TYPESCRIPT_MULTIPLAYER_PROTOCOL;
-export const RELIABLE_CHANNEL_LABEL = "blockwild.gameplay.v3" as const;
-export const MOVEMENT_CHANNEL_LABEL = "blockwild.movement.v3" as const;
-export const VOICE_CHANNEL_LABEL = "blockwild.voice.v1" as const;
+export const RELIABLE_CHANNEL_LABEL = "blockwild.gameplay.v4" as const;
+export const MOVEMENT_CHANNEL_LABEL = "blockwild.movement.v4" as const;
+export const VOICE_CHANNEL_LABEL = "blockwild.voice.v2" as const;
 
 export const MAX_RELIABLE_MESSAGE_BYTES = 256 * 1024;
 export const MAX_MOVEMENT_MESSAGE_BYTES = 64 * 1024;
@@ -612,6 +614,7 @@ export type MultiplayerMessageType = keyof MultiplayerPayloadMap;
 
 export type MultiplayerEnvelope<K extends MultiplayerMessageType = MultiplayerMessageType> = {
   version: typeof MULTIPLAYER_PROTOCOL_VERSION;
+  scope: LocationStamp;
   sessionId: string;
   type: K;
   sequence: number;
@@ -685,6 +688,8 @@ export type PeerConnectionFactory = (configuration: RTCConfiguration) => PeerCon
 
 export type MultiplayerOptions = {
   identity: PeerIdentity;
+  /** Host admission checkpoint; guests adopt the validated offer's scope. */
+  locationScope?: LocationStamp;
   rtcConfiguration?: RTCConfiguration;
   peerConnectionFactory?: PeerConnectionFactory;
   now?: () => number;
@@ -701,6 +706,7 @@ export type MultiplayerOptions = {
 
 type OfferSignal = {
   version: typeof MULTIPLAYER_PROTOCOL_VERSION;
+  scope: LocationStamp;
   protocol: typeof MULTIPLAYER_PROTOCOL_NAME;
   kind: "offer";
   sessionId: string;
@@ -711,6 +717,7 @@ type OfferSignal = {
 
 type AnswerSignal = {
   version: typeof MULTIPLAYER_PROTOCOL_VERSION;
+  scope: LocationStamp;
   protocol: typeof MULTIPLAYER_PROTOCOL_NAME;
   kind: "answer";
   sessionId: string;
@@ -1570,6 +1577,7 @@ export function validatePayload<K extends MultiplayerMessageType>(type: K, value
 export function validateEnvelope(value: unknown): value is MultiplayerEnvelope {
   if (!isRecord(value)
     || value.version !== MULTIPLAYER_PROTOCOL_VERSION
+    || !validateLocationScope(value.scope)
     || !isId(value.sessionId)
     || !MESSAGE_TYPES.has(value.type as MultiplayerMessageType)
     || !isInteger(value.sequence, 0, Number.MAX_SAFE_INTEGER)
@@ -1577,6 +1585,10 @@ export function validateEnvelope(value: unknown): value is MultiplayerEnvelope {
     || !isId(value.from)) return false;
   const type = value.type as MultiplayerMessageType;
   return validatePayload(type, value.payload);
+}
+
+function validateLocationScope(value: unknown): value is LocationStamp {
+  try { locationStamp(value); return true; } catch { return false; }
 }
 
 function utf8ByteLength(text: string) {
@@ -1636,6 +1648,7 @@ export function validateManualSignal(value: unknown): value is ManualSignal {
   if (!isRecord(value)
     || value.version !== MULTIPLAYER_PROTOCOL_VERSION
     || value.protocol !== MULTIPLAYER_PROTOCOL_NAME
+    || !validateLocationScope(value.scope)
     || (value.kind !== "offer" && value.kind !== "answer")
     || !isId(value.sessionId)
     || !isId(value.token)
@@ -1753,6 +1766,10 @@ export class MultiplayerSession {
   role: MultiplayerRole | null = null;
   sessionId: string | null = null;
   state: MultiplayerSessionState = "idle";
+  // Immutable for a session. Revision is its admission checkpoint, not the
+  // changing autosave counter; action-specific live revisions remain required.
+  private scope: LocationStamp | null;
+  get locationScope(): LocationStamp | null { return this.scope; }
 
   private readonly peerConnectionFactory: PeerConnectionFactory;
   private readonly now: () => number;
@@ -1778,6 +1795,7 @@ export class MultiplayerSession {
     expiresAt: number;
     envelopes: Array<{ type: MultiplayerMessageType; payload: MultiplayerPayloadMap[MultiplayerMessageType] }>;
   }>();
+  private readonly requestIntents = new Map<string, { intent: string; expiresAt: number }>();
   private disposed = false;
 
   constructor(options: MultiplayerOptions) {
@@ -1787,6 +1805,7 @@ export class MultiplayerSession {
       if (!support.supported) throw new MultiplayerProtocolError(support.reasons.join(" "));
     }
     this.identity = copyIdentity(options.identity);
+    this.scope = options.locationScope ? locationStamp(options.locationScope) : null;
     this.peerConnectionFactory = options.peerConnectionFactory ?? defaultPeerConnectionFactory;
     this.rtcConfiguration = options.rtcConfiguration ?? {
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
@@ -2013,6 +2032,7 @@ export class MultiplayerSession {
 
   async createHostInvite() {
     this.ensureOpen();
+    if (!this.scope) throw new MultiplayerProtocolError("A host must own a validated location checkpoint");
     if (this.role === "guest") throw new MultiplayerProtocolError("A guest session cannot create host invites");
     if (!this.role) {
       this.role = "host";
@@ -2033,6 +2053,7 @@ export class MultiplayerSession {
       if (this.disposed || peer.closed) throw new MultiplayerOperationCancelledError("Host invite setup was cancelled because the session changed");
       const signal: OfferSignal = {
         version: MULTIPLAYER_PROTOCOL_VERSION,
+        scope: this.scope,
         protocol: MULTIPLAYER_PROTOCOL_NAME,
         kind: "offer",
         sessionId: this.sessionId!,
@@ -2058,6 +2079,9 @@ export class MultiplayerSession {
     const signal = decodeInviteCode(inviteCode);
     if (signal.kind !== "offer") throw new MultiplayerProtocolError("Expected a host offer code");
     if (signal.identity.id === this.identity.id) throw new MultiplayerProtocolError("Cannot join your own multiplayer invite");
+    // Joining needs no local world. It adopts this host's validated identity,
+    // never the preview or a previously opened single-player location.
+    this.scope = locationStamp(signal.scope);
     this.role = "guest";
     this.sessionId = signal.sessionId;
     this.setState("joining");
@@ -2078,6 +2102,7 @@ export class MultiplayerSession {
       if (this.disposed || peer.closed) throw new MultiplayerOperationCancelledError("Guest answer setup was cancelled because the session changed");
       const response: AnswerSignal = {
         version: MULTIPLAYER_PROTOCOL_VERSION,
+        scope: this.scope,
         protocol: MULTIPLAYER_PROTOCOL_NAME,
         kind: "answer",
         sessionId: signal.sessionId,
@@ -2105,6 +2130,7 @@ export class MultiplayerSession {
     const signal = decodeInviteCode(answerCode);
     if (signal.kind !== "answer") throw new MultiplayerProtocolError("Expected a guest answer code");
     if (signal.sessionId !== this.sessionId) throw new MultiplayerProtocolError("Answer belongs to a different session");
+    if (!this.scope || !sameLocationStamp(signal.scope, this.scope)) throw new MultiplayerProtocolError("Answer belongs to a different location checkpoint");
     const peer = this.peers.get(signal.token);
     if (!peer || peer.closed || peer.identity) throw new MultiplayerProtocolError("Answer token is unknown or already used");
     if (signal.identity.id === this.identity.id) throw new MultiplayerProtocolError("Host and guest identities must be different");
@@ -2148,9 +2174,10 @@ export class MultiplayerSession {
   }
 
   private makeEnvelope<K extends MultiplayerMessageType>(type: K, payload: MultiplayerPayloadMap[K], kind: MultiplayerChannelKind): MultiplayerEnvelope<K> {
-    if (!this.sessionId) throw new MultiplayerProtocolError("Multiplayer session has no session ID");
+    if (!this.sessionId || !this.scope) throw new MultiplayerProtocolError("Multiplayer session has no location identity");
     const envelope: MultiplayerEnvelope<K> = {
       version: MULTIPLAYER_PROTOCOL_VERSION,
+      scope: this.scope,
       sessionId: this.sessionId,
       type,
       sequence: this.nextSequence(kind),
@@ -2207,6 +2234,7 @@ export class MultiplayerSession {
   }
 
   private pruneResponseCache(at = this.now()) {
+    for (const [key, entry] of this.requestIntents) if (entry.expiresAt <= at) this.requestIntents.delete(key);
     for (const [key, entry] of this.responseCache) if (entry.expiresAt <= at) this.responseCache.delete(key);
     while (this.responseCache.size > 1_024) {
       const oldest = this.responseCache.keys().next().value as string | undefined;
@@ -2215,12 +2243,16 @@ export class MultiplayerSession {
     }
   }
 
+  private requestKey(peerId: string, requestId: string) {
+    return canonicalJson([this.scope, peerId, requestId]);
+  }
+
   private cacheHostResponse(peer: PeerRecord, type: MultiplayerMessageType, payload: MultiplayerPayloadMap[MultiplayerMessageType]) {
     if (this.role !== "host" || !peer.identity || !isRecord(payload) || !("requestId" in payload) || !("status" in payload)) return;
     const requestId = typeof payload.requestId === "string" ? payload.requestId : null;
     if (!requestId || (payload.status !== "accepted" && payload.status !== "rejected")) return;
     this.pruneResponseCache();
-    const key = `${peer.identity.id}|${requestId}`;
+    const key = this.requestKey(peer.identity.id, requestId);
     const existing = this.responseCache.get(key);
     const envelopes = existing?.envelopes.filter((entry) => entry.type !== type) ?? [];
     envelopes.push({ type, payload: structuredClone(payload) });
@@ -2238,7 +2270,7 @@ export class MultiplayerSession {
   private replayCachedResponse(peer: PeerRecord, requestId: string) {
     if (!peer.identity) return false;
     this.pruneResponseCache();
-    const cached = this.responseCache.get(`${peer.identity.id}|${requestId}`);
+    const cached = this.responseCache.get(this.requestKey(peer.identity.id, requestId));
     if (!cached || !peer.reliable || peer.reliable.readyState !== "open") return false;
     let replayed = false;
     for (const response of cached.envelopes) {
@@ -2377,6 +2409,10 @@ export class MultiplayerSession {
       this.protocolStrike(peer, "Message identity or session mismatch");
       return;
     }
+    if (!this.scope || !sameLocationStamp(envelope.scope, this.scope)) {
+      this.protocolStrike(peer, "Message location, epoch or admission revision mismatch");
+      return;
+    }
     if (!this.incomingTypeAllowed(envelope.type)) {
       this.protocolStrike(peer, `Remote role is not allowed to send ${envelope.type}`);
       return;
@@ -2422,8 +2458,20 @@ export class MultiplayerSession {
     }
     if (this.role === "host" && isRecord(envelope.payload) && "requestId" in envelope.payload
       && typeof envelope.payload.requestId === "string"
-      && (!("status" in envelope.payload) || envelope.payload.status === undefined || envelope.payload.status === "request")
-      && this.replayCachedResponse(peer, envelope.payload.requestId)) return;
+      && (!("status" in envelope.payload) || envelope.payload.status === undefined || envelope.payload.status === "request")) {
+      this.pruneResponseCache();
+      const key = this.requestKey(envelope.from, envelope.payload.requestId);
+      const intent = canonicalJson([envelope.type, envelope.payload]);
+      const existing = this.requestIntents.get(key);
+      if (existing) {
+        if (existing.intent !== intent) this.protocolStrike(peer, "Request ID reused with a different intent");
+        else this.replayCachedResponse(peer, envelope.payload.requestId);
+        return; // Also suppress a retry while the original handler is running.
+      }
+      // Refuse saturation rather than evicting a live exactly-once guard.
+      if (this.requestIntents.size >= 256) { this.protocolStrike(peer, "Request replay window is full"); return; }
+      this.requestIntents.set(key, { intent, expiresAt: this.now() + 20_000 });
+    }
     this.emit({ type: "message", peer: this.peerInfo(peer), channel: kind, envelope });
   }
 
@@ -2515,6 +2563,8 @@ export class MultiplayerSession {
     this.artificialSendTimers.clear();
     this.nextReliableArtificialSendAt.clear();
     this.nextVoiceArtificialSendAt.clear();
+    this.responseCache.clear();
+    this.requestIntents.clear();
     this.listeners.clear();
   }
 }

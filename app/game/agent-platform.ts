@@ -7,8 +7,11 @@
  * one fail-closed contract without creating a second simulation.
  */
 
+import { locationStamp, sameLocationStamp, type LocationStamp } from "./location-address";
+import { canonicalJson } from "./universe-json";
+
 export const AGENT_PLATFORM_SCHEMA_VERSION = 1 as const;
-export const AGENT_PROTOCOL_VERSION = 1 as const;
+export const AGENT_PROTOCOL_VERSION = 2 as const;
 export const AGENT_DEFAULT_RENDER_DISTANCE = 4;
 export const AGENT_DEFAULT_SIMULATION_DISTANCE = 3;
 export const AGENT_DEFAULT_BASIC_RENDER_DISTANCE = 4;
@@ -79,6 +82,7 @@ export type AgentBlockPlacement = AgentBlockCell & Readonly<{
 
 export type AgentCommandEnvelope = Readonly<{
   schema: typeof AGENT_PLATFORM_SCHEMA_VERSION;
+  scope: LocationStamp;
   commandId: string;
   agentId: string;
   kind: AgentCommandKind;
@@ -106,6 +110,7 @@ export type AgentCommandProgress = Readonly<{
 
 export type AgentCommandResult = Readonly<{
   schema: typeof AGENT_PLATFORM_SCHEMA_VERSION;
+  scope: LocationStamp;
   commandId: string;
   agentId: string;
   kind: AgentCommandKind;
@@ -182,6 +187,7 @@ export type AgentNearbyEntity = Readonly<{
 
 export type AgentObservationV1 = Readonly<{
   schema: typeof AGENT_PLATFORM_SCHEMA_VERSION;
+  scope: LocationStamp;
   observationSequence: number;
   observedAt: number;
   expiresAt: number;
@@ -434,6 +440,7 @@ export function normalizeAgentCapabilities(value: unknown, fallback: readonly Ag
 export function validateAgentCommand(value: unknown, now = Date.now()): value is AgentCommandEnvelope {
   if (!isRecord(value) || jsonBytes(value) > AGENT_MAX_COMMAND_BYTES) return false;
   if (value.schema !== AGENT_PLATFORM_SCHEMA_VERSION
+    || !validateAgentScope(value.scope)
     || !isId(value.commandId)
     || !isId(value.agentId)
     || typeof value.kind !== "string" || !COMMAND_KIND_SET.has(value.kind)
@@ -448,9 +455,14 @@ export function validateAgentCommand(value: unknown, now = Date.now()): value is
   return validateCommandArguments(value.kind as AgentCommandKind, value.arguments);
 }
 
+function validateAgentScope(value: unknown): value is LocationStamp {
+  try { locationStamp(value); return true; } catch { return false; }
+}
+
 export function validateAgentResult(value: unknown): value is AgentCommandResult {
   if (!isRecord(value) || jsonBytes(value) > AGENT_MAX_RESULT_BYTES) return false;
   return value.schema === AGENT_PLATFORM_SCHEMA_VERSION
+    && validateAgentScope(value.scope)
     && isId(value.commandId)
     && isId(value.agentId)
     && typeof value.kind === "string" && COMMAND_KIND_SET.has(value.kind)
@@ -507,12 +519,14 @@ export function validateAgentVoiceChunk(value: unknown): value is AgentVoiceChun
 export function validateAgentObservation(value: unknown): value is AgentObservationV1 {
   if (!isRecord(value) || jsonBytes(value) > AGENT_MAX_OBSERVATION_BYTES) return false;
   return value.schema === AGENT_PLATFORM_SCHEMA_VERSION
+    && validateAgentScope(value.scope)
     && isInteger(value.observationSequence)
     && isFiniteNumber(value.observedAt, 0, Number.MAX_SAFE_INTEGER)
     && isFiniteNumber(value.expiresAt, 0, Number.MAX_SAFE_INTEGER)
     && isInteger(value.worldRevision)
     && isShortString(value.coordinateSystem, 240)
-    && isRecord(value.session) && isRecord(value.self) && isRecord(value.world)
+    && isRecord(value.session) && value.session.agentProtocolVersion === AGENT_PROTOCOL_VERSION
+    && isRecord(value.self) && isRecord(value.world)
     && isRecord(value.chat) && isRecord(value.performance)
     && Array.isArray(value.tasks) && value.tasks.length <= AGENT_MAX_TASKS
     && Array.isArray(value.waypoints) && value.waypoints.length <= AGENT_MAX_WAYPOINTS;
@@ -533,6 +547,7 @@ export function createAgentResult(
 ): AgentCommandResult {
   return Object.freeze({
     schema: AGENT_PLATFORM_SCHEMA_VERSION,
+    scope: locationStamp(command.scope),
     commandId: command.commandId,
     agentId: command.agentId,
     kind: command.kind,
@@ -565,6 +580,7 @@ function normalizeHexColor(value: unknown, agentId: string) {
 export class AgentAuthority {
   private readonly sessions = new Map<string, AgentSessionRecord>();
   private readonly terminalCache = new Map<string, { result: AgentCommandResult; expiresAt: number }>();
+  private readonly commandIntents = new Map<string, { intent: string; expiresAt: number }>();
   private readonly leases = new Map<string, { commandId: string; agentId: string; expiresAt: number }>();
 
   constructor(readonly maxAdmitted = AGENT_MAX_ADMITTED) {}
@@ -652,28 +668,43 @@ export class AgentAuthority {
     return next;
   }
 
-  authorize(command: AgentCommandEnvelope, connectionId: string, worldRevision: number, now = Date.now()): AgentCommandResult | null {
+  authorize(command: AgentCommandEnvelope, connectionId: string, worldRevision: number, scope: LocationStamp, now = Date.now()): AgentCommandResult | null {
     this.prune(now);
-    const replay = this.terminalCache.get(command.commandId)?.result;
-    if (replay) return replay;
+    if (!sameLocationStamp(command.scope, scope)) return createAgentResult(command, "blocked", worldRevision, "location_scope_conflict", "The command belongs to another location checkpoint. Reconnect and observe before retrying.", {}, now);
     const session = this.sessions.get(command.agentId);
     if (!session || session.connectionId !== connectionId) return createAgentResult(command, "blocked", worldRevision, "agent_identity_unverified", "The command is not bound to this approved connection.", {}, now);
     if (session.status === "pending") return createAgentResult(command, "blocked", worldRevision, "host_approval_required", "The host has not approved this drone yet.", {}, now);
     if (session.status === "paused" && !["session.status", "session.resume", "session.stop", "capabilities.list"].includes(command.kind)) return createAgentResult(command, "blocked", worldRevision, "agent_paused", "The host or runner paused this drone.", {}, now);
     if (session.status === "revoked" || session.status === "disconnected") return createAgentResult(command, "blocked", worldRevision, "agent_revoked", "This drone no longer has an active session grant.", {}, now);
     if (command.expiresAt < now) return createAgentResult(command, "blocked", worldRevision, "command_expired", "The command expired before the host could validate it.", {}, now);
+    const key = canonicalJson([command.agentId, command.commandId]);
+    const intent = canonicalJson([command.scope, command.kind, command.arguments, command.expectedWorldRevision]);
+    const previous = this.commandIntents.get(key);
+    if (previous && previous.intent !== intent) return createAgentResult(command, "blocked", worldRevision, "command_id_conflict", "This command ID already names a different intent.", {}, now);
+    const replay = this.terminalCache.get(key)?.result;
+    if (previous && replay) return replay;
+    if (previous) return createAgentResult(command, "running", worldRevision, "command_in_progress", "The original command is still active.", {}, now);
     if (command.expectedWorldRevision !== worldRevision && !["observe", "session.status", "session.pause", "session.resume", "session.stop", "capabilities.list", "chat_read", "stop"].includes(command.kind)) {
       return createAgentResult(command, "blocked", worldRevision, "world_revision_conflict", `World revision ${worldRevision} no longer matches expected revision ${command.expectedWorldRevision}. Re-observe before retrying.`, {}, now);
     }
     const required = commandCapability(command.kind);
     if (required && !session.granted.includes(required)) return createAgentResult(command, "blocked", worldRevision, "capability_denied", `The host has not granted ${required}.`, { data: { requiredCapability: required } }, now);
+    if (this.commandIntents.size >= 1024) return createAgentResult(command, "blocked", worldRevision, "command_window_full", "The bounded command retry window is full. Wait before retrying.", {}, now);
+    this.commandIntents.set(key, { intent, expiresAt: Math.max(command.expiresAt, now + AGENT_TERMINAL_CACHE_MS) });
     return null;
   }
 
   setCurrentResult(result: AgentCommandResult, now = Date.now()) {
     const current = this.sessions.get(result.agentId);
     if (current) this.sessions.set(result.agentId, Object.freeze({ ...current, currentCommand: result, updatedAt: now }));
-    if (result.terminal) this.terminalCache.set(result.commandId, { result, expiresAt: now + AGENT_TERMINAL_CACHE_MS });
+    const key = canonicalJson([result.agentId, result.commandId]);
+    // Conflicting/unauthorized retries must not poison the original receipt.
+    if (result.terminal && this.commandIntents.has(key)
+      && !["command_id_conflict", "location_scope_conflict", "agent_identity_unverified", "host_approval_required", "agent_paused", "agent_revoked", "command_expired"].includes(result.code)) {
+      this.terminalCache.set(key, { result, expiresAt: now + AGENT_TERMINAL_CACHE_MS });
+      const intent = this.commandIntents.get(key)!;
+      this.commandIntents.set(key, { ...intent, expiresAt: now + AGENT_TERMINAL_CACHE_MS });
+    }
   }
 
   acquireLease(keys: readonly string[], commandId: string, agentId: string, expiresAt: number, now = Date.now()) {
@@ -700,6 +731,7 @@ export class AgentAuthority {
 
   prune(now = Date.now()) {
     for (const [id, cached] of this.terminalCache) if (cached.expiresAt <= now) this.terminalCache.delete(id);
+    for (const [id, cached] of this.commandIntents) if (cached.expiresAt <= now) this.commandIntents.delete(id);
     for (const [key, lease] of this.leases) if (lease.expiresAt <= now) this.leases.delete(key);
   }
 }

@@ -373,7 +373,7 @@ export function migrateLegacyWorldSave(value: unknown): WorldSave | null {
   }
 }
 
-function normalizeMetadata(value: unknown, fallback: { id: string; save: WorldSave; now: number }): WorldMetadata | null {
+export function normalizeWorldMetadata(value: unknown, fallback: { id: string; save: WorldSave; now: number }): WorldMetadata | null {
   const input = isRecord(value) ? value : {};
   const mode = normalizeMode(input.mode) ?? fallback.save.mode;
   const seed = normalizeSeed(input.seed) || fallback.save.seed;
@@ -725,7 +725,7 @@ export class WorldStorage {
     const sourceSave = migrateLegacyWorldSave(value.world.save);
     if (!sourceSave) return fail("invalid", "The exported world save is corrupt or incomplete.");
     const now = this.now();
-    const sourceMetadata = normalizeMetadata(value.world.metadata, { id: "world", save: sourceSave, now });
+    const sourceMetadata = normalizeWorldMetadata(value.world.metadata, { id: "world", save: sourceSave, now });
     if (!sourceMetadata) return fail("invalid", "The exported world metadata is corrupt or incomplete.");
     const id = this.uniqueId(sourceMetadata.id);
     // Imports are distinct world instances. Private runner notebooks must be

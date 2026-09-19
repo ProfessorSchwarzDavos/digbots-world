@@ -77,7 +77,7 @@ export function createTcgWorldState(authorityId: string): TcgWorldState {
   return Object.freeze({
     schema: 1,
     revision: 0,
-    authorityId: boundedString(authorityId, "world:cardforge"),
+    authorityId: boundedString(authorityId, "world:cardforge", 512),
     catalogRevision: TCG_CATALOG_REVISION,
     players: Object.freeze({}),
     packBatches: Object.freeze({}),
@@ -570,7 +570,7 @@ export function normalizeTcgWorldState(value: unknown, authorityId: string, cata
   return Object.freeze({
     ...createTcgWorldState(authorityId),
     revision: boundedInteger(record.revision, 0, Number.MAX_SAFE_INTEGER),
-    authorityId: boundedString(authorityId, "world:cardforge"),
+    authorityId: boundedString(authorityId, "world:cardforge", 512),
     catalogRevision: catalog.revision,
     players: Object.freeze(players),
     packBatches: Object.freeze(packBatches),

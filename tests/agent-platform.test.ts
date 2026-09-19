@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { homeLocation, locationId, universeId } from "../app/game/location-address";
+const TEST_SCOPE = Object.freeze({ locationId: locationId(homeLocation(universeId("agent-test"))), epoch: 3, revision: 7 });
 import { describe, test } from "node:test";
 import {
   AGENT_DEFAULT_RENDER_DISTANCE,
@@ -29,6 +31,7 @@ function command(overrides: Partial<AgentCommandEnvelope> = {}): AgentCommandEnv
   const issuedAt = Date.now();
   return {
     schema: AGENT_PLATFORM_SCHEMA_VERSION,
+    scope: TEST_SCOPE,
     commandId: "cmd_test_001",
     agentId: "agent_test",
     kind: "observe",
@@ -122,16 +125,16 @@ describe("agent platform contracts", () => {
     const authority = new AgentAuthority(4);
     const registered = authority.register({ agentId: "agent_test", connectionId: "peer_1", name: "Mica", requested: ["observe.world", "build"] });
     assert.equal(registered?.status, "pending");
-    assert.equal(authority.authorize(command(), "peer_1", 4)?.code, "host_approval_required");
+    assert.equal(authority.authorize(command(), "peer_1", 4, TEST_SCOPE)?.code, "host_approval_required");
     authority.approve("agent_test", ["observe.world"]);
-    assert.equal(authority.authorize(command(), "wrong_peer", 4)?.code, "agent_identity_unverified");
-    assert.equal(authority.authorize(command({ kind: "build_plan", arguments: { placements: [{ x: 1, y: 2, z: 3, block: 4 }] } }), "peer_1", 4)?.code, "capability_denied");
-    assert.equal(authority.authorize(command({ kind: "move_to", arguments: { target: { x: 1, y: 2, z: 3 } } }), "peer_1", 4)?.code, "capability_denied");
-    assert.equal(authority.authorize(command({ expectedWorldRevision: 3 }), "peer_1", 4), null, "read-only observe tolerates a stale expected revision");
+    assert.equal(authority.authorize(command(), "wrong_peer", 4, TEST_SCOPE)?.code, "agent_identity_unverified");
+    assert.equal(authority.authorize(command({ kind: "build_plan", arguments: { placements: [{ x: 1, y: 2, z: 3, block: 4 }] } }), "peer_1", 4, TEST_SCOPE)?.code, "capability_denied");
+    assert.equal(authority.authorize(command({ kind: "move_to", arguments: { target: { x: 1, y: 2, z: 3 } } }), "peer_1", 4, TEST_SCOPE)?.code, "capability_denied");
+    assert.equal(authority.authorize(command({ expectedWorldRevision: 3 }), "peer_1", 4, TEST_SCOPE), null, "read-only observe tolerates a stale expected revision");
     authority.setCapability("agent_test", "build", true);
-    assert.equal(authority.authorize(command({ kind: "build_plan", expectedWorldRevision: 3, arguments: { placements: [{ x: 1, y: 2, z: 3, block: 4 }] } }), "peer_1", 4)?.code, "world_revision_conflict");
+    assert.equal(authority.authorize(command({ commandId: "cmd_build_stale", kind: "build_plan", expectedWorldRevision: 3, arguments: { placements: [{ x: 1, y: 2, z: 3, block: 4 }] } }), "peer_1", 4, TEST_SCOPE)?.code, "world_revision_conflict");
     authority.pause("agent_test");
-    assert.equal(authority.authorize(command(), "peer_1", 4)?.code, "agent_paused");
+    assert.equal(authority.authorize(command(), "peer_1", 4, TEST_SCOPE)?.code, "agent_paused");
   });
 
   test("terminal command replay and leases are exactly-once and conflict safe", () => {
@@ -139,9 +142,10 @@ describe("agent platform contracts", () => {
     authority.register({ agentId: "agent_test", connectionId: "peer_1", name: "Mica" });
     authority.approve("agent_test");
     const source = command();
+    assert.equal(authority.authorize(source, "peer_1", 4, TEST_SCOPE), null);
     const result = createAgentResult(source, "completed", 4, "done", "Done");
     authority.setCurrentResult(result);
-    assert.deepEqual(authority.authorize(source, "peer_1", 4), result);
+    assert.deepEqual(authority.authorize(source, "peer_1", 4, TEST_SCOPE), result);
     assert.equal(authority.acquireLease(["block:1,2,3"], source.commandId, source.agentId, Date.now() + 10_000).ok, true);
     assert.deepEqual(authority.acquireLease(["block:1,2,3"], "cmd_other", "agent_other", Date.now() + 10_000), { ok: false, conflict: "block:1,2,3" });
     authority.releaseCommandLeases(source.commandId);
@@ -152,6 +156,25 @@ describe("agent platform contracts", () => {
     const authority = new AgentAuthority(4);
     for (let index = 0; index < 4; index += 1) assert.ok(authority.register({ agentId: `agent_${index}`, connectionId: `peer_${index}`, name: `Drone ${index}` }));
     assert.equal(authority.register({ agentId: "agent_4", connectionId: "peer_4", name: "Fifth" }), null);
+  });
+
+  test("agent scope and intent checks precede replay and preserve original receipts", () => {
+    const authority = new AgentAuthority();
+    authority.register({ agentId: "agent_test", connectionId: "peer_1", name: "Mica" });
+    authority.approve("agent_test");
+    const source = command();
+    assert.equal(authority.authorize({ ...source, scope: { ...TEST_SCOPE, epoch: 2 } }, "peer_1", 4, TEST_SCOPE)?.code, "location_scope_conflict");
+    assert.equal(authority.authorize(source, "peer_1", 4, TEST_SCOPE), null);
+    assert.equal(authority.authorize(source, "peer_1", 4, TEST_SCOPE)?.code, "command_in_progress");
+    const receipt = createAgentResult(source, "completed", 4, "done", "Done");
+    authority.setCurrentResult(receipt);
+    const conflict = authority.authorize({ ...source, kind: "inspect_area", arguments: { radius: 4 } }, "peer_1", 4, TEST_SCOPE)!;
+    assert.equal(conflict.code, "command_id_conflict");
+    authority.setCurrentResult(conflict);
+    assert.deepEqual(authority.authorize(source, "peer_1", 4, TEST_SCOPE), receipt);
+    assert.equal(authority.authorize(source, "wrong_peer", 4, TEST_SCOPE)?.code, "agent_identity_unverified");
+    authority.revoke("agent_test");
+    assert.equal(authority.authorize(source, "peer_1", 4, TEST_SCOPE)?.code, "agent_revoked");
   });
 
   test("chat is sequence ordered, bounded, sanitized, and rate limited", () => {
@@ -196,8 +219,8 @@ describe("agent platform contracts", () => {
     const reconnected = authority.register({ agentId: "agent_test", connectionId: "peer_new", name: "Mica" });
     assert.equal(reconnected?.status, "pending");
     assert.deepEqual(reconnected?.currentCommand, result);
-    assert.equal(authority.authorize(command({ commandId: "cmd_fresh_002" }), "peer_old", 4)?.code, "agent_identity_unverified");
-    assert.equal(authority.authorize(command({ commandId: "cmd_fresh_003" }), "peer_new", 4)?.code, "host_approval_required");
+    assert.equal(authority.authorize(command({ commandId: "cmd_fresh_002" }), "peer_old", 4, TEST_SCOPE)?.code, "agent_identity_unverified");
+    assert.equal(authority.authorize(command({ commandId: "cmd_fresh_003" }), "peer_new", 4, TEST_SCOPE)?.code, "host_approval_required");
   });
 
   test("capability and voice payload validators reject spoofed or excessive data", () => {
@@ -268,13 +291,14 @@ describe("agent platform contracts", () => {
 
   test("observation validator accepts bounded structural observations", () => {
     const observation: AgentObservationV1 = {
+      scope: TEST_SCOPE,
       schema: 1,
       observationSequence: 1,
       observedAt: 10,
       expiresAt: 12,
       worldRevision: 4,
       coordinateSystem: "+x east, +y up, +z south",
-      session: { worldId: "world_1", worldFingerprint: "fingerprint_1", gameVersion: "1.9.1", generatorVersion: 17, multiplayerProtocolVersion: 3, agentProtocolVersion: 1, role: "guest", connected: true, capabilities: ["observe.world"] },
+      session: { worldId: "world_1", worldFingerprint: "fingerprint_1", gameVersion: "1.9.1", generatorVersion: 17, multiplayerProtocolVersion: 4, agentProtocolVersion: 2, role: "guest", connected: true, capabilities: ["observe.world"] },
       self: { agentId: "agent_test", name: "Mica", position: { x: 0, y: 2, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0, biome: "Wildwood", depth: "Surface", liquid: null, light: 15, inventory: { used: 0, capacity: 36 }, command: null },
       world: { day: 1, time: 0.3, weather: "clear", occupiedChunkReady: true, players: [], nearby: [], reachable: [] },
       chat: { newestSequence: 0, newChatCount: 0, messages: [] },

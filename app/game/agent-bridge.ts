@@ -51,6 +51,7 @@ export type AgentBrowserBridge = Readonly<{
   worldList(): unknown;
   worldCreate(input: Readonly<{ seed: string; name?: string; mode?: "survival" | "builder"; options?: Readonly<Record<string, unknown>>; fixture?: string }>): unknown;
   worldLoad(worldId: string): unknown;
+  worldTransition(destination: unknown): unknown;
   worldExport(worldId: string): unknown;
   worldImport(json: string): unknown;
   worldDelete(input: Readonly<{ worldId: string; confirm: boolean }>): unknown;
@@ -76,6 +77,7 @@ export type AgentBridgeAdapter = Readonly<{
   worldList?(): unknown;
   worldCreate?(input: Readonly<{ seed: string; name?: string; mode?: "survival" | "builder"; options?: Readonly<Record<string, unknown>>; fixture?: string }>): unknown;
   worldLoad?(worldId: string): unknown;
+  worldTransition?(destination: unknown): unknown;
   worldExport?(worldId: string): unknown;
   worldImport?(json: string): unknown;
   worldDelete?(worldId: string, confirm: boolean): unknown;
@@ -135,10 +137,12 @@ export function createAgentBrowserBridge(adapter: AgentBridgeAdapter): AgentBrow
       const observation = adapter.observe();
       if (!observation) return { accepted: false, commandId: input.commandId ?? "", error: "no_observation" };
       const now = Date.now();
+      if (observation.expiresAt < now) return { accepted: false, commandId: input.commandId ?? "", error: "stale_observation" };
       const commandId = input.commandId?.trim().slice(0, 128)
         || `cmd_${now.toString(36)}_${(++commandSequence).toString(36)}`;
       const envelope: AgentCommandEnvelope = {
         schema: AGENT_PLATFORM_SCHEMA_VERSION,
+        scope: observation.scope,
         commandId,
         agentId: observation.self.agentId,
         kind: input.kind,
@@ -178,6 +182,7 @@ export function createAgentBrowserBridge(adapter: AgentBridgeAdapter): AgentBrow
     worldList: () => adapter.worldList?.() ?? { ok: false, code: "test_admin_unavailable" },
     worldCreate: (input) => adapter.worldCreate?.(input) ?? { ok: false, code: "test_admin_unavailable" },
     worldLoad: (worldId) => adapter.worldLoad?.(String(worldId).slice(0, 128)) ?? { ok: false, code: "test_admin_unavailable" },
+    worldTransition: (destination) => adapter.worldTransition?.(destination) ?? { ok: false, code: "test_admin_unavailable" },
     worldExport: (worldId) => adapter.worldExport?.(String(worldId).slice(0, 128)) ?? { ok: false, code: "test_admin_unavailable" },
     worldImport: (json) => adapter.worldImport?.(String(json).slice(0, 16 * 1024 * 1024)) ?? { ok: false, code: "test_admin_unavailable" },
     worldDelete: (input) => adapter.worldDelete?.(String(input.worldId).slice(0, 128), input.confirm === true) ?? { ok: false, code: "test_admin_unavailable" },

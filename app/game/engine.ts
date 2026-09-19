@@ -713,6 +713,7 @@ import {
   AGENT_DEFAULT_RENDER_DISTANCE,
   AGENT_DEFAULT_SIMULATION_DISTANCE,
   AGENT_DEFAULT_BASIC_RENDER_DISTANCE,
+  AGENT_PROTOCOL_VERSION,
   createAgentTask,
   createAgentWaypoint,
   defaultAgentCapabilities,
@@ -747,13 +748,17 @@ import {
 import {
   DEFAULT_WORLD_OPTIONS,
   LEGACY_WORLD_KEY,
-  WorldStorage,
   generationOptionsFromWorldOptions,
   normalizeWorldOptions,
   requiredSleepers,
   type WorldMetadata,
   type WorldOptions,
 } from "./world-storage";
+import { UniverseWorldStorage as WorldStorage } from "./universe-world-storage";
+import { homeLocation, locationAddress, locationId, parseLocationId, sameLocationStamp, universeId } from "./location-address";
+import { splitUniverseSave, composeUniverseSave } from "./universe-save";
+import { validateAgentCustody, type AgentCustodySave } from "./agent-custody";
+import { resetLocationTransients, validateLocationPlayerState, type LocationPlayerState } from "./location-manager";
 import {
   TYPESCRIPT_AGENT_ID_KEY,
   TYPESCRIPT_MULTIPLAYER_PLAYER_ID_KEY,
@@ -1586,6 +1591,9 @@ export type WorldSave = {
   cardforge?: TcgWorldState;
   /** Public, host-editable companion task and waypoint ledger. */
   agentPlatform?: AgentWorldSaveV1;
+  /** Location-owned drone inventories and interrupted build reservations. */
+  agentCustody?: AgentCustodySave;
+  locationPlayerState?: LocationPlayerState;
   /** Stable per world instance; imports receive a new value before notebook relinking. */
   agentWorldFingerprint?: string;
   /** Only worlds created by an explicit local agent test-admin session carry this marker. */
@@ -1651,8 +1659,11 @@ export type EngineEvents = {
   onOverlayRequest: (kind: OverlayKind, key?: string) => void;
   onDeath: () => void;
   onSave: () => void;
+  onPersistence?: (state: Readonly<{ dirty: boolean; saving: boolean; error: string | null }>) => void;
   /** Lets the React shell recover cleanly when a host closes a guest session. */
   onMultiplayerEnded?: (reason: string) => void;
+  /** Fired only after the first admitted host snapshot has finished loading. */
+  onMultiplayerWorldReady?: (seed: string) => void;
   /** True while the primary WebGL context is unavailable. */
   onRendererState?: (lost: boolean) => void;
 };
@@ -2772,18 +2783,18 @@ export function resolveStructureLootItem(itemKey: string): ItemCode | null {
   return STRUCTURE_LOOT_ITEMS[itemKey] ?? null;
 }
 
-export function readSavedWorld(): WorldSave | null {
+export async function readSavedWorld(): Promise<WorldSave | null> {
   if (typeof window === "undefined") return null;
   try {
     const storage = new WorldStorage(window.localStorage);
     try {
+      await storage.ready;
       const id = storage.activeWorldId;
       if (id) {
-        const loaded = storage.loadWorld(id, false);
+        const loaded = await storage.loadWorld(id, false);
         if (loaded.ok) return { ...loaded.value.save, options: loaded.value.options };
       }
-      const raw = window.localStorage.getItem(SAVE_KEY);
-      return raw ? migrateSavedWorld(JSON.parse(raw)) : null;
+      return null;
     } finally {
       storage.dispose();
     }
@@ -3417,13 +3428,13 @@ export function waygridCreatureHudState(state: DigitalCreatureArchive): WaygridC
   };
 }
 
-export function clearSavedWorld() {
+export async function clearSavedWorld() {
   if (typeof window === "undefined") return;
   try {
     const storage = new WorldStorage(window.localStorage);
     try {
-      if (storage.activeWorldId) storage.deleteWorld(storage.activeWorldId);
-      window.localStorage.removeItem(SAVE_KEY);
+      await storage.ready;
+      if (storage.activeWorldId) await storage.deleteWorld(storage.activeWorldId);
     } finally {
       storage.dispose();
     }
@@ -3550,7 +3561,7 @@ function inventorySlotFromNetwork(slot: ItemStackSnapshot): InventorySlot | null
   return candidate ? { ...candidate, count: Math.min(candidate.count, inventorySlotStackLimit(candidate)) } : null;
 }
 
-export function normalizeMultiplayerPlayerProgression(value: Partial<PlayerProgressionSnapshot> | null | undefined, playerId: string, worldId = "multiplayer-world"): PlayerProgressionSnapshot {
+export function normalizeMultiplayerPlayerProgression(value: Partial<PlayerProgressionSnapshot> | null | undefined, playerId: string, worldId = "multiplayer-world", mapOwner?: string): PlayerProgressionSnapshot {
   const rawProgression = value;
   const bestiary = blankBestiary();
   if (rawProgression?.bestiary && typeof rawProgression.bestiary === "object") for (const kind of MOB_ORDER) {
@@ -3572,7 +3583,8 @@ export function normalizeMultiplayerPlayerProgression(value: Partial<PlayerProgr
     questBook: normalizeQuestBook(rawProgression?.questBook),
     sideQuestDefinitions: Array.isArray(rawProgression?.sideQuestDefinitions)
       ? structuredClone(rawProgression.sideQuestDefinitions.slice(0, 128)) : [],
-    mapKnowledge: normalizeMapKnowledge(rawProgression?.mapKnowledge, "multiplayer-world", playerId),
+    mapKnowledge: normalizeMapKnowledge(mapOwner && rawProgression?.mapKnowledge
+      ? { ...rawProgression.mapKnowledge, worldId: mapOwner } : rawProgression?.mapKnowledge, mapOwner ?? worldId, playerId),
     bestiary,
     plantBestiary: normalizePlantBestiaryState(rawProgression?.plantBestiary),
     blueprints: normalizeBlueprintState(rawProgression?.blueprints),
@@ -4034,7 +4046,13 @@ export class VoxelEngine {
   spawn = new THREE.Vector3(0, 48, 0);
   velocity = new THREE.Vector3();
   worldStorage = new WorldStorage();
+  persistenceDirty = false;
+  persistenceRevision = 0;
+  persistenceError: string | null = null;
+  private checkpointPromise: Promise<boolean> | null = null;
   activeWorldId: string | null = null;
+  private pendingWorldId: string | null = null;
+  private pendingWorldName: string | null = null;
   worldOptions: WorldOptions = normalizeWorldOptions();
   startingSettlementId: string | null = null;
   worldSessionStartedAt = Date.now();
@@ -4429,6 +4447,10 @@ export class VoxelEngine {
   private localChatSequence = 0;
   agentInventories = new Map<string, Array<InventorySlot | null>>();
   agentInventoryRevisions = new Map<string, number>();
+  agentReturningMaterials = new Map<string, InventorySlot[]>();
+  private locationTransitioning = false;
+  /** Additive legacy metadata is retained but never interpreted by gameplay. */
+  private saveExtensions: Record<string, unknown> = {};
   agentObservationSequences = new Map<string, number>();
   agentObservationTimer = 0;
   latestAgentObservation: AgentObservationV1 | null = null;
@@ -4607,6 +4629,7 @@ export class VoxelEngine {
     window.addEventListener("keyup", this.onKeyUp);
     window.addEventListener("blur", this.clearInput);
     window.addEventListener("pagehide", this.onPageHide);
+    window.addEventListener("beforeunload", this.onBeforeUnload);
     document.addEventListener("visibilitychange", this.onVisibilityChange);
     document.addEventListener("pointerlockchange", this.onPointerLockChange);
     document.addEventListener("fullscreenchange", this.onFullscreenChange);
@@ -4626,6 +4649,7 @@ export class VoxelEngine {
     window.removeEventListener("keyup", this.onKeyUp);
     window.removeEventListener("blur", this.clearInput);
     window.removeEventListener("pagehide", this.onPageHide);
+    window.removeEventListener("beforeunload", this.onBeforeUnload);
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
     document.removeEventListener("pointerlockchange", this.onPointerLockChange);
     document.removeEventListener("fullscreenchange", this.onFullscreenChange);
@@ -4919,7 +4943,23 @@ export class VoxelEngine {
     this.localPlayerModel.setOffhandRaised(false);
     this.resetLookFrameBudget();
   };
-  onPageHide = () => this.saveNow(false);
+  // Best effort only. The dirty-state warning and explicit Save & Quit are the
+  // durable path; a browser may terminate any asynchronous page-hide work.
+  onPageHide = () => { if (this.persistenceDirty) void this.saveNow(false); };
+  onBeforeUnload = (event: BeforeUnloadEvent) => {
+    if (!this.persistent || !this.persistenceDirty && !this.checkpointPromise && !this.persistenceError) return;
+    event.preventDefault(); event.returnValue = "";
+  };
+
+  private reportPersistence() {
+    this.events.onPersistence?.({ dirty: this.persistenceDirty, saving: this.checkpointPromise !== null, error: this.persistenceError });
+  }
+
+  private markPersistenceDirty() {
+    if (!this.persistent) return;
+    this.persistenceRevision += 1;
+    if (!this.persistenceDirty) { this.persistenceDirty = true; this.reportPersistence(); }
+  }
 
   onVisibilityChange = () => {
     if (document.hidden) {
@@ -5075,6 +5115,7 @@ export class VoxelEngine {
   }
 
   previewWorld(seed: string) {
+    this.resetLocationRuntime();
     this.persistent = false;
     this.running = false;
     this.paused = true;
@@ -5121,7 +5162,8 @@ export class VoxelEngine {
     this.activatedStructureMarkers.clear();
     this.liquidCells.clear();
     this.world.setRenderDistance(Math.min(this.settings.renderDistance, this.touchMode ? 4 : 6));
-    this.world.reset(seed, undefined, generationOptionsFromWorldOptions(DEFAULT_WORLD_OPTIONS));
+    this.world.reset(seed, undefined, generationOptionsFromWorldOptions(DEFAULT_WORLD_OPTIONS), undefined,
+      { locationId: locationId(homeLocation(universeId("preview"))), epoch: 1, revision: 0 });
     this.cardforgeState = createTcgWorldState(`preview:${this.world.seedText}`);
     this.cardforgeLastPackReveals.clear();
     this.cardforgeRemoteHud = null;
@@ -5134,14 +5176,82 @@ export class VoxelEngine {
     this.emitHud(true);
   }
 
-  createWorld(
+  private universeAuthorityId() { return `universe:${parseLocationId(this.world.locationScope.locationId).universeId}`; }
+  private locationAuthorityId() { return `location:${this.world.locationScope.locationId}`; }
+
+  /** Only called after the departing checkpoint has committed (or for a
+   * nonpersistent guest/preview). Persisted state is restored separately. */
+  private resetLocationRuntime() {
+    resetLocationTransients(this);
+    this.basicWorldRenderer.resetLocation();
+    this.clearInput();
+    this.hideChestModel(true);
+    this.removeAllRemotePlayers();
+    this.clearAgentWorkRuntime();
+    this.agentInventories.clear();
+    this.agentInventoryRevisions.clear();
+    this.agentReturningMaterials.clear();
+    this.agentVoiceAssembler.clear();
+    this.agentVoicePending = [];
+    this.latestAgentObservation = null;
+    this.latestAgentResult = null;
+    for (const collection of [
+      this.temporarySummons, this.capturePacification, this.captureOrbReleaseConfirm,
+      this.socialMotions, this.apiaryFlowerCache, this.persistentMachineLastStep,
+      this.legendaryResolutionConfirm, this.cardforgeLastPackReveals, this.mapSurfaceSurveyedThisSession,
+      this.agentObservationSequences, this.agentRuntimeTasks, this.localMutedAgentVoices, this.localAgentVoiceGains,
+      this.multiplayerFacilityRevisions, this.multiplayerFacilitySignatures, this.multiplayerPendingFacilityMutations,
+      this.multiplayerPeerActiveFacilities, this.multiplayerPeerFacilitySignatures,
+      this.multiplayerContainerRevisions, this.multiplayerContainerSignatures, this.multiplayerContainerAwaiting,
+      this.multiplayerOptimisticContainers, this.multiplayerPeerActiveContainers, this.multiplayerPeerContainerSignatures,
+      this.multiplayerPeerScopeEpochs, this.pendingReliableRequests, this.multiplayerCombatCooldowns,
+      this.pendingGuestDropRequests, this.appliedMultiplayerTombstones, this.pendingGuestCreatureInventoryRequests,
+      this.pendingGuestPlacementRequests, this.pendingNetworkMobDeaths, this.multiplayerProgressTransfers,
+      this.multiplayerBoatInputs, this.multiplayerPeerActiveMerchants, this.creatureTransferOffers, this.sleepVotes,
+    ]) collection.clear();
+    this.multiplayerProgressOutgoing = [];
+    this.multiplayerTombstones = [];
+    this.multiplayerFacilityPlayerBaseline = null;
+    this.lastNetworkMobSnapshotTick = this.lastNetworkDropSnapshotTick = -1;
+    this.lastNetworkMobSnapshotScope = this.lastNetworkDropSnapshotScope = null;
+    this.multiplayerProgressionSignature = this.multiplayerPlayerStateSignature = "";
+    this.multiplayerProgressionRevision = this.multiplayerPlayerStateRevision = 0;
+    this.multiplayerProgressionReceived = false;
+    for (const key of ["activeFurnaceKey", "activeWheatMillKey", "activeChestKey", "activeNetworkContainerId",
+      "activeApiaryKey", "activeMorphLoomKey", "activeOrbRackKey", "activeHealingStationKey", "activeWaygridItemKey",
+      "activeWaygridCreatureKey", "activeAquariumKey", "activeGolemForgeKey", "activeAlchemyKey", "activeDistilleryKey",
+      "activeSugarworksKey", "activeCartographyKey", "activeNetworkFacilityId", "activeSettlementId", "activeCampOrbId", "activeMerchantId"] as const) this[key] = null;
+    this.activeChestBlocks = [];
+    this.activeSentient = this.targetMob = null;
+    this.target = null; this.targetKey = ""; this.targetRemotePlayerId = null;
+    this.targetBoat = null; this.targetEggDrop = null;
+    this.fastTravelChannel = null;
+    this.velocity.set(0, 0, 0);
+    this.environmentLightCandidates = [];
+    this.environmentLightCandidateCache = [];
+    this.environmentLightSelection = [];
+    this.lightRefreshTimer = 0;
+    for (const light of this.placedLightPool) { light.visible = false; light.intensity = 0; light.userData = {}; }
+  }
+
+  async createWorld(
     seed: string,
     mode: GameMode,
     options: Partial<WorldOptions> = {},
     name = "New World",
     originSearchRadius = DEFAULT_SETTLEMENT_ORIGIN_SEARCH_RADIUS,
     agentTestWorld = false,
-  ) {
+  ): Promise<WorldMetadata | null> {
+    const wasRunning = this.running, wasPaused = this.paused;
+    this.running = false; this.paused = true;
+    if (this.persistent && !await this.saveNow(false)) { this.running = wasRunning; this.paused = wasPaused; return null; }
+    try { await this.worldStorage.releaseActive(); }
+    catch (error) { this.running = wasRunning; this.paused = wasPaused; this.events.onToast(String(error)); return null; }
+    this.disconnectMultiplayer();
+    this.resetLocationRuntime();
+    this.pendingWorldId = crypto.randomUUID();
+    this.pendingWorldName = name;
+    this.saveExtensions = {};
     this.persistent = true;
     this.running = true;
     this.paused = false;
@@ -5258,10 +5368,11 @@ export class VoxelEngine {
     this.waterSurfaceBreachSeconds = 0;
     this.waterSurfaceStrokeCooldownSeconds = 0;
     this.waterSurfaceBobActive = false;
-    this.world.reset(seed.trim() || this.randomSeed(), undefined, generationOptionsFromWorldOptions(this.worldOptions));
-    const authorityId = `world:${this.world.seedText}`;
+    this.world.reset(seed.trim() || this.randomSeed(), undefined, generationOptionsFromWorldOptions(this.worldOptions), undefined,
+      { locationId: locationId(homeLocation(universeId(this.pendingWorldId))), epoch: 1, revision: 0 });
+    const authorityId = this.universeAuthorityId();
     const playerId = this.localPlayerId();
-    this.mapKnowledge = createMapKnowledge(authorityId, playerId);
+    this.mapKnowledge = createMapKnowledge(this.locationAuthorityId(), playerId);
     this.mapSurfaceSurveyedThisSession.clear();
     this.factionRelations = createFactionRelations(authorityId);
     if (this.activeCharacterProfile) {
@@ -5305,17 +5416,36 @@ export class VoxelEngine {
     this.reconcileSystemQuests(true);
     if (this.questBook.active.some((quest) => quest.questId === "main-first-dawn")) this.questBook = pinQuest(this.questBook, "main-first-dawn");
     this.spawnProtection = 22;
-    const created = this.worldStorage.createWorld({ name, save: this.serialize(), options: this.worldOptions });
-    if (created.ok) {
-      this.activeWorldId = created.value.id;
-      this.worldStorage.setActiveWorld(created.value.id);
-      this.events.onSave();
-    } else {
-      this.events.onToast(created.error.message);
-      this.saveSoon();
-    }
+    this.markPersistenceDirty();
+    const creationRevision = this.persistenceRevision;
+    let created: WorldMetadata | null = null;
+    const commit = async () => {
+      try {
+        const result = await this.worldStorage.createWorld({ id: this.pendingWorldId!, name, save: this.serialize(), options: this.worldOptions });
+        if (result.ok) {
+          created = result.value;
+          this.activeWorldId = result.value.id;
+          this.pendingWorldId = null;
+          this.pendingWorldName = null;
+          if (this.worldStorage.currentStamp) this.world.locationScope = this.worldStorage.currentStamp;
+          this.worldStorage.setActiveWorld(result.value.id);
+          this.persistenceDirty = this.persistenceRevision !== creationRevision;
+          this.persistenceError = null;
+          this.events.onSave(); return true;
+        }
+        this.persistenceError = result.error.message;
+      } catch (error) { this.persistenceError = error instanceof Error ? error.message : "Creating the first checkpoint failed."; }
+      this.persistenceDirty = true;
+      this.events.onToast(this.persistenceError);
+      return false;
+    };
+    // Autosave/visibility events must await creation, never race a second
+    // create against the first committed universe while activeWorldId is null.
+    this.checkpointPromise = commit(); this.reportPersistence();
+    try { await this.checkpointPromise; }
+    finally { this.checkpointPromise = null; this.reportPersistence(); }
     this.emitHud(true);
-    return created.ok ? created.value : null;
+    return created;
   }
 
   previewWorldOrigin(seed: string, options: Partial<WorldOptions>, maxRegionRadius = 18) {
@@ -5688,7 +5818,7 @@ export class VoxelEngine {
               : ["#668d52", "#72955b", "#5d8249", "#789b61"] as const,
       });
     }
-    this.mapKnowledge = markChunksRendered(createMapKnowledge(`world:${this.world.seedText}`, playerId), discoveries);
+    this.mapKnowledge = markChunksRendered(createMapKnowledge(this.locationAuthorityId(), playerId), discoveries);
     this.mapKnowledge = discoverNaturalPoi(this.mapKnowledge, {
       id: "audit:forest-watch",
       name: "Forest Watch",
@@ -5760,7 +5890,7 @@ export class VoxelEngine {
         const kind = adventurePoiCandidateForChunk({ seed: this.world.seedText, chunkX, chunkZ, biome });
         if (!kind) continue;
         const y = column.height + 0.51;
-        this.mapKnowledge = createMapKnowledge(`world:${this.world.seedText}`, this.localPlayerId());
+        this.mapKnowledge = createMapKnowledge(this.locationAuthorityId(), this.localPlayerId());
         this.mapSurfaceSurveyedThisSession.clear();
         this.position.set(x, y, z);
         this.spawn.copy(this.position);
@@ -5795,6 +5925,20 @@ export class VoxelEngine {
   }
 
   loadWorld(save: WorldSave, options: Partial<WorldOptions> = save.options ?? {}, worldId: string | null = this.worldStorage.activeWorldId) {
+    const agentCustody = validateAgentCustody(save.agentCustody);
+    const locationPlayer = validateLocationPlayerState(save.locationPlayerState);
+    const extensions = splitUniverseSave(save).extensions;
+    this.resetLocationRuntime();
+    this.saveExtensions = { ...extensions };
+    for (const [id, record] of Object.entries(agentCustody.agents)) {
+      this.agentInventories.set(id, record.inventory.map(cloneSlot));
+      this.agentInventoryRevisions.set(id, record.revision);
+      this.agentReturningMaterials.set(id, record.returning.map((slot) => cloneSlot(slot)!));
+      this.deliverAgentReturningMaterials(id);
+    }
+    this.persistenceDirty = false;
+    this.persistenceError = null;
+    this.reportPersistence();
     this.captureSystemDiagnostics = createCaptureSystemDiagnostics();
     this.recordLegacyCaptureMigration(save);
     this.persistent = true;
@@ -5831,10 +5975,11 @@ export class VoxelEngine {
     this.waterSurfaceBreachSeconds = 0;
     this.waterSurfaceStrokeCooldownSeconds = 0;
     this.waterSurfaceBobActive = false;
-    this.world.reset(save.seed, save.edits, generationOptionsFromWorldOptions(this.worldOptions, save.generatorProfile ?? "world-below-v15"), save.blockFacings);
+    this.world.reset(save.seed, save.edits, generationOptionsFromWorldOptions(this.worldOptions, save.generatorProfile ?? "world-below-v15"), save.blockFacings, this.worldStorage.currentStamp ?? undefined);
     this.world.restoreSurfaceRoadGraph(save.surfaceRoadGraph);
     this.world.initializeAround(save.player.x, save.player.z);
     this.position.set(save.player.x, save.player.y, save.player.z);
+    this.lastPosition.copy(this.position);
     this.spawn.set(save.spawn?.x ?? 0, save.spawn?.y ?? this.world.surfaceAt(0, 0) + 0.51, save.spawn?.z ?? 0);
     this.yaw = Number(save.player.yaw) || 0;
     this.pitch = clamp(Number(save.player.pitch) || 0, -1.4, 1.4);
@@ -5850,13 +5995,13 @@ export class VoxelEngine {
       const savedProgress = save.bestiary?.[kind];
       this.bestiary[kind] = normalizeLivingBestiaryEntry(savedProgress);
     }
-    const authorityId = `world:${save.seed}`;
+    const authorityId = this.universeAuthorityId();
     const playerId = this.localPlayerId();
     this.cardforgeState = normalizeTcgWorldState(save.cardforge, authorityId);
     this.cardforgeLastPackReveals.clear();
     this.cardforgeState = ensureTcgPlayer(this.cardforgeState, playerId).state;
     this.cardforgeRemoteHud = null;
-    this.mapKnowledge = normalizeMapKnowledge(save.mapKnowledge, authorityId, playerId);
+    this.mapKnowledge = normalizeMapKnowledge(save.mapKnowledge ? { ...save.mapKnowledge, worldId: this.locationAuthorityId() } : undefined, this.locationAuthorityId(), playerId);
     this.mapSurfaceSurveyedThisSession.clear();
     this.questBook = normalizeQuestBook(save.questBook);
     this.sideQuestDefinitions = Array.isArray(save.sideQuestDefinitions) ? save.sideQuestDefinitions.slice(0, 128) : [];
@@ -5881,7 +6026,7 @@ export class VoxelEngine {
     this.multiplayerPlayerProgressions = new Map(Object.entries(save.multiplayerProgressions ?? {}).flatMap(([playerId, record]) => {
       if (!record || typeof record !== "object") return [];
       const revision = Math.max(0, Math.trunc(Number(record.revision) || 0));
-      return [[playerId, { revision, state: normalizeMultiplayerPlayerProgression(record.state, playerId) }] as const];
+      return [[playerId, { revision, state: normalizeMultiplayerPlayerProgression(record.state, playerId, this.universeAuthorityId(), this.locationAuthorityId()) }] as const];
     }));
     this.multiplayerProgressTransfers.clear();
     this.creatureTransferOffers.clear();
@@ -6014,6 +6159,23 @@ export class VoxelEngine {
     this.persistentMachineTimer = 0;
     for (const savedBoat of save.boats ?? []) this.restoreSailboat(savedBoat);
     for (const savedCreature of piehouseSave.creatures) this.restoreCreature(savedCreature);
+    // Session passengers are not durable occupants. Restore only this local
+    // player's binding, and only if its referenced entity still exists.
+    for (const boat of this.boats.values()) boat.save.passengers = [];
+    if (locationPlayer?.boatId && this.boats.has(locationPlayer.boatId)) {
+      this.mountedBoatId = locationPlayer.boatId;
+      this.boats.get(locationPlayer.boatId)!.save.passengers = [this.localPlayerId()];
+    } else if (locationPlayer?.creatureId !== null && locationPlayer?.creatureId !== undefined) {
+      const mount = this.mobs.find((mob) => mob.id === locationPlayer.creatureId);
+      const profile = mount ? MOUNT_PROFILES[mount.kind] : null;
+      if (mount && profile) {
+        const seat = Math.min(locationPlayer.creatureSeat ?? 0, profile.seats - 1);
+        const seats = Array.from({ length: seat + 1 }, () => ""); seats[seat] = this.localPlayerId();
+        this.creatureMountSeats.set(mount.id, seats);
+        this.mountedCreatureId = mount.id; this.mountedCreatureSeat = seat;
+      }
+    }
+    this.creativeFlying = this.mode === "builder" && !this.mountedBoatId && this.mountedCreatureId === null && locationPlayer?.creativeFlying === true;
     this.sleepingCreatures = (save.sleepingCreatures ?? [])
       .filter((saved): saved is SavedCreature => Boolean(saved && saved.kind in MOB_DEFS && Number.isFinite(saved.id)))
       .map((saved) => ({ ...saved }));
@@ -6054,12 +6216,25 @@ export class VoxelEngine {
     this.emitHud(true);
   }
 
-  loadStoredWorld(id: string) {
-    const loaded = this.worldStorage.loadWorld(id);
+  async loadStoredWorld(id: string) {
+    const checked = await this.worldStorage.loadWorld(id, false);
+    if (!checked.ok) { this.events.onToast(checked.error.message); return false; }
+    const wasRunning = this.running, wasPaused = this.paused, departingId = this.activeWorldId;
+    this.running = false; this.paused = true;
+    if (this.persistent && !await this.saveNow(false)) { this.running = wasRunning; this.paused = wasPaused; return false; }
+    try { await this.worldStorage.releaseActive(); }
+    catch (error) { this.running = wasRunning; this.paused = wasPaused; this.events.onToast(String(error)); return false; }
+    const loaded = await this.worldStorage.loadWorld(id);
     if (!loaded.ok) {
+      if (departingId && this.persistent) {
+        const restored = await this.worldStorage.loadWorld(departingId);
+        if (restored.ok) { this.running = wasRunning; this.paused = wasPaused; }
+        else { this.persistenceError = restored.error.message; this.reportPersistence(); }
+      } else { this.running = wasRunning; this.paused = wasPaused; }
       this.events.onToast(loaded.error.message);
       return false;
     }
+    this.disconnectMultiplayer();
     this.loadWorld(loaded.value.save, loaded.value.options, id);
     return true;
   }
@@ -6108,6 +6283,7 @@ export class VoxelEngine {
 
   private clearAgentWorkRuntime() {
     (this.agentBuildPreviews ??= new Map()).clear();
+    for (const job of (this.agentBuildJobs ??= new Map()).values()) this.returnBuildReservation(job);
     (this.agentBuildJobs ??= new Map()).clear();
     for (const visual of (this.agentBuildPreviewVisuals ??= new Map()).values()) {
       visual.removeFromParent();
@@ -6232,17 +6408,18 @@ export class VoxelEngine {
     return this.agentTestAdmin && (!this.multiplayer || this.multiplayer.role !== "guest");
   }
 
-  listAgentTestWorlds() {
+  async listAgentTestWorlds() {
     if (!this.assertLocalAgentTestAdmin()) return [];
-    return this.worldStorage.listWorlds().flatMap((metadata) => {
-      const loaded = this.worldStorage.loadWorld(metadata.id, false);
+    await this.worldStorage.ready;
+    return (await Promise.all(this.worldStorage.listWorlds().map(async (metadata) => {
+      const loaded = await this.worldStorage.loadWorld(metadata.id, false);
       return loaded.ok && loaded.value.save.agentTestWorld === true ? [{ ...metadata }] : [];
-    });
+    }))).flat();
   }
 
-  createAgentTestWorld(input: Readonly<{ seed: string; name?: string; mode?: GameMode; options?: Partial<WorldOptions>; fixture?: string }>) {
+  async createAgentTestWorld(input: Readonly<{ seed: string; name?: string; mode?: GameMode; options?: Partial<WorldOptions>; fixture?: string }>) {
     if (!this.assertLocalAgentTestAdmin()) return { ok: false as const, code: "test_admin_denied" };
-    const created = this.createWorld(input.seed, input.mode === "survival" ? "survival" : "builder", input.options ?? { weather: false }, input.name ?? "Agent Test World", DEFAULT_SETTLEMENT_ORIGIN_SEARCH_RADIUS, true);
+    const created = await this.createWorld(input.seed, input.mode === "survival" ? "survival" : "builder", input.options ?? { weather: false }, input.name ?? "Agent Test World", DEFAULT_SETTLEMENT_ORIGIN_SEARCH_RADIUS, true);
     if (created) switch (input.fixture) {
       case "agent-drone": this.primeAgentDroneAudit(); break;
       case "map-navigation": this.primeMapNavigationAudit(false, false); break;
@@ -6255,38 +6432,67 @@ export class VoxelEngine {
     return created ? { ok: true as const, world: created } : { ok: false as const, code: "world_create_failed" };
   }
 
-  loadAgentTestWorld(worldId: string) {
+  async loadAgentTestWorld(worldId: string) {
     if (!this.assertLocalAgentTestAdmin()) return { ok: false as const, code: "test_admin_denied" };
-    const loaded = this.worldStorage.loadWorld(worldId, false);
+    const loaded = await this.worldStorage.loadWorld(worldId, false);
     if (!loaded.ok || loaded.value.save.agentTestWorld !== true) return { ok: false as const, code: "test_world_not_found" };
-    this.loadWorld(loaded.value.save, loaded.value.options, worldId);
+    if (!await this.loadStoredWorld(worldId)) return { ok: false as const, code: "world_load_failed" };
     return { ok: true as const, world: { ...loaded.value.metadata } };
   }
 
-  exportAgentTestWorld(worldId: string) {
+  /** CF1 validation surface only. Ordinary players have no travel control. */
+  async transitionAgentTestLocation(destination: unknown) {
+    if (!this.assertLocalAgentTestAdmin() || !this.agentTestWorld || !this.activeWorldId || this.multiplayer || this.locationTransitioning) return { ok: false as const, code: "test_transition_denied" };
+    const address = locationAddress(destination);
+    if (address.universeId !== this.activeWorldId) return { ok: false as const, code: "wrong_universe" };
+    const wasRunning = this.running, wasPaused = this.paused, wasOverlayOpen = this.gameplayOverlayOpen;
+    this.locationTransitioning = true;
+    this.running = false; this.paused = true;
+    try {
+      if (!await this.saveNow(false)) return { ok: false as const, code: "origin_checkpoint_failed" };
+      const save = this.serialize(), parts = splitUniverseSave(save);
+      const initial = composeUniverseSave({ ...parts, location: {
+        generatorVersion: save.generatorVersion, generatorProfile: save.generatorProfile ?? "world-below-v15",
+        seed: save.seed, edits: {}, spawn: save.spawn, weather: "clear", furnaces: {}, chests: {},
+      } });
+      const result = await this.worldStorage.transitionSyntheticLocation(locationId(address), save, initial);
+      if (!result.ok) { this.persistenceError = result.error.message; this.reportPersistence(); return { ok: false as const, code: result.error.code }; }
+      // Until the transaction completes, every object and callback still owns
+      // the origin. Only now may loadWorld retire those owners.
+      this.loadWorld(result.value.save, result.value.options, result.value.metadata.id);
+      return { ok: true as const, location: this.world.locationScope };
+    } finally {
+      this.locationTransitioning = false;
+      this.running = wasRunning; this.paused = wasPaused;
+      this.gameplayOverlayOpen = wasOverlayOpen;
+    }
+  }
+
+  async exportAgentTestWorld(worldId: string) {
     if (!this.assertLocalAgentTestAdmin()) return { ok: false as const, code: "test_admin_denied" };
-    const loaded = this.worldStorage.loadWorld(worldId, false);
+    const loaded = await this.worldStorage.loadWorld(worldId, false);
     if (!loaded.ok || loaded.value.save.agentTestWorld !== true) return { ok: false as const, code: "test_world_not_found" };
-    const exported = this.worldStorage.exportWorld(worldId);
+    const exported = await this.worldStorage.exportWorld(worldId);
     return exported.ok ? { ok: true as const, json: exported.value } : { ok: false as const, code: exported.error.code };
   }
 
-  importAgentTestWorld(json: string) {
+  async importAgentTestWorld(json: string) {
     if (!this.assertLocalAgentTestAdmin()) return { ok: false as const, code: "test_admin_denied" };
     try {
-      const value = JSON.parse(json) as { world?: { save?: { agentTestWorld?: unknown } } };
-      if (value.world?.save?.agentTestWorld !== true) return { ok: false as const, code: "not_an_agent_test_world" };
+      const value = JSON.parse(json) as { format?: string; world?: { save?: { agentTestWorld?: unknown } }; entries?: { store?: string; value?: { data?: { fields?: { agentTestWorld?: unknown } } } }[] };
+      const synthetic = value.format === "blockwild-universe" ? value.entries?.find((entry) => entry.store === "universeRecords")?.value?.data?.fields?.agentTestWorld : value.world?.save?.agentTestWorld;
+      if (synthetic !== true) return { ok: false as const, code: "not_an_agent_test_world" };
     } catch { return { ok: false as const, code: "invalid_world_export" }; }
-    const imported = this.worldStorage.importWorld(json);
+    const imported = await this.worldStorage.importWorld(json);
     return imported.ok ? { ok: true as const, world: imported.value } : { ok: false as const, code: imported.error.code };
   }
 
-  deleteAgentTestWorld(worldId: string, confirm: boolean) {
+  async deleteAgentTestWorld(worldId: string, confirm: boolean) {
     if (!this.assertLocalAgentTestAdmin() || confirm !== true) return { ok: false as const, code: "destructive_confirmation_required" };
     if (worldId === this.activeWorldId) return { ok: false as const, code: "active_test_world_cannot_be_deleted" };
-    const loaded = this.worldStorage.loadWorld(worldId, false);
+    const loaded = await this.worldStorage.loadWorld(worldId, false);
     if (!loaded.ok || loaded.value.save.agentTestWorld !== true) return { ok: false as const, code: "test_world_not_found" };
-    const deleted = this.worldStorage.deleteWorld(worldId);
+    const deleted = await this.worldStorage.deleteWorld(worldId);
     return deleted.ok ? { ok: true as const, world: deleted.value } : { ok: false as const, code: deleted.error.code };
   }
 
@@ -6692,8 +6898,7 @@ export class VoxelEngine {
     this.agentAuthority = new AgentAuthority();
     (this.agentChat ??= new AgentChatRing()).clear();
     this.localChatSequence = 0;
-    (this.agentInventories ??= new Map()).clear();
-    (this.agentInventoryRevisions ??= new Map()).clear();
+    // Material custody belongs to the location, not the connection session.
     (this.agentObservationSequences ??= new Map()).clear();
     (this.agentRuntimeTasks ??= new Map()).clear();
     this.clearAgentWorkRuntime();
@@ -6733,7 +6938,7 @@ export class VoxelEngine {
     }));
     else this.localPlayerModel.setVariant(identity.variant ?? "male").setColors({ shirt: identity.color });
     const artificialLatencyMs = typeof window !== "undefined" ? parseMultiplayerLatencyRange(window.location.search) : undefined;
-    this.multiplayer = new MultiplayerSession({ identity, artificialLatencyMs, onEvent: (event) => this.handleMultiplayerEvent(event) });
+    this.multiplayer = new MultiplayerSession({ identity, locationScope: this.world.locationScope, artificialLatencyMs, onEvent: (event) => this.handleMultiplayerEvent(event) });
     this.multiplayerState.status = "idle";
     this.multiplayerState.role = null;
     this.multiplayerState.peers = [];
@@ -6849,9 +7054,29 @@ export class VoxelEngine {
     }
   }
 
+  private async prepareGuestAdmission(): Promise<() => Promise<void>> {
+    if (!this.persistent) return async () => undefined;
+    const wasRunning = this.running, wasPaused = this.paused;
+    let id = this.activeWorldId;
+    this.running = false; this.paused = true;
+    try {
+      if (!await this.saveNow(false)) throw new Error("The local checkpoint failed. Joining was cancelled; recover or export this world first.");
+      id = this.activeWorldId;
+      await this.worldStorage.releaseActive();
+    } catch (error) { this.running = wasRunning; this.paused = wasPaused; throw error; }
+    this.persistent = false; this.activeWorldId = null;
+    return async () => {
+      if (this.disposed || !id || this.activeWorldId !== null) return;
+      this.disconnectMultiplayer();
+      if (await this.loadStoredWorld(id)) { this.running = wasRunning; this.paused = wasPaused; }
+    };
+  }
+
   async joinMultiplayerRoom(roomCode: string, playerName: string) {
     const joiningFromTitle = this.titleMode;
+    let restoreLocalWorld: () => Promise<void> = async () => undefined;
     try {
+      restoreLocalWorld = await this.prepareGuestAdmission();
       await this.closeHostRendezvous();
       const session = this.beginMultiplayerSession(playerName);
       const joined = await joinByRoomCode({
@@ -6881,6 +7106,7 @@ export class VoxelEngine {
       this.emitHud(true);
       return { hostName: joined.hostName, seed: this.agentMode ? undefined : this.world.seedText, worldReady: true as const };
     } catch (error) {
+      await restoreLocalWorld();
       if (isMultiplayerOperationCancellation(error)) {
         if (joiningFromTitle) this.disconnectMultiplayer();
         else {
@@ -6919,7 +7145,9 @@ export class VoxelEngine {
   }
 
   async joinMultiplayer(inviteCode: string, playerName: string) {
+    let restoreLocalWorld: () => Promise<void> = async () => undefined;
     try {
+      restoreLocalWorld = await this.prepareGuestAdmission();
       const session = this.beginMultiplayerSession(playerName);
       const answer = await session.createGuestAnswer(inviteCode.trim());
       this.multiplayerState.answerCode = answer.answerCode;
@@ -6929,6 +7157,7 @@ export class VoxelEngine {
       this.events.onToast(`Answer created for ${answer.host.name}. Send it back to the host to finish connecting.`);
       return { answerCode: answer.answerCode };
     } catch (error) {
+      await restoreLocalWorld();
       this.multiplayerState.error = error instanceof Error ? error.message : String(error);
       this.multiplayerState.status = "error";
       throw error;
@@ -6985,8 +7214,7 @@ export class VoxelEngine {
     this.agentAuthority = new AgentAuthority();
     (this.agentChat ??= new AgentChatRing()).clear();
     this.localChatSequence = 0;
-    (this.agentInventories ??= new Map()).clear();
-    (this.agentInventoryRevisions ??= new Map()).clear();
+    // Keep drone materials available to a later, freshly approved session.
     (this.agentObservationSequences ??= new Map()).clear();
     (this.agentRuntimeTasks ??= new Map()).clear();
     this.clearAgentWorkRuntime();
@@ -7245,10 +7473,10 @@ export class VoxelEngine {
   }
 
   private applyLocalPlayerProgression(value: PlayerProgressionSnapshot, playerId: string) {
-    const progression = normalizeMultiplayerPlayerProgression(value, playerId);
+    const progression = normalizeMultiplayerPlayerProgression(value, playerId, this.universeAuthorityId(), this.locationAuthorityId());
     this.questBook = progression.questBook;
     this.sideQuestDefinitions = structuredClone(progression.sideQuestDefinitions);
-    this.mapKnowledge = normalizeMapKnowledge(progression.mapKnowledge, `session:${this.world.seedText}`, playerId);
+    this.mapKnowledge = progression.mapKnowledge;
     const bestiary = blankBestiary();
     for (const kind of MOB_ORDER) {
       const progress = progression.bestiary[kind];
@@ -7312,7 +7540,7 @@ export class VoxelEngine {
     }
     const normalized = {
       revision: Math.max(0, Math.trunc(Number(current?.revision) || 0)),
-      state: normalizeMultiplayerPlayerProgression(current?.state, identity.id),
+      state: normalizeMultiplayerPlayerProgression(current?.state, identity.id, this.universeAuthorityId(), this.locationAuthorityId()),
     };
     this.multiplayerPlayerProgressions.set(identity.id, normalized);
     return normalized;
@@ -7656,7 +7884,7 @@ export class VoxelEngine {
         this.sendAuthoritativePlayerProgression(peer.identity);
         return;
       }
-      const next = { revision: action.revision, state };
+      const next = { revision: action.revision, state: normalizeMultiplayerPlayerProgression(state, peer.identity.id, this.universeAuthorityId(), this.locationAuthorityId()) };
       this.multiplayerPlayerProgressions.set(peer.identity.id, next);
       this.saveSoon();
       const ack: PlayerProgressAction = {
@@ -8864,6 +9092,8 @@ export class VoxelEngine {
   }
 
   private applyInitialWorldSnapshot(snapshot: WorldSnapshot, hostPeer: PeerInfo) {
+    const scope = this.multiplayer?.locationScope;
+    if (!scope) return;
     const snapshotProfile = snapshot.generatorProfile ?? "world-below-v15";
     if (snapshot.generatorVersion !== GENERATOR_VERSION
       || !["legacy-v14", "world-below-v15"].includes(snapshotProfile)) {
@@ -8871,6 +9101,7 @@ export class VoxelEngine {
       return;
     }
     const hostPose = snapshot.players.find((pose) => pose.playerId === hostPeer.identity?.id) ?? snapshot.players[0];
+    this.resetLocationRuntime();
     // The host world decides the game mode. A guest must never retain a local
     // builder catalog when entering somebody else's survival save.
     applyAuthoritativeNetworkMode(this, snapshot.mode);
@@ -8890,16 +9121,17 @@ export class VoxelEngine {
       this.editsFromNetwork(snapshot.blockEdits),
       generationOptionsFromWorldOptions(this.worldOptions, snapshotProfile),
       this.facingsFromNetwork(snapshot.blockEdits),
+      scope,
     );
     const guestPlayerId = this.multiplayer?.identity.id ?? "guest";
-    const sessionAuthority = `session:${snapshot.seed}`;
+    const sessionAuthority = this.universeAuthorityId();
     // A guest enters the host session, never a hybrid of the host terrain and
     // whatever local single-player character happened to be open beforehand.
     this.cursor = null;
     this.trash = null;
     this.craftGrid = Array.from({ length: 9 }, () => null);
     this.bestiary = blankBestiary();
-    this.mapKnowledge = createMapKnowledge(sessionAuthority, guestPlayerId);
+    this.mapKnowledge = createMapKnowledge(this.locationAuthorityId(), guestPlayerId);
     this.mapSurfaceSurveyedThisSession.clear();
     this.questBook = createQuestBook();
     this.sideQuestDefinitions = [];
@@ -8957,10 +9189,13 @@ export class VoxelEngine {
       : normalizeMultiplayerPlayerState(null, guestPlayerId, this.multiplayer?.identity.variant), false, true);
     for (const pose of snapshot.players) this.upsertRemotePlayer(pose, pose.playerId === hostPeer.identity?.id ? hostPeer : undefined);
     this.multiplayerReceivedSnapshot = true;
+    this.events.onMultiplayerWorldReady?.(this.world.seedText);
     this.events.onToast(`Joined ${hostPeer.identity?.name ?? "the host"}'s world. The host device is authoritative for this session.`);
   }
 
   private applyIncrementalWorldSnapshot(snapshot: WorldSnapshot, hostPeer: PeerInfo) {
+    const scope = this.multiplayer?.locationScope;
+    if (!scope || scope.locationId !== this.world.locationScope.locationId || scope.epoch !== this.world.locationScope.epoch) return;
     if (snapshot.generatorVersion !== GENERATOR_VERSION || snapshot.seed !== this.world.seedText) return;
     applyAuthoritativeNetworkMode(this, snapshot.mode);
     this.worldOptions = normalizeWorldOptions(snapshot.worldOptions ?? this.worldOptions);
@@ -9543,6 +9778,7 @@ export class VoxelEngine {
             this.sendAgentGrant(record, "Waiting for host approval.");
             if (!this.agentInventories.has(record.agentId)) this.agentInventories.set(record.agentId, blankInventory());
             if (!this.agentInventoryRevisions.has(record.agentId)) this.agentInventoryRevisions.set(record.agentId, 0);
+            this.deliverAgentReturningMaterials(record.agentId);
             const slot = Math.max(0, this.agentAuthority.list().findIndex((agent) => agent.agentId === record.agentId));
             const angle = this.yaw + Math.PI + (slot - 1.5) * 0.48;
             this.upsertRemotePlayer({
@@ -9597,6 +9833,12 @@ export class VoxelEngine {
       this.emitHud(true);
     } else if (event.type === "message") {
       const { envelope } = event;
+      if (this.multiplayer?.role === "host" && this.persistent && !this.worldStorage.writerAuthorityValid) {
+        this.disconnectMultiplayer();
+        this.persistenceError = "Writer authority is no longer confirmed. Multiplayer stopped; keep this session open to recover unsaved work.";
+        this.reportPersistence();
+        return;
+      }
       if (envelope.type === "chat") {
         const incoming = envelope.payload as AgentChatMessage;
         if (this.multiplayer?.role === "host" && event.peer.identity) {
@@ -9624,7 +9866,9 @@ export class VoxelEngine {
         this.handleAgentVoiceChunk(envelope.payload as AgentVoiceChunk, event.peer);
       } else if (envelope.type === "agent-command" && this.multiplayer?.role === "host") {
         const command = envelope.payload as AgentCommandEnvelope;
-        const blocked = this.agentAuthority.authorize(command, event.peer.token, this.world.mutationRevision);
+        const scope = this.multiplayer.locationScope;
+        if (!scope) return;
+        const blocked = this.agentAuthority.authorize(command, event.peer.token, this.world.mutationRevision, scope);
         if (blocked) {
           this.agentAuthority.setCurrentResult(blocked);
           this.multiplayer.sendAgentResult(blocked, command.agentId);
@@ -9634,6 +9878,11 @@ export class VoxelEngine {
         if (grant.status === "revoked" && grant.reason) this.events.onToast(grant.reason);
       } else if (envelope.type === "agent-observation" && this.multiplayer?.role === "guest" && this.agentMode) {
         const observation = structuredClone(envelope.payload as AgentObservationV1);
+        const scope = this.multiplayer.locationScope;
+        if (!scope || !sameLocationStamp(observation.scope, scope)
+          || observation.self.agentId !== this.multiplayer.identity.id
+          || (this.latestAgentObservation && (observation.observationSequence <= this.latestAgentObservation.observationSequence
+            || observation.worldRevision < this.latestAgentObservation.worldRevision))) return;
         this.latestAgentObservation = observation;
         if (this.multiplayerReceivedSnapshot) {
           this.position.set(observation.self.position.x, observation.self.position.y, observation.self.position.z);
@@ -9648,7 +9897,10 @@ export class VoxelEngine {
           }
         }
       } else if (envelope.type === "agent-result" && this.multiplayer?.role === "guest" && this.agentMode) {
-        this.latestAgentResult = structuredClone(envelope.payload as AgentCommandResult);
+        const result = envelope.payload as AgentCommandResult, scope = this.multiplayer.locationScope;
+        if (!scope || !sameLocationStamp(result.scope, scope) || result.agentId !== this.multiplayer.identity.id
+          || (this.latestAgentResult && result.updatedAt < this.latestAgentResult.updatedAt)) return;
+        this.latestAgentResult = structuredClone(result);
       } else if (envelope.type === "player-pose") {
         let pose = envelope.payload as PlayerPose;
         if (this.multiplayer?.role === "host" && event.peer.identity) {
@@ -9757,6 +10009,12 @@ export class VoxelEngine {
   updateMultiplayer(dt: number) {
     const session = this.multiplayer;
     if (!session || !session.role || session.state === "closed" || session.state === "error") return;
+    if (session.role === "host" && this.persistent && !this.worldStorage.writerAuthorityValid) {
+      this.disconnectMultiplayer();
+      this.persistenceError = "Writer authority is no longer confirmed. Multiplayer stopped; keep this session open to recover unsaved work.";
+      this.reportPersistence();
+      return;
+    }
     this.multiplayerTick += 1;
     this.multiplayerPoseTimer -= dt;
     this.multiplayerWorldTimer -= dt;
@@ -11440,9 +11698,20 @@ export class VoxelEngine {
     if (document.pointerLockElement) document.exitPointerLock();
   }
 
-  quitToTitle() {
+  async quitToTitle() {
     this.closeContainer();
-    this.saveNow();
+    const wasRunning = this.running, wasPaused = this.paused;
+    this.running = false; this.paused = true;
+    if (!await this.saveNow()) {
+      this.running = wasRunning; this.paused = wasPaused;
+      return false;
+    }
+    try { await this.worldStorage.releaseActive(); }
+    catch (error) {
+      this.persistenceError = String(error); this.reportPersistence();
+      this.running = wasRunning; this.paused = wasPaused;
+      return false;
+    }
     this.disconnectMultiplayer();
     this.running = false;
     this.paused = true;
@@ -11450,6 +11719,7 @@ export class VoxelEngine {
     this.persistent = false;
     this.clearInput();
     if (document.pointerLockElement) document.exitPointerLock();
+    return true;
   }
 
   async toggleFullscreen() {
@@ -11925,7 +12195,7 @@ export class VoxelEngine {
       const head = this.world.getBlock(candidate.x, candidate.y + 1, candidate.z);
       if (!BLOCKS[support ?? BlockId.Air]?.solid || !this.world.isWalkThrough(feet) || !this.world.isWalkThrough(head)) continue;
       this.spawn.set(candidate.x, candidate.y - 0.49, candidate.z);
-      this.mapKnowledge ??= createMapKnowledge(`world:${this.world.seedText ?? "world"}`, this.localPlayerId());
+      this.mapKnowledge ??= createMapKnowledge(this.locationAuthorityId(), this.localPlayerId());
       this.mapKnowledge = setBedSpawn(this.mapKnowledge, {
         id: `bed:${x},${y},${z}`,
         name: "Home Bed",
@@ -31591,6 +31861,7 @@ export class VoxelEngine {
       this.world.setStreamingBudgets(budget.chunkGenerations, budget.chunkMeshSections, budget.streamingFrameMilliseconds);
     }
     if (this.running && this.persistent) {
+      if (!this.paused) this.markPersistenceDirty();
       this.autoSaveAccumulator += dt;
       if (this.autoSaveAccumulator >= 30) {
         if (this.fallingTrees.length) this.autoSaveAccumulator = 29;
@@ -31690,7 +31961,26 @@ export class VoxelEngine {
   private bumpAgentInventoryRevision(agentId: string) {
     const revision = (this.agentInventoryRevisions.get(agentId) ?? 0) + 1;
     this.agentInventoryRevisions.set(agentId, revision);
+    this.markPersistenceDirty();
     return revision;
+  }
+
+  private deliverAgentReturningMaterials(agentId: string) {
+    const returning = this.agentReturningMaterials.get(agentId) ?? [];
+    if (!returning.length) return;
+    const transfer = transferInventoryStacks(returning, this.agentInventories.get(agentId) ?? blankInventory());
+    this.agentInventories.set(agentId, transfer.target.map(cloneSlot));
+    this.agentReturningMaterials.set(agentId, transfer.source.filter((slot): slot is InventorySlot => slot !== null));
+  }
+
+  private serializeAgentCustody(): AgentCustodySave {
+    const agents: Record<string, { inventory: Array<InventorySlot | null>; revision: number; returning: InventorySlot[] }> = {};
+    for (const id of new Set([...this.agentInventories.keys(), ...this.agentReturningMaterials.keys(), ...this.agentBuildJobs.keys()])) {
+      const returning = (this.agentReturningMaterials.get(id) ?? []).map((slot) => cloneSlot(slot)!);
+      for (const [item, count] of this.agentBuildJobs.get(id)?.reserved ?? []) if (count > 0) returning.push({ item, count });
+      agents[id] = { inventory: (this.agentInventories.get(id) ?? blankInventory()).map(cloneSlot), revision: this.agentInventoryRevisions.get(id) ?? 0, returning };
+    }
+    return validateAgentCustody({ schema: 1, agents });
   }
 
   private showAgentBuildPreview(preview: AgentBuildPreview) {
@@ -31760,10 +32050,14 @@ export class VoxelEngine {
       if (count <= 0) continue;
       const leftover = this.addAgentStack(job.preview.agentId, { item, count });
       if (leftover) {
-        const pose = this.agentPose(job.preview.agentId);
-        if (pose) this.spawnDrop(item, leftover, new THREE.Vector3(pose.x, pose.y + 0.5, pose.z));
+        // A disconnect can remove the pose before cancellation. Retain the
+        // remainder even when there is no safe physical drop destination.
+        const returning = this.agentReturningMaterials.get(job.preview.agentId) ?? [];
+        returning.push({ item, count: leftover });
+        this.agentReturningMaterials.set(job.preview.agentId, returning);
       }
     }
+    job.reserved.clear();
   }
 
   private cancelAgentBuild(agentId: string, code = "build_cancelled", message = "The build stopped and all unplaced reserved materials were returned.") {
@@ -32364,6 +32658,7 @@ export class VoxelEngine {
     const messages = chat.since(Math.max(0, chat.newestSequence() - 40), 40);
     const observation: AgentObservationV1 = {
       schema: 1,
+      scope: this.multiplayer?.locationScope ?? this.world.locationScope,
       observationSequence: sequence,
       observedAt: now,
       expiresAt: now + 2_000,
@@ -32375,7 +32670,7 @@ export class VoxelEngine {
         gameVersion: GAME_VERSION,
         generatorVersion: GENERATOR_VERSION,
         multiplayerProtocolVersion: MULTIPLAYER_PROTOCOL_VERSION,
-        agentProtocolVersion: 1,
+        agentProtocolVersion: AGENT_PROTOCOL_VERSION,
         role: this.multiplayer?.role === "host" ? "guest" : this.multiplayer?.role ?? "single-player",
         connected: this.multiplayer?.state === "connected",
         capabilities: [...(record?.granted ?? [])],
@@ -32480,6 +32775,9 @@ export class VoxelEngine {
       },
       world: {
         seed: this.world.seedText,
+        location: this.world.locationScope,
+        runtimeRevision: this.world.mutationRevision,
+        persistence: { dirty: this.persistenceDirty, saving: this.checkpointPromise !== null, error: this.persistenceError },
         day: this.day,
         time: Number(this.worldTime.toFixed(4)),
         biome: BIOME_NAMES[this.world.biomeAt(Math.round(this.position.x), Math.round(this.position.z))],
@@ -32946,12 +33244,14 @@ export class VoxelEngine {
 
   saveSoon(delayMilliseconds = 2_500) {
     if (!this.persistent) return;
+    this.markPersistenceDirty();
     window.clearTimeout(this.saveTimer);
     this.saveTimer = window.setTimeout(() => this.saveNow(), delayMilliseconds);
   }
 
   serialize(): WorldSave {
     return {
+      ...this.saveExtensions,
       version: 2,
       generatorVersion: GENERATOR_VERSION,
       generatorProfile: this.world.generationOptions.profile,
@@ -33043,7 +33343,7 @@ export class VoxelEngine {
         { revision: record.revision, state: normalizeMultiplayerPlayerProgression(record.state, playerId) },
       ])),
       multiplayerWallets: Object.fromEntries(this.multiplayerPlayerWallets.entries()),
-      cardforge: normalizeTcgWorldState(this.cardforgeState, `world:${this.world.seedText}`),
+      cardforge: normalizeTcgWorldState(this.cardforgeState, this.universeAuthorityId()),
       archiveShelves: Object.fromEntries(this.archiveShelves.entries()),
       tomeDisplays: Object.fromEntries(this.tomeDisplays.entries()),
       goldWallet: this.goldWallet,
@@ -33087,14 +33387,21 @@ export class VoxelEngine {
       })),
       leads: serializeLeadAnchors(this.leadAnchors, new Set(this.mobs.map((mob) => mob.id))),
       agentPlatform: normalizeAgentWorldSave(this.agentWorldState),
+      agentCustody: this.serializeAgentCustody(),
+      locationPlayerState: { schema: 1, creativeFlying: this.creativeFlying, boatId: this.mountedBoatId,
+        creatureId: this.mountedCreatureId, creatureSeat: this.mountedCreatureSeat },
       agentWorldFingerprint: this.agentWorldFingerprint,
       ...(this.agentTestWorld ? { agentTestWorld: true } : {}),
       savedAt: Date.now(),
     };
   }
 
-  saveNow(notify = true) {
-    if (!this.persistent) return;
+  async saveNow(notify = true): Promise<boolean> {
+    if (!this.persistent) return true;
+    if (this.checkpointPromise) {
+      if (!await this.checkpointPromise) return false;
+      if (!this.persistenceDirty) return true;
+    }
     window.clearTimeout(this.saveTimer);
     if (this.autoSaveIdleHandle) {
       const idleWindow = window as Window & { cancelIdleCallback?: (handle: number) => void };
@@ -33103,35 +33410,51 @@ export class VoxelEngine {
       this.autoSaveIdleHandle = 0;
       this.autoSaveUsesIdleCallback = false;
     }
-    if (this.fallingTrees.length) this.settleAllFallingTrees();
-    const save = this.serialize();
+    let save: WorldSave;
     try {
-      const now = Date.now();
-      const playTimeDeltaMs = Math.max(0, now - this.worldSessionStartedAt);
-      const result = this.activeWorldId
-        ? this.worldStorage.saveWorld(this.activeWorldId, { save, playTimeDeltaMs })
-        : this.worldStorage.createWorld({ name: this.world.seedText || "New World", save, options: this.worldOptions });
-      if (result.ok) {
-        this.activeWorldId = result.value.id;
-        this.worldSessionStartedAt = now;
-        window.localStorage.removeItem(SAVE_KEY);
-        if (notify) this.events.onSave();
-        return;
-      }
-      // A legacy single-save fallback keeps the current session recoverable if
-      // a browser cannot commit the catalog transaction.
-      window.localStorage.setItem(SAVE_KEY, JSON.stringify(save));
-      if (notify) this.events.onSave();
-      this.events.onToast(result.error.message);
-    } catch {
-      this.events.onToast("This world grew beyond the browser's save allowance. The current session is safe, but storage is full.");
+      if (this.fallingTrees.length) this.settleAllFallingTrees();
+      save = this.serialize();
+    } catch (error) {
+      this.persistenceDirty = true;
+      this.persistenceError = error instanceof Error ? error.message : "The live session could not be serialized; the last committed checkpoint is unchanged.";
+      this.reportPersistence(); this.events.onToast(this.persistenceError); return false;
     }
+    const revision = this.persistenceRevision;
+    const commit = async () => {
+      try {
+        const now = Date.now();
+        const playTimeDeltaMs = Math.max(0, now - this.worldSessionStartedAt);
+        const result = this.activeWorldId
+          ? await this.worldStorage.saveWorld(this.activeWorldId, { save, playTimeDeltaMs })
+          : await this.worldStorage.createWorld({ ...(this.pendingWorldId ? { id: this.pendingWorldId } : {}), name: this.pendingWorldName ?? (this.world.seedText || "New World"), save, options: this.worldOptions });
+        if (result.ok) {
+          this.activeWorldId = result.value.id;
+          this.pendingWorldId = null;
+          this.pendingWorldName = null;
+          if (this.worldStorage.currentStamp) this.world.locationScope = this.worldStorage.currentStamp;
+          this.worldSessionStartedAt = now;
+          this.persistenceDirty = this.persistenceRevision !== revision;
+          this.persistenceError = null;
+          if (notify) this.events.onSave();
+          return true;
+        }
+        this.persistenceError = result.error.message;
+      } catch (error) {
+        this.persistenceError = error instanceof Error ? error.message : "The checkpoint failed. The last committed world and legacy backup remain unchanged.";
+      }
+      this.persistenceDirty = true;
+      this.events.onToast(this.persistenceError);
+      return false;
+    };
+    this.checkpointPromise = commit();
+    this.reportPersistence();
+    try { return await this.checkpointPromise; }
+    finally { this.checkpointPromise = null; this.reportPersistence(); }
   }
 
   dispose() {
     this.disposed = true;
     this.unlockFullscreenEscape();
-    this.saveNow(false);
     this.worldStorage.dispose();
     this.creatureArticulatedBatcher.dispose();
     this.creatureLodBatcher.dispose();

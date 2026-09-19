@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { homeLocation, locationId, universeId } from "../app/game/location-address";
+const SOAK_SCOPE = Object.freeze({ locationId: locationId(homeLocation(universeId("synthetic-agent-soak"))), epoch: 1, revision: 0 });
 import { performance } from "node:perf_hooks";
 import { BlockId, Item } from "../app/game/data";
 import {
@@ -26,6 +28,7 @@ const percentile = (values: readonly number[], fraction: number) => {
 function command(agentId: string, sequence: number, revision: number, now: number): AgentCommandEnvelope {
   return {
     schema: 1,
+    scope: SOAK_SCOPE,
     commandId: `soak_${agentId}_${sequence}`,
     agentId,
     kind: "observe",
@@ -70,7 +73,7 @@ function runScenario(agentCount: typeof COUNTS[number], layout: typeof LAYOUTS[n
     if (step % 600 === 0) {
       for (const [index, agentId] of agents.entries()) {
         const issued = command(agentId, commands, revision, step * STEP_MILLISECONDS + 100);
-        assert.equal(authority.authorize(issued, `peer_${index}`, revision, issued.issuedAt), null);
+        assert.equal(authority.authorize(issued, `peer_${index}`, revision, SOAK_SCOPE, issued.issuedAt), null);
         const result = createAgentResult(issued, "completed", revision, "soak_observed", "Authoritative observation sampled.", {}, issued.issuedAt + 2);
         authority.setCurrentResult(result, issued.issuedAt + 2);
         assert.equal(result.terminal, true);

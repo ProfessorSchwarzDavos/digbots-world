@@ -1,3 +1,5 @@
+import { parseLocationId } from "./location-address";
+
 export const MAP_SCHEMA = 1 as const;
 export const CARTOGRAPHY_SCHEMA = 1 as const;
 export const MAP_CHUNK_SIZE = 16;
@@ -150,6 +152,15 @@ const clamp = (value: number, minimum: number, maximum: number) => Math.max(mini
 const cleanId = (value: unknown, fallback: string) => {
   const cleaned = typeof value === "string" ? value.trim().replace(/[^a-zA-Z0-9:_-]+/gu, "-").slice(0, 96) : "";
   return cleaned || fallback;
+};
+// Location ownership is a canonical tuple, not a display slug. Slugging or
+// truncating it would alias different bodies/instances in the same universe.
+const mapWorldId = (value: unknown, fallback: string): string => {
+  if (typeof value === "string" && value.startsWith("location:")) {
+    parseLocationId(value.slice("location:".length));
+    return value;
+  }
+  return cleanId(value, fallback);
 };
 const cleanName = (value: unknown, fallback: string) => {
   const cleaned = typeof value === "string" ? value.trim().replace(/\s+/gu, " ").slice(0, 48) : "";
@@ -473,7 +484,7 @@ export function chunkAtWorldPosition(position: Pick<WorldPoint, "x" | "z">, chun
 export function createMapKnowledge(worldId: string, playerId: string): MapKnowledge {
   return {
     schema: MAP_SCHEMA,
-    worldId: cleanId(worldId, "world"),
+    worldId: mapWorldId(worldId, "world"),
     playerId: cleanId(playerId, "player"),
     revision: 0,
     exploredChunks: [],
@@ -574,7 +585,7 @@ export function normalizeMapKnowledge(value: unknown, fallbackWorldId = "world",
     : null;
   return {
     schema: MAP_SCHEMA,
-    worldId: cleanId(input.worldId, cleanId(fallbackWorldId, "world")),
+    worldId: mapWorldId(input.worldId, mapWorldId(fallbackWorldId, "world")),
     playerId: cleanId(input.playerId, cleanId(fallbackPlayerId, "player")),
     revision: Math.max(0, integer(input.revision)),
     exploredChunks,

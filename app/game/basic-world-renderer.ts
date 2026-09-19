@@ -83,6 +83,7 @@ export class BasicWorldRenderer {
   private generationOptionsSignature = "";
   private lastRequestAt = -Infinity;
   private disposed = false;
+  private locationOwner = "";
   private caveBlend = 0;
   private wasFramePressurePaused = false;
   private counters = {
@@ -205,6 +206,11 @@ export class BasicWorldRenderer {
 
   update(input: BasicWorldRendererInput) {
     if (this.disposed) return;
+    const owner = `${input.world.locationScope.locationId}|${input.world.runtimeLocationEpoch}`;
+    if (owner !== this.locationOwner) {
+      this.resetLocation();
+      this.locationOwner = owner;
+    }
     const active = input.enabled && input.basicDistance > input.fullDistance;
     this.group.visible = active;
     this.caveBlend = input.caveBlend;
@@ -220,7 +226,7 @@ export class BasicWorldRenderer {
       this.generationOptionsReference = input.generationOptions;
       this.generationOptionsSignature = JSON.stringify(input.generationOptions);
     }
-    const key = `${input.seedText}|${this.generationOptionsSignature}|${centerChunkX},${centerChunkZ}|${input.fullDistance},${input.basicDistance}|${cameraLayer}`;
+    const key = `${owner}|${input.seedText}|${this.generationOptionsSignature}|${centerChunkX},${centerChunkZ}|${input.fullDistance},${input.basicDistance}|${cameraLayer}`;
     this.desiredKey = key;
     if (this.completedResult && this.completedResult.key !== key) {
       this.counters.stale += 1;
@@ -287,6 +293,22 @@ export class BasicWorldRenderer {
       drawCalls: Number(Boolean(this.surface?.visible)) + Number(Boolean(this.caves?.visible)),
       ringCompleteness: this.desiredKey === null || this.installedKey === this.desiredKey ? 1 : this.installedKey ? 0.5 : 0,
     });
+  }
+
+  /** Release geometry and pending jobs immediately at an owner boundary. */
+  resetLocation() {
+    this.cancelPendingWorker();
+    this.completedResult = null;
+    this.desiredKey = this.installedKey = null;
+    this.lastRequestAt = -Infinity;
+    this.group.visible = false;
+    for (const mesh of [this.surface, this.caves]) {
+      mesh?.removeFromParent();
+      mesh?.geometry.dispose();
+      (mesh?.material as THREE.Material | undefined)?.dispose();
+    }
+    this.surface = this.caves = null;
+    this.counters.bytes = this.counters.vertices = this.counters.triangles = 0;
   }
 
   dispose() {

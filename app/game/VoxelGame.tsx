@@ -73,10 +73,11 @@ import { collectPreviousEditionBackup, countPreviousEditionLocalStorageRecords }
 import {
   DEFAULT_WORLD_OPTIONS,
   WORLD_OWNERSHIP_NOTICE,
-  WorldStorage,
   type WorldMetadata,
   type WorldOptions,
 } from "./world-storage";
+import { UniverseWorldStorage as WorldStorage } from "./universe-world-storage";
+import { UniverseStorage } from "./universe-storage";
 import {
   HobbitBankPanel,
   MapPanel,
@@ -2008,6 +2009,9 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
   const [hud, setHud] = useState<ExtendedHudState>(INITIAL_HUD);
   const [toast, setToast] = useState("There is always another horizon. Usually with teeth.");
   const [savedPulse, setSavedPulse] = useState(false);
+  const [persistenceState, setPersistenceState] = useState<{ dirty: boolean; saving: boolean; error: string | null }>({ dirty: false, saving: false, error: null });
+  const [storageStatus, setStorageStatus] = useState<{ phase: string; message: string }>({ phase: "opening", message: "Opening browser universe storage…" });
+  const [worldActionBusy, setWorldActionBusy] = useState(false);
   const [inventoryDragRevision, setInventoryDragRevision] = useState(0);
   const [worlds, setWorlds] = useState<WorldMetadata[]>([]);
   const [characterCatalog, setCharacterCatalog] = useState<CharacterProfileCatalog>(FALLBACK_CHARACTER_CATALOG);
@@ -2289,7 +2293,8 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
     if (!canvas) return;
     let browserStorage: Storage | null = null;
     try { browserStorage = window.localStorage; } catch { /* WorldStorage reports browser storage unavailability. */ }
-    const storage = new WorldStorage(browserStorage);
+    const storage = new WorldStorage(browserStorage, new UniverseStorage({ allowSyntheticLocations: agentMode && new URLSearchParams(window.location.search).get("testAdmin") === "1" }));
+    const unsubscribeStorage = storage.subscribe(setStorageStatus);
     const characterStore = new CharacterProfileStore(browserStorage);
     characterStoreRef.current = characterStore;
     const selectedCharacter = characterStore.selectedProfile;
@@ -2352,11 +2357,28 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
           setSavedPulse(true);
           window.setTimeout(() => setSavedPulse(false), 1300);
         },
-        onMultiplayerEnded: (reason) => {
+        onPersistence: setPersistenceState,
+        onMultiplayerWorldReady: (hostSeed) => {
+          // Manual exchange returns its answer before the host accepts it. The
+          // shell must enter play on the actual snapshot, not on answer creation.
           window.queueMicrotask(() => {
+            if (engineRef.current !== engine || engine.multiplayer?.role !== "guest") return;
+            activeWorldIdRef.current = null;
+            setCurrentWorldSeed(hostSeed);
+            setMultiplayerReturn("pause");
+            if (!startedRef.current) {
+              startedRef.current = true;
+              setStarted(true);
+              setOverlay(null);
+              engine.activate();
+            }
+          });
+        },
+        onMultiplayerEnded: (reason) => {
+          window.queueMicrotask(async () => {
             if (engineRef.current !== engine) return;
             clearFirstPersonHeldPresentation(engine);
-            engine.quitToTitle();
+            if (!await engine.quitToTitle()) return;
             engine.previewWorld("WILDERNESS");
             startedRef.current = false;
             setStarted(false);
@@ -2380,6 +2402,17 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
     (engine as VoxelEngine & { setCharacterProfile?: (profile: CharacterProfile) => void }).setCharacterProfile?.(selectedCharacter);
     engine.localPlayerModel.setAppearance(selectedCharacter.appearance).setPlayerName(selectedCharacter.name);
     engineRef.current = engine;
+    void storage.ready.then(() => {
+      if (engineRef.current !== engine) return;
+      refreshWorldCatalog(storage);
+      if (storage.issues.length) setWorldNotice(storage.issues.map((entry) => entry.message).join(" "));
+      const current = storage.listWorlds()[0];
+      if (current && !startedRef.current && !agentMode) {
+        setSelectedWorldId(storage.activeWorldId ?? current.id);
+        setSeed(current.seed); setCurrentWorldSeed(current.seed);
+        engine.previewWorld(current.seed);
+      }
+    });
     const automationWindow = window as Window & {
       render_game_to_text?: () => string;
       advanceTime?: (milliseconds: number) => Promise<void>;
@@ -2426,6 +2459,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
       worldList: () => engine.listAgentTestWorlds(),
       worldCreate: (input) => engine.createAgentTestWorld({ ...input, options: input.options as Partial<WorldOptions> | undefined }),
       worldLoad: (worldId) => engine.loadAgentTestWorld(worldId),
+      worldTransition: (destination) => engine.transitionAgentTestLocation(destination),
       worldExport: (worldId) => engine.exportAgentTestWorld(worldId),
       worldImport: (json) => engine.importAgentTestWorld(json),
       worldDelete: (worldId, confirm) => engine.deleteAgentTestWorld(worldId, confirm),
@@ -2466,7 +2500,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
     const placementAudit = auditParameters.get("placement-audit") === "1" || mapNavigationAudit || waystoneIconAudit || generatedPoiAudit || chestAudit || caveLiquidAudit || waterPhysicsAudit || iceWaterAudit || oceanFloraAudit || creatureCollisionAudit || moonfeltAudit || treeFallAudit || agentDroneAudit || cardforgeAudit || settlementOriginAudit || itemGuideAudit;
     let treeFallTimer: number | undefined;
     if (placementAudit) {
-      engine.createWorld(
+      void engine.createWorld(
         settlementOriginAudit ? "WOOD-ELF-REMOTE-1" : caveLiquidAudit ? "WILDERNESS" : iceWaterAudit ? "ICE-WATER-AUDIT" : waterPhysicsAudit ? "WATER-PHYSICS-AUDIT" : oceanFloraAudit ? "OCEAN-FLORA-AUDIT" : creatureCollisionAudit ? "MOB-COLLISION-AUDIT" : moonfeltAudit ? "MOONFELT-MYCELIUM-AUDIT" : treeFallAudit ? "TREE-FALL-LIGHT-AUDIT" : generatedPoiAudit ? "GENERATED-POI-METADATA-AUDIT" : cardforgeAudit ? "CARDFORGE-AUDIT" : mapNavigationAudit || waystoneIconAudit ? "MAP-NAVIGATION-AUDIT" : "DIRECTIONAL-PLACEMENT-AUDIT",
         "builder",
         settlementOriginAudit ? {
@@ -2485,7 +2519,8 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
         } : { structures: false, weather: false, mobDensity: 0, butterflyDensity: 0 },
         settlementOriginAudit ? "Remote Wood Elf Origin Audit" : caveLiquidAudit ? "Cave Liquid Audit" : iceWaterAudit ? "Ice Water Audit" : waterPhysicsAudit ? "Water Physics Audit" : oceanFloraAudit ? "Ocean Flora Audit" : creatureCollisionAudit ? "Creature Collision Audit" : moonfeltAudit ? "Moonfelt Mycelium Audit" : treeFallAudit ? "Tree Fall Light Audit" : generatedPoiAudit ? "Generated POI Metadata Audit" : cardforgeAudit ? "Cardforge Audit" : mapNavigationAudit || waystoneIconAudit ? "Map Navigation Audit" : "Directional Placement Audit",
         settlementOriginAudit ? MAX_SETTLEMENT_ORIGIN_SEARCH_RADIUS : DEFAULT_SETTLEMENT_ORIGIN_SEARCH_RADIUS,
-      );
+      ).then((created) => {
+      if (!created || engineRef.current !== engine) return;
       const auditMarkerId = mapNavigationAudit || waystoneIconAudit ? engine.primeMapNavigationAudit(auditParameters.get("far-track") === "1", waystoneIconAudit) : null;
       if (generatedPoiAudit) engine.primeGeneratedPoiAudit();
       const auditChestKey = !mapNavigationAudit && !waystoneIconAudit && !generatedPoiAudit && !caveLiquidAudit && !waterPhysicsAudit && !oceanFloraAudit && !creatureCollisionAudit && !moonfeltAudit && !treeFallAudit && !agentDroneAudit && !cardforgeAudit && !settlementOriginAudit && !itemGuideAudit ? engine.primeDirectionalPlacementAudit() : null;
@@ -2520,6 +2555,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
           setItemGuideVisible(true);
         }
       });
+      });
     } else if (agentMode) {
       engine.previewWorld("AGENT-CLIENT-PREVIEW");
       overlayRef.current = "multiplayer";
@@ -2530,6 +2566,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
       });
     } else if (initialWorld) engine.previewWorld(initialWorld.seed);
     return () => {
+      unsubscribeStorage();
       window.clearTimeout(toastTimerRef.current);
       if (treeFallTimer !== undefined) window.clearTimeout(treeFallTimer);
       engine.dispose();
@@ -2847,12 +2884,16 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
     setOverlay("new");
   };
 
-  const createWorld = () => {
+  const createWorld = async () => {
     const engine = engineRef.current;
-    if (!engine) return;
+    if (!engine || worldActionBusy) return;
+    setWorldActionBusy(true);
     prepareFirstPersonHeldPresentation(engine);
     applyCharacterProfile(activeCharacterProfile);
-    const created = engine.createWorld(seed, mode, worldOptions, worldName, originSearchRadius);
+    let created: WorldMetadata | null = null;
+    try { created = await engine.createWorld(seed, mode, worldOptions, worldName, originSearchRadius); }
+    catch (error) { setWorldNotice(error instanceof Error ? error.message : "Creating this world failed."); }
+    finally { setWorldActionBusy(false); }
     const storage = worldStorageRef.current;
     if (created) {
       activeWorldIdRef.current = created.id;
@@ -2860,7 +2901,13 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
       refreshWorldCatalog(storage);
     } else {
       activeWorldIdRef.current = null;
-      setWorldNotice("Browser world storage is unavailable; this session cannot be added to the local catalog.");
+      setWorldNotice("The first checkpoint did not commit. Retry when storage is available; no saved-world success was recorded.");
+      if (engine.persistent) {
+        setCurrentWorldSeed(engine.world.seedText);
+        startedRef.current = true; setStarted(true);
+        engine.pause(); setOverlay("pause");
+      }
+      return;
     }
     setCurrentWorldSeed(engine.world.seedText);
     startedRef.current = true;
@@ -2870,16 +2917,18 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
     showToast("WASD move · Space jump/swim · Shift crouch · Ctrl sprint · V camera · Left harvest/attack · Right use/build · E inventory · Esc menu", 8500);
   };
 
-  const playWorld = (worldId: string) => {
+  const playWorld = async (worldId: string) => {
     const engine = engineRef.current;
     const storage = worldStorageRef.current;
-    if (!engine || !storage) return;
-    const loaded = storage.loadWorld(worldId);
+    if (!engine || !storage || worldActionBusy) return;
+    setWorldActionBusy(true);
+    if (!await engine.loadStoredWorld(worldId)) { setWorldActionBusy(false); setWorldNotice(storage.currentStatus.message); return; }
+    const loaded = await storage.loadWorld(worldId, false);
+    setWorldActionBusy(false);
     if (!loaded.ok) {
       setWorldNotice(loaded.error.message);
       return;
     }
-    engine.loadWorld(loaded.value.save, loaded.value.options, worldId);
     prepareFirstPersonHeldPresentation(engine);
     applyCharacterProfile(activeCharacterProfile);
     activeWorldIdRef.current = worldId;
@@ -2914,13 +2963,13 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
     engineRef.current?.previewWorld(world.seed);
   };
 
-  const renameSelectedWorld = () => {
+  const renameSelectedWorld = async () => {
     const storage = worldStorageRef.current;
     const world = worlds.find((candidate) => candidate.id === selectedWorldId);
     if (!storage || !world) return;
     const name = window.prompt("Rename this browser-local world", world.name);
     if (name === null) return;
-    const renamed = storage.renameWorld(world.id, name);
+    const renamed = await storage.renameWorld(world.id, name);
     if (!renamed.ok) setWorldNotice(renamed.error.message);
     else {
       setWorldNotice(`Renamed to ${renamed.value.name}.`);
@@ -2928,10 +2977,10 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
     }
   };
 
-  const duplicateSelectedWorld = () => {
+  const duplicateSelectedWorld = async () => {
     const storage = worldStorageRef.current;
     if (!storage || !selectedWorldId) return;
-    const duplicated = storage.duplicateWorld(selectedWorldId);
+    const duplicated = await storage.duplicateWorld(selectedWorldId);
     if (!duplicated.ok) setWorldNotice(duplicated.error.message);
     else {
       setSelectedWorldId(duplicated.value.id);
@@ -2940,14 +2989,14 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
     }
   };
 
-  const deleteSelectedWorld = () => {
+  const deleteSelectedWorld = async () => {
     const storage = worldStorageRef.current;
     const world = worlds.find((candidate) => candidate.id === selectedWorldId);
-    if (!storage || !world || !window.confirm(`Delete “${world.name}” from this browser? This cannot be undone unless you exported it.`)) return;
-    const deleted = storage.deleteWorld(world.id);
+    if (!storage || !world || !window.confirm(`Remove “${world.name}” from this browser's world list? Recovery records and original legacy data are retained.`)) return;
+    const deleted = await storage.deleteWorld(world.id);
     if (!deleted.ok) setWorldNotice(deleted.error.message);
     else {
-      setWorldNotice(`Deleted ${deleted.value.name} from this browser.`);
+      setWorldNotice(`Removed ${deleted.value.name} from the world list. Recovery records were retained.`);
       refreshWorldCatalog(storage);
       const remainingWorlds = storage.listWorlds({ sortBy: "lastPlayedAt", direction: "desc" });
       const nextWorld = remainingWorlds.find((candidate) => candidate.id === storage.activeWorldId) ?? remainingWorlds[0];
@@ -2955,11 +3004,11 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
     }
   };
 
-  const exportSelectedWorld = () => {
+  const exportSelectedWorld = async () => {
     const storage = worldStorageRef.current;
     const world = worlds.find((candidate) => candidate.id === selectedWorldId);
     if (!storage || !world) return;
-    const exported = storage.exportWorld(world.id);
+    const exported = await storage.exportWorld(world.id);
     if (!exported.ok) {
       setWorldNotice(exported.error.message);
       return;
@@ -2974,6 +3023,31 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
     anchor.remove();
     window.setTimeout(() => URL.revokeObjectURL(blobUrl), 0);
     setWorldNotice(`Exported ${world.name}. Keep the file somewhere outside this browser.`);
+  };
+
+  const downloadRecovery = (json: string, filename: string) => {
+    const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
+    const anchor = document.createElement("a");
+    anchor.href = url; anchor.download = filename; anchor.hidden = true;
+    document.body.append(anchor); anchor.click(); anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
+
+  const exportLegacyRecovery = async () => {
+    const storage = worldStorageRef.current, id = activeWorldIdRef.current ?? selectedWorldId;
+    if (!storage || !id) return;
+    const result = await storage.exportLegacyBackup(id);
+    if (!result.ok) { setWorldNotice(result.error.message); return; }
+    downloadRecovery(result.value, "blockwild-exact-legacy-backup.json");
+    setWorldNotice("Exported exact legacy source strings and checksums. No browser source was changed.");
+  };
+
+  const exportUnsavedSession = () => {
+    const engine = engineRef.current;
+    if (!engine?.persistent) return;
+    const save = engine.serialize(), now = Date.now(), id = engine.activeWorldId ?? crypto.randomUUID();
+    const metadata = worlds.find((entry) => entry.id === id) ?? { id, ownership: "host-device", name: "Recovered session", seed: save.seed, mode: save.mode, createdAt: now, updatedAt: now, lastPlayedAt: now, playTimeMs: 0, lastSavedGameVersion: GAME_VERSION };
+    downloadRecovery(JSON.stringify({ format: "blockwild-world", version: 1, exportedAt: now, recovery: "Unsaved current-location session, not a committed full universe archive.", world: { version: 1, metadata, options: engine.worldOptions, save } }), "blockwild-unsaved-home-session.blockwild.json");
   };
 
   const exportPreviousEditionData = () => {
@@ -3005,7 +3079,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
     event.currentTarget.value = "";
     if (!storage || !file) return;
     try {
-      const imported = storage.importWorld(await file.text());
+      const imported = await storage.importWorld(await file.text());
       if (!imported.ok) setWorldNotice(imported.error.message);
       else {
         storage.setActiveWorld(imported.value.id);
@@ -3046,12 +3120,15 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
     engine.activate();
   };
 
-  const saveAndQuit = () => {
+  const saveAndQuit = async () => {
     const engine = engineRef.current;
-    if (!engine) return;
+    if (!engine || worldActionBusy) return;
+    setWorldActionBusy(true);
     if (telemetryLogRef.current.running) stopTelemetry("save-and-quit");
+    const committed = await engine.quitToTitle();
+    setWorldActionBusy(false);
+    if (!committed) return;
     clearFirstPersonHeldPresentation(engine);
-    engine.quitToTitle();
     startedRef.current = false;
     setStarted(false);
     activeWorldIdRef.current = null;
@@ -3287,7 +3364,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
       setDroneVoiceVolumes({});
       if (wasGuest && engineRef.current) {
         clearFirstPersonHeldPresentation(engineRef.current);
-        engineRef.current.quitToTitle();
+        if (!await engineRef.current.quitToTitle()) return;
         engineRef.current.previewWorld("WILDERNESS");
         startedRef.current = false;
         setStarted(false);
@@ -3769,13 +3846,13 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
     setItemGuideVisible(true);
   };
 
-  const changeSelectedWorldMode = (nextMode: GameMode) => {
+  const changeSelectedWorldMode = async (nextMode: GameMode) => {
     const storage = worldStorageRef.current;
     const world = worlds.find((candidate) => candidate.id === selectedWorldId);
     if (!storage || !world || world.mode === nextMode) return;
     const nextLabel = gameModeLabel(nextMode);
     if (!window.confirm(`Change “${world.name}” to ${nextLabel} before its next load? World edits and inventory are preserved.`)) return;
-    const updated = storage.updateWorldMode(world.id, nextMode);
+    const updated = await storage.updateWorldMode(world.id, nextMode);
     if (!updated.ok) {
       setWorldNotice(updated.error.message);
       return;
@@ -4376,7 +4453,8 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
           ) : <button type="button" className="agent-chat-open" onClick={() => { chatOpenRef.current = true; setChatOpen(true); if (document.pointerLockElement) void document.exitPointerLock(); window.requestAnimationFrame(() => chatInputRef.current?.focus()); }}><kbd>ENTER</kbd> CHAT</button>}
         </section>
       )}
-      {savedPulse && <div className="save-pulse">WORLD SAVED</div>}
+      {savedPulse && !persistenceState.error && <div className="save-pulse">CHECKPOINT SAVED</div>}
+      {(storageStatus.phase === "opening" || storageStatus.phase === "migrating" || storageStatus.phase === "loading" || storageStatus.phase === "saving" || storageStatus.phase === "error") && <div className={`universe-storage-status ${storageStatus.phase === "error" ? "storage-error" : ""}`} role={storageStatus.phase === "error" ? "alert" : "status"}>{storageStatus.message}</div>}
       {uiPreferences.showReferenceHints && contextReference && overlay && overlay !== "title" && overlay !== "new" && (
         <div className="context-reference-hint" role="status">
           <span><kbd>?</kbd> Item Wiki</span>
@@ -4417,7 +4495,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
             </div>
             <div className={`title-menu-layout title-${titleMenuView}-layout`}>
               {titleMenuView === "main" && <nav className="main-menu-buttons title-main-menu" aria-label="Main menu">
-                <PixelButton className="primary-menu-button title-menu-choice" disabled={!hasSave || !selectedWorld} onClick={continueWorld}>
+                <PixelButton className="primary-menu-button title-menu-choice" disabled={!hasSave || !selectedWorld || worldActionBusy || storageStatus.phase === "opening" || storageStatus.phase === "migrating"} onClick={continueWorld}>
                   <strong>Continue</strong><small>{selectedWorld?.name ?? "No local world selected"}</small>
                 </PixelButton>
                 <PixelButton className="title-menu-choice" onClick={beginNewWorld}><strong>Create New World</strong><small>Begin a fresh endless world</small></PixelButton>
@@ -4486,6 +4564,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
                   <button type="button" disabled={!selectedWorld} onClick={renameSelectedWorld}>Rename</button>
                   <button type="button" disabled={!selectedWorld} onClick={duplicateSelectedWorld}>Duplicate</button>
                   <button type="button" disabled={!selectedWorld} onClick={exportSelectedWorld}>Export</button>
+                  <button type="button" disabled={!selectedWorld} onClick={exportLegacyRecovery}>Legacy backup</button>
                   <button type="button" className="danger" disabled={!selectedWorld} onClick={deleteSelectedWorld}>Delete</button>
                 </div>
                   {worldNotice && <p className="world-catalog-notice" role="status">{worldNotice}</p>}
@@ -4658,7 +4737,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
             <p className="browser-ownership-note setup-ownership-note">This world will belong to this browser on this host device. Export it to make a backup or move it.</p>
             <div className="panel-actions">
               <PixelButton className="secondary-button" onClick={() => setOverlay("title")}>Cancel</PixelButton>
-              <PixelButton className="gold-button" disabled={worldOptions.origin.mode !== "wilderness" && (originPreviewPending || !originPreview)} onClick={createWorld}>Generate World</PixelButton>
+              <PixelButton className="gold-button" disabled={worldActionBusy || storageStatus.phase === "opening" || storageStatus.phase === "migrating" || worldOptions.origin.mode !== "wilderness" && (originPreviewPending || !originPreview)} onClick={createWorld}>{worldActionBusy ? "Committing home checkpoint…" : "Generate World"}</PixelButton>
             </div>
           </div>
         </section>
@@ -4670,8 +4749,15 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
             <span className="panel-eyebrow">{hud.biome} · DAY {hud.day} · {hud.clock}</span>
             <h2 id="pause-title">{hud.onlinePlayers > 1 ? "Session Menu" : "Game Paused"}</h2>
             <p className="panel-flavor">{hud.onlinePlayers > 1 ? "This shared world keeps running while the session menu is open." : `Loaded ${hud.loadedChunks} chunks around you. The rest of infinity is waiting politely offscreen.`}</p>
+            {engineRef.current?.persistent && <p className="world-catalog-notice" role="status">{persistenceState.error ?? (persistenceState.saving ? "Checkpoint in progress. Keep this tab open." : persistenceState.dirty ? "Unsaved progress. Save & Quit waits for the browser checkpoint." : "Current checkpoint committed to this browser.")}</p>}
+            {persistenceState.error && <div className="world-catalog-actions" aria-label="Save recovery">
+              <button type="button" disabled={persistenceState.saving} onClick={() => void engineRef.current?.saveNow()}>Retry checkpoint</button>
+              <button type="button" onClick={exportUnsavedSession}>Export unsaved session</button>
+              <button type="button" onClick={exportLegacyRecovery}>Legacy backup</button>
+            </div>}
             <div className="stacked-menu-buttons">
               <PixelButton className="gold-button" onClick={() => { setOverlay(null); engineRef.current?.activate(); }}>Back to Game</PixelButton>
+              <PixelButton className="secondary-button" disabled={worldActionBusy || persistenceState.saving} onClick={saveAndQuit}>{worldActionBusy ? "Waiting for checkpoint…" : "Save & Quit to Title"}</PixelButton>
               <PixelButton onClick={() => engineRef.current?.openOverlay("map")}>Map <kbd>M</kbd></PixelButton>
               <PixelButton onClick={() => engineRef.current?.openOverlay("quests")}>Quest Journal <kbd>J</kbd></PixelButton>
               <PixelButton onClick={() => engineRef.current?.openOverlay("guilds")}>Guilds of Hearthroads</PixelButton>
@@ -4684,7 +4770,6 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
               <PixelButton onClick={() => engineRef.current?.toggleFullscreen()}>{hud.fullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}</PixelButton>
               <PixelButton onClick={() => openSettings("pause")}>Settings</PixelButton>
               <PixelButton onClick={() => setOverlay("help")}>Field Manual</PixelButton>
-              <PixelButton className="secondary-button" onClick={saveAndQuit}>Save & Quit to Title</PixelButton>
             </div>
           </div>
         </section>
@@ -5452,16 +5537,16 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
               <p className={`multiplayer-rendezvous status-${multiplayerState.rendezvousStatus}`} role="status"><b>{multiplayerState.rendezvousStatus.toUpperCase()}</b><span>{multiplayerState.rendezvousStatus === "waiting" ? (multiplayerState.role === "host" ? "Room open · waiting for a guest" : "Waiting for the host room to finish opening") : multiplayerState.rendezvousStatus === "retrying" ? "Host found · retrying the secure exchange" : multiplayerState.rendezvousStatus === "exchanging" ? "Guest found · securing the direct connection" : multiplayerState.rendezvousStatus === "connected" ? "Connected · the host world is live" : multiplayerReturn === "title" ? "Enter the host code, then Join" : "Choose Host or Join to begin"}</span></p>
             </section>
 
-            {multiplayerReturn === "pause" && <details className="multiplayer-advanced">
+            <details className="multiplayer-advanced">
               <summary>Advanced direct connection fallback</summary>
               <p>Use this only if the one-code rendezvous service cannot be reached. It requires one offer and one return answer.</p>
               <div className="multiplayer-connection-grid">
-                <section>
+                {multiplayerReturn === "pause" && <section>
                   <span className="panel-eyebrow">HOST OFFER</span>
                   <PixelButton disabled={multiplayerBusy || !multiplayerState.supported || multiplayerState.role === "guest"} onClick={() => void hostMultiplayer()}>Create direct offer</PixelButton>
                   {multiplayerState.inviteCode && <div className="connection-code"><label>Host offer</label><textarea readOnly value={multiplayerState.inviteCode} aria-label="Host offer code" /><button type="button" onClick={() => void copyMultiplayerCode(multiplayerState.inviteCode)}>COPY OFFER</button></div>}
                   {(multiplayerState.role === "host" || multiplayerState.inviteCode) && <div className="connection-code"><label htmlFor="guest-answer-code">Guest answer</label><textarea id="guest-answer-code" value={multiplayerAnswer} onChange={(event) => setMultiplayerAnswer(event.target.value)} placeholder="Paste the guest answer" /><button type="button" disabled={multiplayerBusy || !multiplayerAnswer.trim()} onClick={() => void acceptMultiplayerAnswer()}>ACCEPT ANSWER</button></div>}
-                </section>
+                </section>}
                 <section>
                   <span className="panel-eyebrow">JOIN OFFER</span>
                   <div className="connection-code"><label htmlFor="host-invite-code">Host offer</label><textarea id="host-invite-code" value={multiplayerInvite} onChange={(event) => setMultiplayerInvite(event.target.value)} placeholder="Paste the host offer" /></div>
@@ -5469,7 +5554,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
                   {multiplayerState.answerCode && <div className="connection-code guest-answer-output"><label>Answer for the host</label><textarea readOnly value={multiplayerState.answerCode} aria-label="Guest answer code" /><button type="button" onClick={() => void copyMultiplayerCode(multiplayerState.answerCode)}>COPY ANSWER</button></div>}
                 </section>
               </div>
-            </details>}
+            </details>
 
             {multiplayerState.peers.length > 0 && <section className="multiplayer-peer-list"><span className="panel-eyebrow">SESSION PLAYERS</span>{multiplayerState.peers.map((peer, index) => <div key={peer.id ?? peer.token ?? index}><span className="peer-cube" aria-hidden="true" /><strong>{peer.identity?.name ?? peer.name ?? peer.id ?? `Player ${index + 1}`}</strong><small>{(peer.state ?? "connected").toUpperCase()}{typeof peer.latencyMs === "number" ? ` · ${Math.round(peer.latencyMs)}ms` : ""}</small>{peer.identity?.peerKind === "agent" && <button type="button" onClick={() => {
               const agentId = peer.identity!.id ?? peer.id ?? peer.token;

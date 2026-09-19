@@ -3,6 +3,7 @@ import test from "node:test";
 import * as THREE from "three";
 import { BLOCKS, CREATIVE_ITEMS, TORCH_BLOCKS, BlockId, ITEMS, Item, RECIPES, type InventorySlot } from "../app/game/data.ts";
 import { LEGACY_LENS_ORB_ITEMS, LEGACY_SPECIES_ORB_ITEMS } from "../app/game/capture-orbs.ts";
+import { homeLocation, locationId, universeId } from "../app/game/location-address.ts";
 import {
   DEFAULT_UNARMED_DAMAGE,
   DEFAULT_WORLD_OPTIONS,
@@ -695,6 +696,7 @@ test("v0.6 interaction policies keep respawns, instant flora, placement bypass, 
   engine.events = { onToast() {} } as never;
   engine.saveSoon = () => undefined;
   engine.world = {
+    locationScope: { locationId: locationId(homeLocation(universeId("bed-respawn-test"))), epoch: 1, revision: 0 },
     getBlock: (x: number, y: number, z: number) => x === 0 && y === 9 && z === 1 ? BlockId.Stone : BlockId.Air,
     isWalkThrough: (type: BlockId) => type === BlockId.Air,
   } as never;

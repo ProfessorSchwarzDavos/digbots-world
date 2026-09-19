@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
+import { homeLocation, locationId, universeId } from "../app/game/location-address";
+const TEST_SCOPE = Object.freeze({ locationId: locationId(homeLocation(universeId("bridge-test"))), epoch: 3, revision: 7 });
 import { test } from "node:test";
 import { createAgentBrowserBridge } from "../app/game/agent-bridge";
 import type { AgentCommandEnvelope, AgentObservationV1 } from "../app/game/agent-platform";
 
 const observation: AgentObservationV1 = {
-  schema: 1, observationSequence: 7, observedAt: 10, expiresAt: 2_000, worldRevision: 42,
+  scope: TEST_SCOPE,
+  schema: 1, observationSequence: 7, observedAt: Date.now(), expiresAt: Date.now() + 60_000, worldRevision: 42,
   coordinateSystem: "+x east, +y up, +z south",
-  session: { worldId: "world_1", worldFingerprint: "worldfp_1", gameVersion: "1.9.1", generatorVersion: 18, multiplayerProtocolVersion: 3, agentProtocolVersion: 1, role: "guest", connected: true, capabilities: ["observe.world"] },
+  session: { worldId: "world_1", worldFingerprint: "worldfp_1", gameVersion: "1.9.1", generatorVersion: 18, multiplayerProtocolVersion: 4, agentProtocolVersion: 2, role: "guest", connected: true, capabilities: ["observe.world"] },
   self: { agentId: "agent_1", name: "Mica", position: { x: 0, y: 2, z: 0 }, velocity: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0, biome: "Wildwood", depth: "Surface", liquid: null, light: 15, inventory: { used: 0, capacity: 36 }, command: null },
   world: { day: 1, time: 0.25, weather: "clear", occupiedChunkReady: true, players: [], nearby: [], reachable: ["north"] },
   chat: { newestSequence: 0, newChatCount: 0, messages: [] }, tasks: [], waypoints: [],
@@ -31,6 +34,7 @@ test("typed agent bridge constructs fresh host-authorized commands without expos
   assert.equal(issued.accepted, true);
   assert.equal(sent[0]?.agentId, "agent_1");
   assert.equal(sent[0]?.expectedWorldRevision, 42);
+  assert.deepEqual(sent[0]?.scope, TEST_SCOPE);
   assert.equal(bridge.status().lastObservationSequence, 7);
   assert.equal(bridge.status().testAdmin, false);
   assert.equal("engine" in bridge, false);

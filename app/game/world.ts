@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { homeLocation, locationId, universeId, locationStamp as validateLocationStamp, type LocationStamp } from "./location-address";
 import { ChunkMemoryCache, ChunkPersistentCache, type CachedChunkData } from "./chunk-cache";
 import { TerrainBufferPipeline, type TerrainMergedGeometry, type TerrainSectionGeometry } from "./terrain-buffer-pipeline";
 import { TerrainGenerationPipeline, type TerrainGenerationResult } from "./terrain-generation-pipeline";
@@ -2919,6 +2920,10 @@ export class ChunkWorld {
   private chunkEditSignatureCache = new Map<string, string>();
   /** Monotonic session-local revision for optimistic agent commands. */
   mutationRevision = 0;
+  /** Every coordinate-keyed map below belongs to this runtime owner. */
+  locationScope: LocationStamp = { locationId: locationId(homeLocation(universeId(`preview-${globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)}`))), epoch: 1, revision: 0 };
+  private locationLoadEpoch = 0;
+  get runtimeLocationEpoch() { return this.locationLoadEpoch; }
   structureMarkers = new Map<string, StructureMarker>();
   settlementPlans = new Map<string, SettlementWorldPlan>();
   private readonly settlementIndex = new SettlementIndex();
@@ -3123,7 +3128,16 @@ export class ChunkWorld {
     savedEdits?: ChunkEditSave,
     generationOptions?: Partial<WorldGenerationOptions>,
     savedFacings?: Readonly<Record<string, number>>,
+    scope?: LocationStamp,
   ) {
+    this.locationLoadEpoch += 1;
+    if (scope) this.locationScope = validateLocationStamp(scope);
+    // Drop old callbacks and their transferred buffers before admitting work
+    // for a different owner, even when its seed and coordinates are identical.
+    this.terrainGenerationPipeline.dispose();
+    this.terrainBufferPipeline.dispose();
+    this.terrainGenerationPipeline = new TerrainGenerationPipeline();
+    this.terrainBufferPipeline = new TerrainBufferPipeline();
     this.disposeChunks();
     this.generationQueue = [];
     this.generationQueued.clear();
@@ -3762,8 +3776,10 @@ export class ChunkWorld {
       const dz = Math.floor(index / 3) - 1;
       return this.chunkEditSignature(chunkKey(cx + dx, cz + dz));
     }).join(".");
-    return `terrain-v5|g${GENERATOR_VERSION}|${this.seedText}|${JSON.stringify(this.generationOptions)}|${key}|${editHalo}`;
+    return `terrain-location-v1|${this.locationScope.locationId}|g${GENERATOR_VERSION}|${this.seedText}|${JSON.stringify(this.generationOptions)}|${key}|${editHalo}`;
   }
+
+  private generationNamespace(key: string) { return `${this.locationLoadEpoch}|${this.chunkCacheKey(key)}`; }
 
   private structureMarkerEntriesForChunk(cx: number, cz: number) {
     return [...this.structureMarkers.entries()].filter(([, marker]) => (
@@ -3828,9 +3844,10 @@ export class ChunkWorld {
 
   private requestPersistentChunk(key: string, cx: number, cz: number, distance: number) {
     const cacheKey = this.chunkCacheKey(key);
+    const ownerEpoch = this.locationLoadEpoch;
     if (!this.chunkPersistentCache.supported || this.pendingPersistentChunks.has(cacheKey)) return false;
     const queueGenerationFallback = () => {
-      if (cacheKey !== this.chunkCacheKey(key) || this.chunks.has(key)) return;
+      if (ownerEpoch !== this.locationLoadEpoch || cacheKey !== this.chunkCacheKey(key) || this.chunks.has(key)) return;
       const radialStreaming = this.renderDistance > RADIAL_STREAMING_DISTANCE_THRESHOLD;
       if (!chunkWithinStreamingRadius(cx - this.playerChunkX, cz - this.playerChunkZ, this.renderDistance + 1, radialStreaming)) return;
       if (this.generationQueued.has(key) || this.activeGenerationTask?.key === key) return;
@@ -3841,6 +3858,7 @@ export class ChunkWorld {
     };
     this.pendingPersistentChunks.add(cacheKey);
     void this.chunkPersistentCache.get(cacheKey).then((data) => {
+      if (ownerEpoch !== this.locationLoadEpoch) return;
       this.pendingPersistentChunks.delete(cacheKey);
       if (cacheKey !== this.chunkCacheKey(key) || this.chunks.has(key)) return;
       if (data) {
@@ -3851,6 +3869,7 @@ export class ChunkWorld {
       this.persistentCacheMisses += 1;
       queueGenerationFallback();
     }).catch(() => {
+      if (ownerEpoch !== this.locationLoadEpoch) return;
       this.pendingPersistentChunks.delete(cacheKey);
       this.persistentCacheMisses += 1;
       queueGenerationFallback();
@@ -3975,7 +3994,7 @@ export class ChunkWorld {
           this.renderDistance + 1,
           radialStreaming,
         );
-        if (completed.namespace !== this.chunkCacheKey(completed.key) || !retained || this.chunks.has(completed.key)) {
+        if (completed.namespace !== this.generationNamespace(completed.key) || !retained || this.chunks.has(completed.key)) {
           this.generationQueued.delete(completed.key);
           this.generationEnqueuedAt.delete(completed.key);
           this.staleWorkerGeneration += 1;
@@ -4025,7 +4044,7 @@ export class ChunkWorld {
         const key = chunkKey(next.cx, next.cz);
         if (this.chunks.has(key) || this.pendingWorkerGeneration.has(key)) continue;
         const request = {
-          namespace: this.chunkCacheKey(key),
+          namespace: this.generationNamespace(key),
           seedText: this.seedText,
           generationOptions: this.generationOptions as unknown as Readonly<Record<string, unknown>>,
           key,
@@ -4035,8 +4054,12 @@ export class ChunkWorld {
         };
         if (!this.terrainGenerationPipeline.submit(
           request,
-          (result) => this.completedWorkerGeneration.push(result),
+          (result) => {
+            if (request.namespace !== this.generationNamespace(key)) { this.staleWorkerGeneration += 1; return; }
+            this.completedWorkerGeneration.push(result);
+          },
           () => {
+            if (request.namespace !== this.generationNamespace(key)) return;
             this.pendingWorkerGeneration.delete(key);
             const radialStreaming = this.renderDistance > RADIAL_STREAMING_DISTANCE_THRESHOLD;
             const retained = chunkWithinStreamingRadius(
@@ -4045,7 +4068,7 @@ export class ChunkWorld {
               this.renderDistance + 1,
               radialStreaming,
             );
-            if (request.namespace !== this.chunkCacheKey(key) || !retained || this.chunks.has(key)) {
+            if (request.namespace !== this.generationNamespace(key) || !retained || this.chunks.has(key)) {
               this.generationQueued.delete(key);
               this.generationEnqueuedAt.delete(key);
               return;
@@ -4636,16 +4659,19 @@ export class ChunkWorld {
         if (mesh) parts.push(this.terrainSectionGeometry(mesh.geometry));
       }
       const revision = this.consolidationRevision.get(queueKey) ?? 0;
+      const ownerEpoch = this.locationLoadEpoch;
       dirtyLayers.delete(next.layer);
       if (!dirtyLayers.size) this.consolidationDirtyLayers.delete(next.key);
       this.pendingConsolidations.add(queueKey);
       this.terrainBufferPipeline.submit(
         parts,
         (geometry) => {
+          if (ownerEpoch !== this.locationLoadEpoch) { this.staleConsolidations += 1; return; }
           this.pendingConsolidations.delete(queueKey);
           this.completedConsolidations.push({ key: next.key, layer: next.layer, revision, geometry });
         },
         () => {
+          if (ownerEpoch !== this.locationLoadEpoch) return;
           this.pendingConsolidations.delete(queueKey);
           if (!this.chunks.has(next.key) || revision !== this.consolidationRevision.get(queueKey)) return;
           const retryLayers = this.consolidationDirtyLayers.get(next.key) ?? new Set<WorldRenderLayer>();
@@ -9158,6 +9184,7 @@ export class ChunkWorld {
   }
 
   dispose() {
+    this.locationLoadEpoch += 1;
     this.disposeChunks();
     this.terrainBufferPipeline.dispose();
     this.terrainGenerationPipeline.dispose();

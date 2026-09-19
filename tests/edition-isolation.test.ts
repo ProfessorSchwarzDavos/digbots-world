@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { homeLocation, locationId, universeId } from "../app/game/location-address.ts";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { WorldSave } from "../app/game/engine.ts";
@@ -240,6 +241,7 @@ test("readSettings ignores generic settings and reads the TypeScript-edition rec
 test("manual signaling accepts TypeScript peers and rejects generic or Rust peers before payload inspection", () => {
   const sameEdition: ManualSignal = {
     version: MULTIPLAYER_PROTOCOL_VERSION,
+    scope: { locationId: locationId(homeLocation(universeId("edition-test"))), epoch: 1, revision: 0 },
     protocol: MULTIPLAYER_PROTOCOL_NAME,
     kind: "offer",
     sessionId: "session_typescript_01",

@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { BasicWorldRenderer } from "../app/game/basic-world-renderer.ts";
 import { BiomeId, normalizeWorldGenerationOptions, type ChunkWorld, type ColumnSample } from "../app/game/world.ts";
+import { homeLocation, locationId, universeId } from "../app/game/location-address.ts";
 
 const column: ColumnSample = { height: 42, waterline: 32, biome: BiomeId.Meadow, temperature: 0.5, moisture: 0.5, continental: 0.5, river: 0, mountain: 0 };
-const world = { seed: 19, seedText: "BASIC-RENDERER", sampleColumn: () => column } as unknown as ChunkWorld;
+const world = { seed: 19, seedText: "BASIC-RENDERER", sampleColumn: () => column,
+  locationScope: { locationId: locationId(homeLocation(universeId("basic-test"))), epoch: 1, revision: 0 }, runtimeLocationEpoch: 1 } as unknown as ChunkWorld;
 const generationOptions = normalizeWorldGenerationOptions();
 
 test("basic renderer performs no proxy work when basic equals full distance", () => {
@@ -32,4 +34,3 @@ test("basic renderer installs two-call-capped geometry and pauses replacement un
   assert.equal(pressured.adaptiveDowngrades, 1);
   renderer.dispose();
 });
-

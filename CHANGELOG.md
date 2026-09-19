@@ -2,6 +2,13 @@
 
 Named releases summarize player-visible changes and the compatibility work that keeps browser-local worlds loadable. Dates use the repository release date.
 
+## Unreleased - Celestial Frontiers foundations
+
+- Added canonical location identity, location-owned runtime/cache state, and transactional TypeScript universe saves with exact legacy backups, writer leases, journaled checkpoints and validated whole-universe archives.
+- Save & Quit now waits for durable browser storage; recovery/export remains available when saving fails. Generic/Rust saves are not imported automatically.
+- Scoped multiplayer protocol4 and agent protocol2 to the admitted location/epoch/revision; preserved host-owned custody and blocked conflicting request replay within the bounded response window.
+- This is a partially verified local foundation checkpoint. Additional destinations, the remaining expansion, and comprehensive integration verification are unfinished; no release or deployment is implied.
+
 ## 1.12.0 - Field Archive - 2026-08-01
 
 - Added a searchable public `/wiki` with stable article links and lazy category shards for 537 items, 232 creatures, 52 plants, 24 surface biomes, and ten maintained system guides.

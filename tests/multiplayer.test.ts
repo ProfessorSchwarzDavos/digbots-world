@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { homeLocation, locationId, universeId } from "../app/game/location-address.ts";
+const TEST_SCOPE = Object.freeze({ locationId: locationId(homeLocation(universeId("wire-test"))), epoch: 3, revision: 7 });
 import test from "node:test";
 import {
   MAX_MOVEMENT_MESSAGE_BYTES,
@@ -194,6 +196,7 @@ class FakePeerConnection implements PeerConnectionLike {
 function makeSession(identity: PeerIdentity, network: FakeRtcNetwork, now: () => number, events: MultiplayerEvent[]) {
   return new MultiplayerSession({
     identity,
+    locationScope: TEST_SCOPE,
     peerConnectionFactory: network.factory,
     randomId: deterministicIds(identity.name.replace(/\s/gu, "")),
     now,
@@ -228,6 +231,7 @@ test("identity, invite, and versioned envelope codecs round-trip with bounds", (
   assert.equal(validatePeerIdentity({ ...HOST, color: "blue" }), false);
   const offer: ManualSignal = {
     version: MULTIPLAYER_PROTOCOL_VERSION,
+    scope: TEST_SCOPE,
     protocol: MULTIPLAYER_PROTOCOL_NAME,
     kind: "offer",
     sessionId: "session_codec_01",
@@ -239,6 +243,7 @@ test("identity, invite, and versioned envelope codecs round-trip with bounds", (
 
   const envelope: MultiplayerEnvelope<"player-pose"> = {
     version: MULTIPLAYER_PROTOCOL_VERSION,
+    scope: TEST_SCOPE,
     sessionId: "session_codec_01",
     type: "player-pose",
     sequence: 3,
@@ -295,6 +300,52 @@ test("feature detection reports missing browser WebRTC without throwing", () => 
   assert.equal(support.supported, false);
   assert.equal(support.webRTC, false);
   assert.ok(support.reasons.some((reason) => reason.includes("RTCPeerConnection")));
+});
+
+test("protocol4 rejects unscoped, old and foreign signaling before payload access", async () => {
+  const network = new FakeRtcNetwork();
+  const host = makeSession(HOST, network, () => 100, []);
+  const guest = new MultiplayerSession({ identity: GUEST_A, peerConnectionFactory: network.factory, autoMaintenance: false });
+  await assert.rejects(guest.createHostInvite(), /validated location/u);
+  const offer = await host.createHostInvite();
+  const decoded = decodeInviteCode(offer.inviteCode);
+  const answer = await guest.createGuestAnswer(offer.inviteCode);
+  assert.deepEqual(guest.locationScope, TEST_SCOPE, "title guest adopts host identity without a local save");
+  const bad = { ...decodeInviteCode(answer.answerCode), scope: { ...TEST_SCOPE, epoch: TEST_SCOPE.epoch + 1 } };
+  await assert.rejects(host.acceptGuestAnswer(encodeInviteCode(bad)), /different location/u);
+  await host.acceptGuestAnswer(answer.answerCode); await flushMessages();
+  assert.equal(host.state, "connected");
+  assert.equal(decoded.version, 4);
+  let touched = false;
+  const unscoped = { version: 4, get payload() { touched = true; throw Error("must not inspect payload"); } };
+  assert.equal(validateEnvelope(unscoped), false); assert.equal(touched, false);
+  assert.equal(validateEnvelope({ version: 3, get payload() { throw Error("old protocol payload accessed"); } }), false);
+  guest.dispose(); host.dispose();
+});
+
+test("scope mismatch and changed-intent replay never reach gameplay handlers", async () => {
+  const variants = [
+    { ...TEST_SCOPE, locationId: locationId(homeLocation(universeId("foreign-universe"))) },
+    { ...TEST_SCOPE, epoch: TEST_SCOPE.epoch - 1 },
+    { ...TEST_SCOPE, revision: TEST_SCOPE.revision - 1 },
+  ];
+  for (const scope of variants) {
+    const network = new FakeRtcNetwork(), events: MultiplayerEvent[] = [];
+    const host = makeSession(HOST, network, () => 100, events), guest = makeSession(GUEST_A, network, () => 100, []);
+    await connect(host, guest);
+    const channel = [...network.connections.values()][1].channels.find(entry => entry.label === RELIABLE_CHANNEL_LABEL)!;
+    const payload: InventoryAction = { requestId: "scope_pickup_001", actorId: GUEST_A.id, kind: "collect", dropId: 71, status: "request" };
+    channel.send(JSON.stringify({ version: 4, scope, sessionId: host.sessionId, sequence: 100, sentAt: 100, from: GUEST_A.id, type: "inventory-action", payload }));
+    await flushMessages();
+    assert.equal(events.filter(event => event.type === "message").length, 0);
+    assert.ok(events.some(event => event.type === "error" && /location|epoch|revision/u.test(event.error.message)));
+    guest.sendInventoryAction(payload); await flushMessages();
+    guest.sendInventoryAction(payload); await flushMessages();
+    guest.sendInventoryAction({ ...payload, dropId: 72 }); await flushMessages();
+    assert.equal(events.filter(event => event.type === "message").length, 1, "duplicate and altered retry cannot execute twice");
+    assert.ok(events.some(event => event.type === "error" && /different intent/u.test(event.error.message)));
+    guest.dispose(); host.dispose();
+  }
 });
 
 test("browser multiplayer latency QA range is explicit and safely bounded", () => {
@@ -447,6 +498,7 @@ test("agent peers preserve identity, command ownership, chat ordering, and dedic
   const issuedAt = Date.now();
   const command: AgentCommandEnvelope = {
     schema: 1,
+    scope: TEST_SCOPE,
     commandId: "command_move_01",
     agentId: agent.id,
     kind: "move_to",

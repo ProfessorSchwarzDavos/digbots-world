@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { homeLocation, locationId, universeId } from "../app/game/location-address";
 import test from "node:test";
 import * as THREE from "three";
 import { BlockId, Item } from "../app/game/data.ts";
@@ -128,6 +129,7 @@ test("host reassembles and persists a reconnecting guest's quest progression by 
   const engine = Object.create(VoxelEngine.prototype) as VoxelEngine & Record<string, unknown>;
   Object.assign(engine, {
     multiplayer: { role: "host", sendPlayerProgress: (action: unknown) => { acknowledgements.push(action); return 1; } },
+    world: { locationScope: { locationId: locationId(homeLocation(universeId("progression-test"))), epoch: 1, revision: 0 } },
     multiplayerPlayerProgressions: new Map(), multiplayerProgressTransfers: new Map(),
     multiplayerProgressOutgoing: [], saveSoon: () => undefined,
   });

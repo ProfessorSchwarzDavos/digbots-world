@@ -489,7 +489,15 @@ export function stepSwimming(
   environment: SwimEnvironment,
   deltaSeconds: number,
   rules: SwimRules = DEFAULT_SWIM_RULES,
+  gravityG = 1,
 ): SwimStep {
+  if (gravityG !== 1) {
+    const g = Math.max(0, Number.isFinite(gravityG) ? gravityG : 1);
+    rules = { ...rules, buoyancyAcceleration: rules.buoyancyAcceleration * g,
+      passiveSinkAcceleration: rules.passiveSinkAcceleration * g,
+      surfaceBobRecoveryAcceleration: rules.surfaceBobRecoveryAcceleration * g,
+      surfaceRecoveryAcceleration: rules.surfaceRecoveryAcceleration * g };
+  }
   const dt = Math.max(0, Math.min(1, deltaSeconds));
   const submersion = Math.max(0, Math.min(1, environment.submersion));
   let oxygenSeconds = Math.max(0, Math.min(rules.maxOxygenSeconds, state.oxygenSeconds));

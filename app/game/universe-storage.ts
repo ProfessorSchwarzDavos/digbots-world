@@ -44,7 +44,7 @@ export type UniverseSnapshot = Readonly<{
   locations: readonly { descriptor: LocationDescriptor; fields: SaveFields }[];
   players: readonly PlayerData[]; backups: readonly LegacyBackup[]; journals: readonly UniverseJournal[]; receipts: readonly MigrationReceipt[];
 }>;
-export type UniverseLoadedWorld = Readonly<{ world: StoredWorld; manifest: UniverseManifest; stamp: LocationStamp; lease: UniverseLease | null }>;
+export type UniverseLoadedWorld = Readonly<{ world: StoredWorld; manifest: UniverseManifest; catalog: CelestialCatalogSnapshot; stamp: LocationStamp; lease: UniverseLease | null }>;
 export type UniverseFaultStage = "before-prepare" | "prepare-written" | "after-prepare" | "before-records" | "records-written" | "before-commit" | "after-commit";
 export type UniverseStorageDependencies = Readonly<{
   indexedDB?: IDBFactory | null; now?: () => number; ownerId?: string;
@@ -306,7 +306,7 @@ export class UniverseStorage {
     const location = snapshot.locations.find((entry) => entry.descriptor.id === manifest.currentLocationId)!;
     const player = snapshot.players.find((entry) => entry.playerId === manifest.currentPlayerId)!;
     const save = composeUniverseSave({ universe: snapshot.universe.fields, extensions: snapshot.universe.extensions, location: location.fields, player: player.fields });
-    return { world: { version: 1, metadata: cloneUniverseJson(manifest.metadata), options: cloneUniverseJson(manifest.options), save }, manifest,
+    return { world: { version: 1, metadata: cloneUniverseJson(manifest.metadata), options: cloneUniverseJson(manifest.options), save }, manifest, catalog: snapshot.catalog,
       stamp: { locationId: manifest.currentLocationId, epoch: lease?.epoch ?? location.descriptor.generationEpoch, revision: location.descriptor.revision }, lease };
   }
 

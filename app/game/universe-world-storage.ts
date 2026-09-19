@@ -98,6 +98,7 @@ export class UniverseWorldStorage {
   get activeWorldId() { return this.selectedId; }
   get currentStamp(): LocationStamp | null { return this.active ? { ...this.active.stamp } : null; }
   get currentManifest() { return this.active?.manifest ?? null; }
+  get currentCatalog() { return this.active?.catalog ?? null; }
   get writerAuthorityValid() { return this.writerConfirmed && !!this.active?.lease && this.active.lease.expiresAt > Date.now(); }
   get currentStatus() { return { ...this.status }; }
 

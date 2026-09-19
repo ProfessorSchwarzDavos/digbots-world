@@ -10,7 +10,7 @@ export const WORLD_SAVE_OWNERS = Object.freeze({
   seed: "location", mode: "universe", edits: "location", blockFacings: "location", player: "player", spawn: "location",
   startingSettlementId: "location", inventory: "player", cursor: "player", trash: "player", craftGrid: "player",
   equipment: "player", offhand: "player", bestiary: "player", saplings: "location", veinRegrowth: "location",
-  selected: "player", health: "player", hunger: "player", xp: "player", level: "player", time: "universe", day: "universe",
+  selected: "player", health: "player", hunger: "player", xp: "player", level: "player", time: "universe", day: "universe", universeTimeSeconds: "universe",
   weather: "location", furnaces: "location", wheatMills: "location", chests: "location", contextualLoot: "location",
   roadEvents: "location", surfaceRoadGraph: "location", apiaries: "location", morphLooms: "location", orbRacks: "location",
   healingStations: "location", aquariums: "location", fieldPerches: "location", summonContracts: "player", guildBook: "player",
@@ -96,6 +96,7 @@ export function composeUniverseSave(parts: UniverseSavePartitions): WorldSave {
     throw new Error("Universe checkpoint has an invalid legacy-compatible core.");
   }
   if (output.agentCustody !== undefined) validateAgentCustody(output.agentCustody);
+  if (output.universeTimeSeconds !== undefined && (typeof output.universeTimeSeconds !== "number" || !Number.isFinite(output.universeTimeSeconds) || output.universeTimeSeconds < 0)) throw new Error("Invalid universe clock.");
   validateLocationPlayerState(output.locationPlayerState);
   return cloneUniverseJson(output) as unknown as WorldSave;
 }

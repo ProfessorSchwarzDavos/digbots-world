@@ -1,5 +1,6 @@
 import { bodyId, systemId, type BodyId, type LocationAddress, type SystemId } from "./location-address";
 import { assertExactKeys, canonicalJson, cloneUniverseJson, freezeUniverseJson, isUniverseRecord, universeSha256 } from "./universe-json";
+import { bodyEnvironment } from "./celestial-environment";
 
 export const CELESTIAL_CATALOG_VERSION = 1;
 export type CelestialBodyKind = "star" | "planet" | "gas-giant" | "moon" | "dwarf-world";
@@ -96,6 +97,7 @@ export function validateCelestialCatalog(value: unknown): CelestialCatalogSnapsh
   const byId = new Map(bodies.map((body) => [body.id, body]));
   if (bodies.filter((body) => body.kind === "star").length !== 1) throw new Error("A catalog requires one root star.");
   for (const body of bodies) {
+    bodyEnvironment(body); // Fail closed if a frozen policy cannot be resolved.
     const path = new Set<BodyId>();
     let current: CelestialBodyDefinition | undefined = body;
     while (current) {

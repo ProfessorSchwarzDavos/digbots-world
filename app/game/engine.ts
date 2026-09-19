@@ -1,4 +1,8 @@
 import * as THREE from "three";
+import { createWaystarCatalog, validateCelestialCatalog, type CelestialCatalogSnapshot, type CelestialBodyDefinition } from "./celestial-catalog";
+import { bodyEnvironment, gravityAcceleration, gravityGait, contactPushOffSpeed, effectiveFallDistance, type BodyEnvironment } from "./celestial-environment";
+import { localBodyClock, secondsFromLocalClock, sampleCelestialSky, type CelestialSkySample } from "./celestial-ephemeris";
+import { CelestialSkyRenderer } from "./celestial-sky";
 import { isSharedModelGeometry, sharedModelGeometryDiagnostics } from "./shared-model-geometry";
 import { CreatureLodBatcher, type CreatureLodInstance } from "./creature-lod-batcher";
 import { CreatureArticulatedBatcher, type ArticulatedCreatureInstance } from "./creature-articulated-batcher";
@@ -758,7 +762,7 @@ import { UniverseWorldStorage as WorldStorage } from "./universe-world-storage";
 import { homeLocation, locationAddress, locationId, parseLocationId, sameLocationStamp, universeId } from "./location-address";
 import { splitUniverseSave, composeUniverseSave } from "./universe-save";
 import { validateAgentCustody, type AgentCustodySave } from "./agent-custody";
-import { resetLocationTransients, validateLocationPlayerState, type LocationPlayerState } from "./location-manager";
+import { resetLocationTransients, validateLocationPlayerState, validLocationVelocity, type LocationPlayerState } from "./location-manager";
 import {
   TYPESCRIPT_AGENT_ID_KEY,
   TYPESCRIPT_MULTIPLAYER_PLAYER_ID_KEY,
@@ -1253,6 +1257,7 @@ export type RecipePlanResult =
 export type InventoryDragTarget = Readonly<{ area: "inventory" | "craft"; index: number }>;
 
 export type HudState = {
+  celestial?: { bodyName: string; gravityG: number; pressureKPa: number; localDayLengthMinutes: number; synthetic: boolean };
   health: number;
   hunger: number;
   xp: number;
@@ -1365,6 +1370,7 @@ export type HudState = {
 
 export type SavedCreature = {
   id: number;
+  celestialVelocity?: [number, number, number];
   /** Stable across capture, release, growth replacement, sleep, and reconnect. */
   specimenId?: string;
   kind: MobKind;
@@ -1523,6 +1529,8 @@ export type WorldSave = {
   level: number;
   time: number;
   day: number;
+  /** Coarse analytic clock, in simulation seconds since the fixed Waystar epoch. */
+  universeTimeSeconds?: number;
   weather: Weather;
   furnaces: Record<string, FurnaceState>;
   wheatMills?: Record<string, WheatMillState>;
@@ -1568,7 +1576,7 @@ export type WorldSave = {
   skillState?: SkillState;
   archiveShelves?: Record<string, ArchiveShelfState>;
   tomeDisplays?: Record<string, TomeDisplayState>;
-  drops?: Array<{ item: ItemCode; count: number; durability?: number; metadata?: Record<string, unknown>; x: number; y: number; z: number; age: number }>;
+  drops?: Array<{ item: ItemCode; count: number; durability?: number; metadata?: Record<string, unknown>; x: number; y: number; z: number; age: number; velocity?: [number, number, number] }>;
   options?: Partial<WorldOptions>;
   playerVariant?: PlayerVariant;
   liquidLevels?: Array<[string, LiquidCell]>;
@@ -3986,6 +3994,16 @@ export class VoxelEngine {
   sun: THREE.Mesh;
   moon: THREE.Mesh;
   stars: THREE.Points;
+  celestialSkyRenderer?: CelestialSkyRenderer;
+  private celestialContextCache?: { key: string; catalog: CelestialCatalogSnapshot; body: CelestialBodyDefinition; environment: BodyEnvironment; kind: ReturnType<typeof parseLocationId>["kind"]; instanceId: string; home: boolean };
+  private networkCelestialCatalog?: CelestialCatalogSnapshot;
+  private celestialSample?: CelestialSkySample;
+  private universeTimeSeconds?: number;
+  private clockLocalTime?: number;
+  private clockLocalDay?: number;
+  private zeroGPushHeld = false;
+  private vacuumDamageAccumulator = 0;
+  private celestialCreatureVelocity = new Map<number, THREE.Vector3>();
   rain: THREE.LineSegments;
   directional: THREE.DirectionalLight;
   hemisphere: THREE.HemisphereLight;
@@ -6090,6 +6108,11 @@ export class VoxelEngine {
     this.lastLightningId = "";
     this.lightningFlash = 0;
     this.day = Math.max(1, Number(save.day) || 1);
+    this.universeTimeSeconds = Number.isFinite(save.universeTimeSeconds) && Number(save.universeTimeSeconds) >= 0
+      ? save.universeTimeSeconds : secondsFromLocalClock(this.bodyContext().catalog.bodies.find(body => body.id === "blockwild")!, this.day, this.worldTime);
+    this.clockLocalTime = undefined; this.clockLocalDay = undefined;
+    this.applyUniverseClock();
+    this.visualWorldTime = this.worldTime;
     this.lastQuestDay = this.day;
     this.weather = save.weather === "rain" ? "rain" : "clear";
     if (!this.worldOptions.weather) this.weather = "clear";
@@ -6176,6 +6199,7 @@ export class VoxelEngine {
       }
     }
     this.creativeFlying = this.mode === "builder" && !this.mountedBoatId && this.mountedCreatureId === null && locationPlayer?.creativeFlying === true;
+    if (this.bodyContext().environment.gravityG === 0 && locationPlayer?.velocity && !this.mountedBoatId && this.mountedCreatureId === null) this.velocity.fromArray(locationPlayer.velocity);
     this.sleepingCreatures = (save.sleepingCreatures ?? [])
       .filter((saved): saved is SavedCreature => Boolean(saved && saved.kind in MOB_DEFS && Number.isFinite(saved.id)))
       .map((saved) => ({ ...saved }));
@@ -6200,7 +6224,8 @@ export class VoxelEngine {
       const drop = this.spawnDrop(normalizedDrop.item, normalizedDrop.count, new THREE.Vector3(savedDrop.x, savedDrop.y, savedDrop.z), normalizedDrop.durability, normalizedDrop.metadata);
       if (!drop) continue;
       drop.mesh.position.set(savedDrop.x, savedDrop.y, savedDrop.z);
-      drop.velocity.set(0, 0, 0);
+      if (this.bodyContext().environment.gravityG === 0 && validLocationVelocity(savedDrop.velocity)) drop.velocity.fromArray(savedDrop.velocity);
+      else drop.velocity.set(0, 0, 0);
       drop.age = clamp(Number(savedDrop.age) || 0, 0, 115);
       drop.pickupDelay = 0.25;
     }
@@ -6552,6 +6577,38 @@ export class VoxelEngine {
     if (!this.assertLocalAgentTestAdmin() || !this.agentTestWorld) return { ok: false as const, code: "test_admin_denied" };
     this.paused = paused;
     return { ok: true as const, paused: this.paused };
+  }
+
+  /** Explicit synthetic-only sky/physics fixture, never an ordinary travel cheat. */
+  configureLocalEnvironmentTest(input: unknown) {
+    if (!this.assertLocalAgentTestAdmin() || !this.agentTestWorld || this.multiplayer || !this.paused) return { ok: false as const, code: "paused_local_test_world_required" };
+    if (!input || typeof input !== "object" || Array.isArray(input)) return { ok: false as const, code: "invalid_environment_fixture" };
+    const value = input as Record<string, unknown>;
+    if (Object.keys(value).some(key => !["universeSeconds", "platform", "roof", "face", "velocity"].includes(key))
+      || value.universeSeconds !== undefined && (typeof value.universeSeconds !== "number" || !Number.isFinite(value.universeSeconds) || value.universeSeconds < 0 || value.universeSeconds > 1e10)
+      || value.platform !== undefined && typeof value.platform !== "boolean"
+      || value.roof !== undefined && typeof value.roof !== "boolean"
+      || value.face !== undefined && !["parent", "sun", "horizon"].includes(String(value.face))
+      || value.velocity !== undefined && (!Array.isArray(value.velocity) || value.velocity.length !== 3 || !value.velocity.every(n => typeof n === "number" && Number.isFinite(n) && Math.abs(n) <= 30))) return { ok: false as const, code: "invalid_environment_fixture" };
+    const y = Math.min(MAX_Y - 12, 110);
+    if (value.platform) {
+      this.world.initializeAround(0, 0);
+      for (let x = -7; x <= 7; x++) for (let z = -7; z <= 7; z++) {
+        this.world.setBlock(x, y, z, (x + z) % 2 === 0 ? BlockId.Stone : BlockId.Cobblestone, true, true);
+        for (let h = 1; h <= 6; h++) this.world.setBlock(x, y + h, z, BlockId.Air, true, true);
+      }
+      this.position.set(0, y + .51, 0); this.lastPosition.copy(this.position); this.velocity.set(0, 0, 0);
+      this.creativeFlying = false; this.grounded = true; this.fallDistance = 0;
+    }
+    if (typeof value.roof === "boolean") for (let x = -6; x <= 6; x++) for (let z = -6; z <= 6; z++) this.world.setBlock(x, y + 4, z, value.roof ? BlockId.Stone : BlockId.Air, true, true);
+    if (typeof value.universeSeconds === "number") this.acceptUniverseClock(value.universeSeconds);
+    if (Array.isArray(value.velocity)) this.velocity.fromArray(value.velocity);
+    this.visualWorldTime = this.worldTime; this.updateDayNight(0);
+    const direction = value.face === "parent" ? this.celestialSample?.bodies.find(body => body.parent)?.direction
+      : value.face === "sun" ? this.celestialSample?.sunDirection : value.face === "horizon" ? [0, .2, -1] : null;
+    if (direction) { this.yaw = Math.atan2(-direction[0], -direction[2]); this.pitch = Math.asin(clamp(direction[1], -1, 1)); }
+    this.updateGameplayCamera(1); this.emitHud(true); this.saveSoon();
+    return { ok: true as const, synthetic: true, location: this.world.locationScope, body: this.bodyContext().body.id, universeSeconds: this.universeTimeSeconds };
   }
 
   advanceLocalAgentTest(milliseconds: number) {
@@ -6987,6 +7044,8 @@ export class VoxelEngine {
     this.multiplayerFacilityPlayerBaseline = null;
     this.pendingReliableRequests.clear();
     this.multiplayerReceivedSnapshot = false;
+    this.networkCelestialCatalog = undefined;
+    this.celestialContextCache = undefined;
     return this.multiplayer;
   }
 
@@ -7225,6 +7284,8 @@ export class VoxelEngine {
     this.latestAgentObservation = null;
     this.latestAgentResult = null;
     this.multiplayerReceivedSnapshot = false;
+    this.networkCelestialCatalog = undefined;
+    this.celestialContextCache = undefined;
     this.sleepVotes.clear();
     this.multiplayerContainerAwaiting.clear();
     this.multiplayerOptimisticContainers?.clear();
@@ -9031,8 +9092,9 @@ export class VoxelEngine {
       boats: [...this.boats.values()].map(({ save }) => ({
         id: save.id, x: save.x, y: save.y, z: save.z, yaw: save.yaw, velocity: save.velocity, passengers: [...save.passengers], ownerId: save.ownerId,
       })),
-      time: { tick: this.multiplayerTick, worldTime: this.worldTime, day: this.day, weather: this.weather, weatherState: { ...this.weatherState } },
+      time: { tick: this.multiplayerTick, worldTime: this.worldTime, day: this.day, universeTimeSeconds: this.advanceUniverseClock(0), weather: this.weather, weatherState: { ...this.weatherState } },
       worldOptions: { ...this.worldOptions, enabledFactions: [...this.worldOptions.enabledFactions] },
+      celestialCatalog: this.bodyContext().catalog,
       // Chests are demand-synced. A broad world snapshot must not truncate an
       // arbitrary prefix or let a guest treat generated placeholder loot as
       // authoritative. Only the recipient's actively opened chest may ride a
@@ -9106,6 +9168,10 @@ export class VoxelEngine {
     // builder catalog when entering somebody else's survival save.
     applyAuthoritativeNetworkMode(this, snapshot.mode);
     this.worldOptions = normalizeWorldOptions(snapshot.worldOptions ?? this.worldOptions);
+    this.networkCelestialCatalog = snapshot.celestialCatalog
+      ? validateCelestialCatalog(snapshot.celestialCatalog)
+      : createWaystarCatalog(this.worldOptions.dayLengthMinutes);
+    this.celestialContextCache = undefined;
     this.butterflyDensity = this.agentMode ? 0 : this.worldOptions.butterflyDensity;
     this.clearEntities();
     this.pendingNetworkMobDeaths.clear();
@@ -9166,6 +9232,7 @@ export class VoxelEngine {
     this.lastLightningId = "";
     this.lightningFlash = 0;
     this.day = snapshot.time.day;
+    this.acceptUniverseClock(snapshot.time.universeTimeSeconds);
     this.weather = snapshot.time.weather;
     if (snapshot.time.weatherState) this.weatherState = { ...snapshot.time.weatherState };
     else this.resetDynamicWeather({ ...this.weatherState, kind: snapshot.time.weather, intensity: snapshot.time.weather === "rain" ? 0.72 : 0 });
@@ -9207,6 +9274,7 @@ export class VoxelEngine {
     }
     this.worldTime = snapshot.time.worldTime;
     this.day = snapshot.time.day;
+    this.acceptUniverseClock(snapshot.time.universeTimeSeconds);
     this.weather = snapshot.time.weather;
     if (snapshot.time.weatherState) this.weatherState = { ...snapshot.time.weatherState };
     this.applyNetworkMobSnapshot(snapshot.mobs, snapshot.tick, snapshot.mobScope);
@@ -9965,6 +10033,7 @@ export class VoxelEngine {
         const time = envelope.payload as WorldSnapshot["time"] & { boats?: NonNullable<WorldSnapshot["boats"]> };
         this.worldTime = time.worldTime;
         this.day = time.day;
+        this.acceptUniverseClock(time.universeTimeSeconds);
         this.weather = time.weather;
         if (time.weatherState) this.weatherState = { ...time.weatherState };
         if (time.boats) this.applyNetworkBoatSnapshot(time.boats);
@@ -10059,7 +10128,7 @@ export class VoxelEngine {
             drops: this.networkDropSnapshotForPeer(peer.identity.id),
           }, peer.identity.id);
           session.sendTimeWeather({
-            tick: this.multiplayerTick, worldTime: this.worldTime, day: this.day, weather: this.weather, weatherState: { ...this.weatherState },
+            tick: this.multiplayerTick, worldTime: this.worldTime, day: this.day, universeTimeSeconds: this.advanceUniverseClock(0), weather: this.weather, weatherState: { ...this.weatherState },
             boats: [...this.boats.values()].map(({ save }) => ({ id: save.id, x: save.x, y: save.y, z: save.z, yaw: save.yaw, velocity: save.velocity, passengers: [...save.passengers], ownerId: save.ownerId })),
           }, peer.identity.id);
         } catch { /* Reconstructable images are retried on the next 5 Hz frame. */ }
@@ -12234,7 +12303,7 @@ export class VoxelEngine {
     this.saveSoon();
     this.emitHud(true);
     if (this.multiplayer?.role === "host") {
-      try { this.multiplayer.sendTimeWeather({ tick: this.multiplayerTick, worldTime: this.worldTime, day: this.day, weather: this.weather, weatherState: { ...this.weatherState } }); }
+      try { this.multiplayer.sendTimeWeather({ tick: this.multiplayerTick, worldTime: this.worldTime, day: this.day, universeTimeSeconds: this.advanceUniverseClock(0), weather: this.weather, weatherState: { ...this.weatherState } }); }
       catch { /* A peer may disconnect while the vote resolves. */ }
     }
   }
@@ -19366,7 +19435,7 @@ export class VoxelEngine {
   updateFallingTrees(dt: number) {
     for (let index = this.fallingTrees.length - 1; index >= 0; index -= 1) {
       const tree = this.fallingTrees[index];
-      tree.progress = Math.min(1, tree.progress + dt / 0.92);
+      tree.progress = Math.min(1, tree.progress + dt / 0.92 * Math.sqrt(this.bodyContext().environment.gravityG));
       const eased = 1 - Math.pow(1 - tree.progress, 3);
       tree.group.quaternion.setFromAxisAngle(tree.fallAxis, eased * Math.PI * 0.48);
       if (tree.progress >= 1) {
@@ -20078,6 +20147,9 @@ export class VoxelEngine {
     }
     const forwardAmount = (this.keys.has("KeyW") ? 1 : 0) - (this.keys.has("KeyS") ? 1 : 0);
     const rightAmount = (this.keys.has("KeyD") ? 1 : 0) - (this.keys.has("KeyA") ? 1 : 0);
+    const bodyEnvironment = this.bodyContext().environment;
+    const gravityG = bodyEnvironment.gravityG;
+    const oxygenBeforeMovement = this.oxygenSeconds;
     const moving = forwardAmount !== 0 || rightAmount !== 0;
     const creativeFlight = this.mode === "builder" && this.creativeFlying;
     const liquidSampleX = Math.floor(this.position.x + 0.5);
@@ -20144,11 +20216,12 @@ export class VoxelEngine {
     const cos = Math.cos(this.yaw);
     const desiredX = (-sin * f + cos * r) * speed;
     const desiredZ = (-cos * f - sin * r) * speed;
-    const acceleration = creativeFlight ? 16 : this.grounded || inLiquid ? 18 : 7;
+    const zeroGDrift = gravityG === 0 && !creativeFlight && !inLiquid && !onRopeLadder;
+    const acceleration = zeroGDrift ? 0 : creativeFlight ? 16 : this.grounded || inLiquid ? 18 * Math.sqrt(gravityG) : bodyEnvironment.pressureKPa === 0 ? 0 : 7 * Math.sqrt(gravityG);
     this.velocity.x += (desiredX - this.velocity.x) * Math.min(1, acceleration * dt);
     this.velocity.z += (desiredZ - this.velocity.z) * Math.min(1, acceleration * dt);
     if (!moving) {
-      const drag = creativeFlight ? 10 : this.grounded ? 13 : inLiquid ? 4 : 1.2;
+      const drag = zeroGDrift ? 0 : creativeFlight ? 10 : this.grounded ? 13 * Math.sqrt(gravityG) : inLiquid ? 4 : bodyEnvironment.pressureKPa === 0 ? 0 : 1.2;
       this.velocity.x *= Math.max(0, 1 - drag * dt);
       this.velocity.z *= Math.max(0, 1 - drag * dt);
     }
@@ -20168,6 +20241,26 @@ export class VoxelEngine {
       if (verticalInput === 0) this.velocity.y *= Math.max(0, 1 - dt * 12);
       this.oxygenSeconds = DEFAULT_SWIM_RULES.maxOxygenSeconds;
       this.drowningAccumulator = 0;
+      this.grounded = false;
+    } else if (zeroGDrift) {
+      this.fallVelocity = 0; this.fallDistance = 0; this.fallCuePlayed = false;
+      const pushHeld = this.keys.has("Space");
+      if (pushHeld && !this.zeroGPushHeld) {
+        const contact = this.position.clone();
+        let normal: THREE.Vector3 | null = null;
+        for (const [x, y, z] of [[0, -.08, 0], [0, .08, 0], [-.08, 0, 0], [.08, 0, 0], [0, 0, -.08], [0, 0, .08]]) {
+          contact.copy(this.position).add(new THREE.Vector3(x, y, z));
+          if (this.collidesAt(contact)) { normal = new THREE.Vector3(-x, -y, -z).normalize(); break; }
+        }
+        if (normal) {
+          // v1 carried-mass proxy: 250 g per item unit plus an 80 kg body.
+          const mass = this.inventory.reduce((sum, slot) => sum + (slot?.count ?? 0) * .25, 0);
+          if (moving) normal.add(new THREE.Vector3(desiredX, 0, desiredZ).normalize().multiplyScalar(.7)).normalize();
+          this.velocity.addScaledVector(normal, contactPushOffSpeed(mass));
+          this.audio.play("jump");
+        }
+      }
+      this.zeroGPushHeld = pushHeld;
       this.grounded = false;
     } else if (inSwimmableLiquid) {
       this.fallVelocity = 0;
@@ -20216,6 +20309,7 @@ export class VoxelEngine {
           : tidebreathActive
           ? { ...DEFAULT_SWIM_RULES, maxOxygenSeconds: 300, oxygenDrainPerSecond: 0 }
           : hasBreatherCharm ? { ...DEFAULT_SWIM_RULES, maxOxygenSeconds: 24 } : DEFAULT_SWIM_RULES,
+        gravityG,
       );
       this.velocity.y = swim.state.velocityY;
       this.waterEntryMomentumSpeed = swim.state.entryMomentumSpeed ?? 0;
@@ -20232,7 +20326,7 @@ export class VoxelEngine {
       this.fallVelocity = 0;
       this.fallDistance = 0;
       this.fallCuePlayed = false;
-      this.velocity.y -= 5 * dt;
+      this.velocity.y -= gravityAcceleration(5, gravityG) * dt;
       this.velocity.y *= Math.max(0, 1 - 2.4 * dt);
       if (this.keys.has("Space")) this.velocity.y += 9.5 * dt;
     } else if (onRopeLadder) {
@@ -20255,7 +20349,7 @@ export class VoxelEngine {
         this.grounded = false;
         this.audio.play("jump");
       }
-      this.velocity.y -= 24 * dt;
+      this.velocity.y -= gravityAcceleration(24, gravityG) * dt;
       this.fallVelocity = Math.min(this.fallVelocity, this.velocity.y);
       if (!this.fallCuePlayed && this.fallVelocity < -8.5) {
         this.audio.play("fall");
@@ -20263,6 +20357,14 @@ export class VoxelEngine {
       }
     }
 
+    if (!zeroGDrift) this.zeroGPushHeld = false;
+    if (!bodyEnvironment.breathable && !this.headSubmerged && this.mode === "survival") {
+      this.oxygenSeconds = Math.max(0, oxygenBeforeMovement - dt);
+      if (this.oxygenSeconds === 0) {
+        this.vacuumDamageAccumulator += dt;
+        if (this.vacuumDamageAccumulator >= 1.5) { this.vacuumDamageAccumulator -= 1.5; this.damagePlayer(1, "the unbreathable atmosphere", true, "ambient"); }
+      }
+    } else this.vacuumDamageAccumulator = 0;
     this.moveWithCollisions(this.velocity.x * dt, 0, 0);
     const verticalStart = this.position.y;
     this.moveWithCollisions(0, this.velocity.y * dt, 0);
@@ -20272,16 +20374,16 @@ export class VoxelEngine {
     this.moveWithCollisions(0, 0, this.velocity.z * dt);
     const wasGrounded = this.grounded;
     this.groundProbe.set(this.position.x, this.position.y - 0.055, this.position.z);
-    this.grounded = creativeFlight ? false : this.collidesAt(this.groundProbe);
+    this.grounded = creativeFlight || zeroGDrift ? false : this.collidesAt(this.groundProbe);
     if (!wasGrounded && this.grounded && !inLiquid) {
       this.audio.play("land", this.blockUnderfoot());
-      const fallDamage = fallDamageForDistance(this.fallDistance);
+      const fallDamage = fallDamageForDistance(effectiveFallDistance(this.fallDistance, gravityG));
       if (this.mode === "survival" && fallDamage > 0) this.damagePlayer(fallDamage, "the fall", true, "ambient");
       this.fallVelocity = 0;
       this.fallDistance = 0;
       this.fallCuePlayed = false;
     }
-    if (this.position.y < MIN_Y - 8) this.respawn(true);
+    if (!zeroGDrift && this.position.y < MIN_Y - 8) this.respawn(true);
 
     const horizontalTravel = Math.hypot(this.position.x - this.lastPosition.x, this.position.z - this.lastPosition.z);
     if (this.grounded && moving && !inLiquid) {
@@ -24523,13 +24625,14 @@ export class VoxelEngine {
         const next = integrateSailboat(boat.save, { forward, turn }, dt, (x, z) => {
           const y = Math.floor(boat.save.y - 0.05);
           return blockContainsWater(this.world.getBlock(Math.floor(x + 0.5), y, Math.floor(z + 0.5)));
-        });
+        }, this.bodyContext().environment.gravityG);
         Object.assign(boat.save, next);
       } else if (remoteInput && !freshRemoteInput) {
         this.multiplayerBoatInputs.delete(driverId);
       }
-      boat.group.position.set(boat.save.x, boat.save.y + Math.sin(performance.now() * 0.0018 + boat.save.x) * 0.025, boat.save.z);
-      boat.group.rotation.set(Math.sin(performance.now() * 0.0013 + boat.save.z) * 0.018, boat.save.yaw, Math.sin(performance.now() * 0.0016 + boat.save.x) * 0.025);
+      const bob = Math.min(1.8, Math.sqrt(this.bodyContext().environment.gravityG));
+      boat.group.position.set(boat.save.x, boat.save.y + Math.sin(performance.now() * 0.0018 + boat.save.x) * 0.025 * bob, boat.save.z);
+      boat.group.rotation.set(Math.sin(performance.now() * 0.0013 + boat.save.z) * 0.018 * bob, boat.save.yaw, Math.sin(performance.now() * 0.0016 + boat.save.x) * 0.025 * bob);
       if (localSeat >= 0) {
         this.mountedBoatId = boat.save.id;
         const seat = sailboatSeatOffset(localSeat, boat.save.yaw);
@@ -25307,7 +25410,8 @@ export class VoxelEngine {
       if (movement === "ground") {
         const resolvedY = this.mobMoveTarget(mob, x, z, this.mobBaseScale(mob), referenceGround, false, maxStepUp, maxDrop);
         if (resolvedY === null) return false;
-        targetY = resolvedY;
+        targetY = this.bodyContext().environment.gravityG !== 1 && resolvedY < mob.group.position.y ? mob.group.position.y : resolvedY;
+        if (targetY !== resolvedY) mob.baseY = resolvedY;
       } else if (movement === "aquatic") {
         const liquid = this.world.getBlock(Math.floor(x + 0.5), Math.floor(targetY + 0.5), Math.floor(z + 0.5));
         if (mob.kind === "syrupfin" ? liquid !== BlockId.Syrup : !blockContainsWater(liquid)) return false;
@@ -25322,7 +25426,7 @@ export class VoxelEngine {
           targetY,
         );
         if (mob.presentationRoot) mob.presentationRoot.position.y = mob.stepPresentationOffset;
-        mob.baseY = targetY;
+        if (this.bodyContext().environment.gravityG === 1 || targetY > previousY) mob.baseY = targetY;
         referenceGround = Math.round(targetY - mob.definition.footOffset);
       }
       return true;
@@ -26185,6 +26289,7 @@ export class VoxelEngine {
   serializeCreature(mob: MobEntity): SavedCreature {
     return {
       id: mob.id,
+      ...(this.celestialCreatureVelocity?.has(mob.id) ? { celestialVelocity: this.celestialCreatureVelocity.get(mob.id)!.toArray() as [number, number, number] } : {}),
       specimenId: mob.specimenId,
       kind: mob.kind,
       ...(mob.name !== mob.definition.name ? { name: mob.name } : {}),
@@ -26253,7 +26358,7 @@ export class VoxelEngine {
       this.world.generateChunk(Math.floor(migrated.x / CHUNK_SIZE), Math.floor(migrated.z / CHUNK_SIZE));
       const markerY = this.world.sampleColumn(piehouseOrigin.x, piehouseOrigin.z).height + 1;
       position.y = structureMobSpawnY(this.world, migrated.kind, migrated.x, migrated.z, markerY, ["authored-interior-spawn"]);
-    } else if (definition.movement !== "flying" && definition.movement !== "aquatic" && !isLeviathanKind(migrated.kind) && migrated.kind !== "glowmoth") {
+    } else if (this.bodyContext().environment.gravityG > 0 && definition.movement !== "flying" && definition.movement !== "aquatic" && !isLeviathanKind(migrated.kind) && migrated.kind !== "glowmoth") {
       const x = Math.round(migrated.x);
       const z = Math.round(migrated.z);
       const clearance = Math.max(1, Math.ceil(definition.height));
@@ -26278,6 +26383,10 @@ export class VoxelEngine {
     const restoredUnderground = legacyNatural && typeof this.world?.surfaceAt === "function"
       ? position.y < this.world.surfaceAt(Math.round(position.x), Math.round(position.z)) - 2
       : false;
+    if (validLocationVelocity(saved.celestialVelocity)) {
+      this.celestialCreatureVelocity ??= new Map();
+      this.celestialCreatureVelocity.set(saved.id, new THREE.Vector3().fromArray(saved.celestialVelocity));
+    }
     return this.spawnMob(migrated.kind, position, {
       id: migrated.id,
       specimenId: migrated.specimenId ?? null,
@@ -26793,6 +26902,7 @@ export class VoxelEngine {
   }
 
   trySpawnMob(intent: "passive" | "hostile" = "passive", requestedFocus?: SimulationInterestPoint) {
+    if (!this.bodyContext().home) return; // Destination ecology is authored in CF4, not Home fauna in vacuum.
     const interests = this.simulationInterestPoints();
     const focus = requestedFocus ?? selectSimulationInterest(interests, this.naturalSpawnInterestCursor++);
     if (!focus) return;
@@ -27024,8 +27134,9 @@ export class VoxelEngine {
   }
 
   animateMob(mob: MobEntity, moved: number) {
-    mob.gait += moved * 9;
-    mob.bob += moved * 4;
+    const gravity = gravityGait(this.bodyContext().environment.gravityG);
+    mob.gait += moved * 9 / gravity.stride;
+    mob.bob += moved * 4 * gravity.cadence;
     // Middle- and far-tier animation is expressed by the shared batch matrix;
     // avoid walking every hidden authored hierarchy merely to mutate transforms
     // the renderer will not submit.
@@ -28475,7 +28586,7 @@ export class VoxelEngine {
     const origin = mob.group.position.clone().add(new THREE.Vector3(0, mob.definition.height * 0.78, 0));
     const target = this.position.clone().add(new THREE.Vector3(0, 1.1, 0));
     const projectile = mob.kind === "webspinner-golem"
-      ? createWebspinnerProjectile(this.nextProjectileId++, { kind: "mob", id: mob.id }, origin, target, mob.damage, 18, 3.2)
+      ? createWebspinnerProjectile(this.nextProjectileId++, { kind: "mob", id: mob.id }, origin, target, mob.damage, 18, 3.2, this.bodyContext().environment.gravityG)
       : mob.kind === "wood-elf-leafwarden"
       ? createVerdantVolleyProjectile(
         this.nextProjectileId++,
@@ -28485,8 +28596,9 @@ export class VoxelEngine {
         Math.max(mob.damage, WOOD_ELF_LEAF_ATTACK.damage),
         WOOD_ELF_LEAF_ATTACK.speed,
         WOOD_ELF_LEAF_ATTACK.statusSeconds,
+        this.bodyContext().environment.gravityG,
       )
-      : createArrowProjectile(this.nextProjectileId++, { kind: "mob", id: mob.id }, origin, target, mob.damage, 11.8);
+      : createArrowProjectile(this.nextProjectileId++, { kind: "mob", id: mob.id }, origin, target, mob.damage, 11.8, this.bodyContext().environment.gravityG);
     projectile.targetKind = "player";
     this.projectileGroup.add(projectile.visual);
     this.projectiles.push(projectile);
@@ -28505,7 +28617,7 @@ export class VoxelEngine {
     const origin = mob.group.position.clone().add(new THREE.Vector3(0, mob.definition.height * 0.76, 0));
     const target = targetMob.group.position.clone().add(new THREE.Vector3(0, targetMob.definition.height * 0.55, 0));
     const projectile = mob.kind === "webspinner-golem"
-      ? createWebspinnerProjectile(this.nextProjectileId++, { kind: "mob", id: mob.id }, origin, target, mob.damage, 18, 3.2)
+      ? createWebspinnerProjectile(this.nextProjectileId++, { kind: "mob", id: mob.id }, origin, target, mob.damage, 18, 3.2, this.bodyContext().environment.gravityG)
       : mob.kind === "wood-elf-leafwarden"
       ? createVerdantVolleyProjectile(
         this.nextProjectileId++,
@@ -28515,8 +28627,9 @@ export class VoxelEngine {
         Math.max(mob.damage, WOOD_ELF_LEAF_ATTACK.damage),
         WOOD_ELF_LEAF_ATTACK.speed,
         WOOD_ELF_LEAF_ATTACK.statusSeconds,
+        this.bodyContext().environment.gravityG,
       )
-      : createArrowProjectile(this.nextProjectileId++, { kind: "mob", id: mob.id }, origin, target, mob.damage, 14.5);
+      : createArrowProjectile(this.nextProjectileId++, { kind: "mob", id: mob.id }, origin, target, mob.damage, 14.5, this.bodyContext().environment.gravityG);
     this.projectileGroup.add(projectile.visual);
     projectile.targetKind = "hostile-mob";
     this.projectiles.push(projectile);
@@ -28664,7 +28777,7 @@ export class VoxelEngine {
     const origin = this.camera.position.clone().addScaledVector(direction, 0.48).add(new THREE.Vector3(0, -0.08, 0));
     const target = origin.clone().addScaledVector(direction, 58);
     const rangedDamage = (definition.damage ?? 2) * skillMultiplier(this.skillState.skills.ranged.level);
-    const arrow = createArrowProjectile(this.nextProjectileId++, { kind: "player", id: this.localPlayerId() }, origin, target, rangedDamage, definition.id === Item.WayfarerCrossbow ? 23 : 19);
+    const arrow = createArrowProjectile(this.nextProjectileId++, { kind: "player", id: this.localPlayerId() }, origin, target, rangedDamage, definition.id === Item.WayfarerCrossbow ? 23 : 19, this.bodyContext().environment.gravityG);
     this.projectileGroup.add(arrow.visual);
     this.projectiles.push(arrow);
     this.rangedLoaded.set(slot.item, loaded - 1);
@@ -28707,7 +28820,7 @@ export class VoxelEngine {
           if (distance <= hitRadius * hitRadius && distance < closestDistance) { closest = mob; closestDistance = distance; }
         }
         return closest?.id ?? null;
-      });
+      }, this.bodyContext().environment.gravityG);
       if (result.kind === "flying") continue;
       if (result.kind === "target") {
         if (projectile.owner.kind === "mob" && result.targetId === "local") {
@@ -28965,7 +29078,41 @@ export class VoxelEngine {
     if (processed < groups.length) this.creatureWorkTimer = Math.min(this.creatureWorkTimer, 0.05);
   }
 
+  private updateCelestialCreatureMotion(dt: number, zeroG: boolean) {
+    const environment = this.bodyContext().environment;
+    this.celestialCreatureVelocity ??= new Map();
+    const live = new Set(this.mobs.map(mob => mob.id));
+    for (const id of this.celestialCreatureVelocity.keys()) if (!live.has(id)) this.celestialCreatureVelocity.delete(id);
+    for (const mob of this.mobs) {
+      if (mob.id === this.mountedCreatureId || mob.dragonState?.onShoulder) continue;
+      if (!zeroG && (mob.definition.aquatic || mob.definition.flying && environment.pressureKPa > 0)) continue;
+      let velocity = this.celestialCreatureVelocity.get(mob.id);
+      if (!velocity) {
+        velocity = new THREE.Vector3();
+        if (zeroG) velocity.set(Math.cos(mob.angle) * .35, 0, Math.sin(mob.angle) * .35);
+        this.celestialCreatureVelocity.set(mob.id, velocity);
+      }
+      if (zeroG) {
+        // No aerial steering without an authored propulsion mechanism. A ground
+        // creature can push from contact, then carries that velocity in vacuum.
+        const contact = !this.mobTerrainClearAt(mob, mob.group.position.x, mob.group.position.y - .08, mob.group.position.z);
+        if (contact && velocity.lengthSq() < .2) velocity.set(Math.cos(mob.angle) * .7, contactPushOffSpeed(mob.definition.radius * mob.definition.height * 80), Math.sin(mob.angle) * .7);
+        mob.age += dt;
+      } else velocity.y -= gravityAcceleration(24, environment.gravityG) * dt;
+      const steps = Math.max(1, Math.ceil(velocity.length() * dt / .1));
+      for (let step = 0; step < steps; step++) for (const axis of ["x", "y", "z"] as const) {
+        if (!zeroG && axis !== "y") continue;
+        const candidate = mob.group.position.clone(); candidate[axis] += velocity[axis] * dt / steps;
+        if (!zeroG && candidate.y < mob.baseY) { candidate.y = mob.baseY; velocity.y = 0; }
+        if (this.mobTerrainClearAt(mob, candidate.x, candidate.y, candidate.z)) mob.group.position.copy(candidate);
+        else velocity[axis] = 0;
+      }
+      if (zeroG) { mob.baseY = mob.group.position.y; this.animateMob(mob, 0); this.refreshMobSpatialEntry(mob); }
+    }
+  }
+
   updateMobs(dt: number) {
+    if (this.bodyContext().environment.gravityG === 0) { this.updateCelestialCreatureMotion(dt, true); return; }
     this.updateTemporaryMagic();
     this.updateCapturePacification(dt);
     this.wakeSleepingCreatures(dt);
@@ -29087,7 +29234,7 @@ export class VoxelEngine {
       const simulationRadius = this.settings.simulationDistance * CHUNK_SIZE + 10;
       mob.age += dt;
       if (mob.dragonState) {
-        const elapsed = dt / Math.max(60, this.worldOptions.dayLengthMinutes * 60) * 24_000 + mob.dragonTickRemainder;
+        const elapsed = dt / Math.max(60, this.bodyContext().body.rotation.dayLengthMinutes * 60) * 24_000 + mob.dragonTickRemainder;
         const ticks = Math.floor(elapsed);
         mob.dragonTickRemainder = elapsed - ticks;
         if (ticks > 0) this.applyDragonState(mob, stepDragonState({ ...mob.dragonState, health: mob.health }, { elapsedTicks: ticks }));
@@ -29245,7 +29392,7 @@ export class VoxelEngine {
           Math.floor(mob.group.position.z + 0.5),
         ));
         const growth = stepLeviathanGrowth(mob.leviathanGrowth, {
-          elapsedTicks: worldTicksForDelta(mobDt, this.worldOptions.dayLengthMinutes),
+          elapsedTicks: worldTicksForDelta(mobDt, this.bodyContext().body.rotation.dayLengthMinutes),
           underwater,
         });
         mob.leviathanGrowth = growth;
@@ -29698,7 +29845,9 @@ export class VoxelEngine {
       const movement = mob.definition.movement ?? (mob.definition.aquatic ? "aquatic" : mob.definition.flying ? "flying" : "ground");
       let routeBlocked = false;
       let routeHeading = mob.desiredAngle;
-      let routeMaxDrop = mob.kind === "caveblob" || mob.kind === "puddlehopper" ? 2 : 1;
+      const gait = gravityGait(this.bodyContext().environment.gravityG);
+      if (!gait.supported && movement === "ground") speed = 0;
+      let routeMaxDrop = Math.max(mob.kind === "caveblob" || mob.kind === "puddlehopper" ? 2 : 1, gait.safeDrop);
       if (movement === "ground" && speed > 0.001) {
         const profile = this.mobCollisionProfile(mob);
         const baseLookahead = Math.max(0.72, (profile.radius || mob.definition.radius * this.mobBaseScale(mob)) + 0.36, speed * 0.42);
@@ -29739,7 +29888,12 @@ export class VoxelEngine {
           const puddlePhase = mob.age % puddleInterval / puddleInterval;
           const hop = mob.kind === "caveblob" ? Math.max(0, Math.sin(performance.now() * 0.006 + mob.id)) * 0.1
             : puddleJump?.jumps && speed > 0 ? Math.max(0, Math.sin(puddlePhase * Math.PI)) * Math.min(0.75, puddleJump.verticalVelocity * 0.1) : 0;
-          mob.group.position.y = mob.baseY + hop;
+          if (this.bodyContext().environment.gravityG === 1) mob.group.position.y = mob.baseY + hop;
+          else if (hop > .02 && mob.group.position.y <= mob.baseY + .02) {
+            const velocity = this.celestialCreatureVelocity.get(mob.id) ?? new THREE.Vector3();
+            if (velocity.y <= 0) velocity.y = 2.2;
+            this.celestialCreatureVelocity.set(mob.id, velocity);
+          }
         } else mob.wanderTimer = Math.max(mob.wanderTimer, 0.5);
       }
       const moved = Math.hypot(mob.group.position.x - beforeX, mob.group.position.z - beforeZ);
@@ -29750,6 +29904,7 @@ export class VoxelEngine {
     }
     for (const defeated of companionKills) if (this.mobs.includes(defeated) && defeated.health <= 0) this.killMob(defeated);
     this.resolveMobBodyOverlaps(dt);
+    if (this.bodyContext().environment.gravityG !== 1) this.updateCelestialCreatureMotion(dt, false);
     this.mobSpatialIndexFrameActive = false;
   }
 
@@ -29868,7 +30023,7 @@ export class VoxelEngine {
       remains.age += dt;
       const burn = clamp((remains.age - 0.72) / 1.55, 0, 1);
       for (const fragment of remains.fragments) {
-        fragment.velocity.y -= 11.5 * dt;
+        fragment.velocity.y -= gravityAcceleration(11.5, this.bodyContext().environment.gravityG) * dt;
         const nextY = fragment.mesh.position.y + fragment.velocity.y * dt;
         const ground = this.world.getBlock(
           Math.floor(fragment.mesh.position.x + 0.5),
@@ -30188,7 +30343,7 @@ export class VoxelEngine {
         const removableIndex = this.drops.findIndex((drop) => !dragonEggDropIsProtected(
           drop.metadata,
           drop.age,
-          this.worldOptions.dayLengthMinutes,
+          this.bodyContext().body.rotation.dayLengthMinutes,
         ));
         if (removableIndex >= 0) this.removeDrop(removableIndex);
       }
@@ -30242,7 +30397,7 @@ export class VoxelEngine {
       const drop = this.drops[index];
       drop.age += dt;
       drop.pickupDelay -= dt;
-      drop.velocity.y -= 12 * dt;
+      drop.velocity.y -= gravityAcceleration(12, this.bodyContext().environment.gravityG) * dt;
       const nextY = drop.mesh.position.y + drop.velocity.y * dt;
       const groundBlock = this.world.getBlock(Math.floor(drop.mesh.position.x + 0.5), Math.floor(nextY - 0.15 + 0.5), Math.floor(drop.mesh.position.z + 0.5));
       if (groundBlock !== undefined && BLOCKS[groundBlock]?.solid && drop.velocity.y < 0) { drop.velocity.y *= -0.28; drop.velocity.x *= 0.72; drop.velocity.z *= 0.72; }
@@ -30250,7 +30405,7 @@ export class VoxelEngine {
       drop.mesh.position.x += drop.velocity.x * dt;
       drop.mesh.position.z += drop.velocity.z * dt;
       drop.mesh.rotation.y += dt * 2.5;
-      drop.mesh.position.y += Math.sin(drop.age * 4) * 0.001;
+      if (this.bodyContext().environment.gravityG > 0) drop.mesh.position.y += Math.sin(drop.age * 4) * 0.001;
       const portableDragonEgg = dragonEggFromDropMetadata(drop.metadata);
       if (portableDragonEgg) {
         const eggCellY = Math.floor(drop.mesh.position.y + 0.5);
@@ -30290,7 +30445,7 @@ export class VoxelEngine {
           Math.floor(drop.mesh.position.z + 0.5),
         ));
         const stepped = stepLeviathanEgg(placedEgg, {
-          elapsedTicks: worldTicksForDelta(dt, this.worldOptions.dayLengthMinutes),
+          elapsedTicks: worldTicksForDelta(dt, this.bodyContext().body.rotation.dayLengthMinutes),
           underwater,
           intact: true,
         });
@@ -30343,7 +30498,7 @@ export class VoxelEngine {
         const celestialClear = !(["overcast", "rain", "thunder", "snow", "sandstorm", "ashfall"] as const).includes(this.weatherState.kind as "overcast" | "rain" | "thunder" | "snow" | "sandstorm" | "ashfall");
         const stepped = stepDragonEgg(
           dragonEgg,
-          worldTicksForDragonDelta(dt, this.worldOptions.dayLengthMinutes),
+          worldTicksForDragonDelta(dt, this.bodyContext().body.rotation.dayLengthMinutes),
           {
             openFlame: cell === BlockId.Lava || heated,
             submerged,
@@ -30401,7 +30556,7 @@ export class VoxelEngine {
         drop.count = leftover;
         if (drop.count <= 0) { this.removeDrop(index, "collected"); this.saveSoon(); this.emitHud(true); continue; }
       }
-      const protectedDragonEgg = dragonEggDropIsProtected(drop.metadata, drop.age, this.worldOptions.dayLengthMinutes);
+      const protectedDragonEgg = dragonEggDropIsProtected(drop.metadata, drop.age, this.bodyContext().body.rotation.dayLengthMinutes);
       if (!protectedDragonEgg && shouldExpireWorldDrop(drop.age, drop.mesh.position, dropInterestPoints)) this.removeDrop(index, "expired");
     }
   }
@@ -30457,6 +30612,9 @@ export class VoxelEngine {
   }
 
   clearEntities() {
+    this.celestialCreatureVelocity?.clear();
+    this.universeTimeSeconds = undefined; this.clockLocalTime = undefined; this.clockLocalDay = undefined;
+    this.zeroGPushHeld = false; this.vacuumDamageAccumulator = 0;
     this.seatedAt = null;
     this.butterflies.clear();
     while (this.mobs.length) this.removeMob(this.mobs.length - 1);
@@ -30788,6 +30946,7 @@ export class VoxelEngine {
   }
 
   daylightAmount() {
+    if (!this.bodyContext().home && this.celestialSample) return clamp((this.celestialSample.sunDirection[1] + .15) / .42, 0, 1) * (1 - this.celestialSample.eclipse);
     const angle = this.worldTime * Math.PI * 2 - Math.PI / 2;
     return clamp((Math.sin(angle) + 0.15) / 0.42, 0, 1);
   }
@@ -30809,10 +30968,11 @@ export class VoxelEngine {
   }
 
   updateDynamicWeather(dt: number) {
-    if (!this.worldOptions.weather) {
+    const environment = this.bodyContext().environment;
+    if (!this.worldOptions.weather || environment.pressureKPa === 0) {
       if (this.weatherState.kind !== "clear") this.weatherState = {
         kind: "clear", cycle: this.weatherState.cycle, elapsedSeconds: 0, durationSeconds: 86_400,
-        intensity: 0, windAngle: this.weatherState.windAngle, windSpeed: 0.25,
+        intensity: 0, windAngle: this.weatherState.windAngle, windSpeed: environment.pressureKPa === 0 ? 0 : 0.25,
       };
       this.weather = "clear";
       return;
@@ -30833,6 +30993,10 @@ export class VoxelEngine {
       }
     }
     this.weatherState = stepWeather(this.weatherState, { seed: this.world.seedText, biome: this.weatherBiome }, dt);
+    if (!this.bodyContext().home && !environment.weather.includes(this.weatherState.kind)) {
+      const kind = environment.weather[this.weatherState.cycle % environment.weather.length] as WeatherState["kind"];
+      this.weatherState = { ...this.weatherState, kind, intensity: kind === "clear" ? 0 : .65, windSpeed: environment.wind };
+    }
     this.syncLegacyWeather();
   }
 
@@ -30887,20 +31051,70 @@ export class VoxelEngine {
     }
   }
 
-  updateDayNight(dt: number) {
-    if (this.running && !this.titleMode && !this.paused) {
-      this.worldTime += dt / Math.max(60, this.worldOptions.dayLengthMinutes * 60);
-      if (this.worldTime >= 1) { this.worldTime -= 1; this.day += 1; }
+  private bodyContext() {
+    const key = this.world?.locationScope?.locationId ?? "home-preview";
+    const savedCatalog = this.multiplayer?.role === "guest" ? this.networkCelestialCatalog : this.worldStorage?.currentCatalog;
+    if (this.celestialContextCache?.key === key && (!savedCatalog || this.celestialContextCache.catalog === savedCatalog)) return this.celestialContextCache;
+    const catalog = savedCatalog ?? createWaystarCatalog(this.worldOptions?.dayLengthMinutes ?? 20);
+    const address = key === "home-preview" ? null : parseLocationId(key);
+    const body = catalog.bodies.find(body => body.id === (address?.bodyId ?? "blockwild"));
+    if (!body) throw new Error("Active body is missing from the frozen universe catalog.");
+    const kind = address?.kind ?? "surface";
+    this.celestialSample = undefined;
+    return this.celestialContextCache = { key, catalog, body, kind, instanceId: address?.instanceId ?? "main", environment: bodyEnvironment(body, kind), home: body.id === "blockwild" && kind === "surface" };
+  }
+
+  private acceptUniverseClock(seconds: number | undefined) {
+    if (typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0) {
+      this.universeTimeSeconds = seconds; this.applyUniverseClock();
     }
+  }
+
+  private applyUniverseClock() {
+    const body = this.bodyContext().body;
+    const clock = localBodyClock(body, this.universeTimeSeconds ?? secondsFromLocalClock(body, this.day, this.worldTime));
+    this.day = clock.day; this.worldTime = clock.time;
+    this.clockLocalDay = this.day; this.clockLocalTime = this.worldTime;
+  }
+
+  private advanceUniverseClock(dt: number) {
+    const body = this.bodyContext().body;
+    if (this.universeTimeSeconds === undefined || !Number.isFinite(this.universeTimeSeconds)) this.universeTimeSeconds = secondsFromLocalClock(body, this.day, this.worldTime);
+    // Sleep and explicit developer time changes advance the same global clock.
+    if (this.clockLocalTime !== undefined && this.clockLocalDay !== undefined
+      && (this.clockLocalTime !== this.worldTime || this.clockLocalDay !== this.day)) {
+      this.universeTimeSeconds = Math.max(0, this.universeTimeSeconds
+        + (this.day - this.clockLocalDay + this.worldTime - this.clockLocalTime) * Math.max(60, body.rotation.dayLengthMinutes * 60));
+    }
+    this.universeTimeSeconds += Math.max(0, dt);
+    this.applyUniverseClock();
+    return this.universeTimeSeconds;
+  }
+
+  updateDayNight(dt: number) {
+    const context = this.bodyContext(), environmentPolicy = context.environment;
+    this.advanceUniverseClock(this.running && !this.titleMode && !this.paused ? dt : 0);
+    let celestial = sampleCelestialSky(context.catalog, context.body, this.universeTimeSeconds!, context.kind, context.instanceId);
     this.visualWorldTime = smoothCyclicDayTime(this.visualWorldTime, this.worldTime, dt);
     const angle = this.visualWorldTime * Math.PI * 2 - Math.PI / 2;
-    const sunHeight = Math.sin(angle);
-    const daylight = clamp((sunHeight + 0.15) / 0.42, 0, 1);
+    if (context.home) {
+      // Keep the familiar Home solar path while rotating every orbital body
+      // and its lighting vector into that same view frame (never fake phases).
+      const rotation = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3().fromArray(celestial.sunDirection), new THREE.Vector3(Math.cos(angle), Math.sin(angle), -.24).normalize());
+      const rotate = (vector: readonly [number, number, number]) => new THREE.Vector3().fromArray(vector).applyQuaternion(rotation).toArray() as [number, number, number];
+      celestial = { ...celestial, sunDirection: rotate(celestial.sunDirection), bodies: celestial.bodies.map(body => ({ ...body,
+        direction: rotate(body.direction), starDirection: rotate(body.starDirection), axisDirection: rotate(body.axisDirection), displayRadius: body.id === "blockwild/morrow" ? .05 : body.displayRadius })) };
+    }
+    this.celestialSample = celestial;
+    const sunHeight = context.home ? Math.sin(angle) : celestial.sunDirection[1];
+    const daylight = clamp((sunHeight + 0.15) / 0.42, 0, 1) * (1 - celestial.eclipse);
     const moonlight = (1 - daylight) * clamp((-sunHeight + 0.05) / 0.7, 0, 1);
     const twilight = Math.pow(1 - Math.min(1, Math.abs(sunHeight)), 5) * (sunHeight > -0.38 ? 1 : 0);
     const weatherFx = weatherVisuals(this.weatherState);
     this.dawnSkyColor.set(sunHeight >= 0 ? "#f1a46f" : "#c36b68");
     const sky = this.skyColor.copy(this.nightSkyColor).lerp(this.daylightSkyColor, daylight).lerp(this.dawnSkyColor, twilight * 0.52);
+    if (!context.home) sky.set(environmentPolicy.sky.night).lerp(this.weatherSkyColor.set(environmentPolicy.sky.day), daylight)
+      .lerp(this.dawnSkyColor.set(environmentPolicy.sky.dusk), environmentPolicy.pressureKPa > 0 ? twilight * .45 : 0);
     const headBlock = this.world.getBlock(Math.floor(this.camera.position.x + 0.5), Math.floor(this.camera.position.y + 0.5), Math.floor(this.camera.position.z + 0.5));
     const underwater = blockContainsWater(headBlock);
     const subterranean = underwater ? 0 : clamp(
@@ -30943,8 +31157,13 @@ export class VoxelEngine {
     this.hemisphere.intensity = skyLight.hemisphere + this.lightningFlash * 0.12;
     this.directional.intensity = skyLight.directional + this.lightningFlash * 2.4;
     this.directional.color.set(twilight > 0.22 ? 0xffae7a : daylight > 0.2 ? 0xfff1ce : 0x8da5cf);
+    if (!context.home) {
+      this.directional.intensity *= clamp(Math.sqrt(celestial.irradiance), .18, 1.8) * (1 - celestial.eclipse);
+      this.directional.color.set(context.body.id === "cinderhymn" ? "#ffd0a3" : environmentPolicy.sky.starColor);
+    }
     const celestialDistance = 82;
     const celestialDirection = this.celestialDirection.set(Math.cos(angle), Math.sin(angle), -0.24).normalize();
+    if (!context.home) celestialDirection.fromArray(celestial.sunDirection);
     const cloudOffset = this.cloudMesh?.position;
     // Some deterministic renderer tests and older hydrated sessions predate
     // cloud planning. An absent plan list means a clear cloud layer, not a
@@ -30958,12 +31177,15 @@ export class VoxelEngine {
     const visibleCloudPlans = this.cloudPlans ?? [];
     const sunCloudOcclusion = cloudCelestialOcclusion(cloudOcclusionViewer, celestialDirection, visibleCloudPlans, this.cloudOpacity);
     const moonDirection = (this.moonDirection ?? (this.moonDirection = new THREE.Vector3())).copy(celestialDirection).multiplyScalar(-1);
+    const visibleMoon = celestial.bodies.find(body => context.home ? body.id === "blockwild/morrow" : body.parent);
+    if (visibleMoon) moonDirection.fromArray(visibleMoon.direction);
     const moonCloudOcclusion = cloudCelestialOcclusion(cloudOcclusionViewer, moonDirection, visibleCloudPlans, this.cloudOpacity);
     const sunVisibility = celestialVisibilityThroughClouds(weatherFx.sunVisibility, sunCloudOcclusion);
     const moonVisibility = celestialVisibilityThroughClouds(weatherFx.celestialVisibility, moonCloudOcclusion);
     this.sun.position.copy(this.camera.position).addScaledVector(celestialDirection, celestialDistance);
     this.moon.position.copy(this.camera.position).addScaledVector(celestialDirection, -celestialDistance);
     this.sun.lookAt(this.camera.position);
+    this.sun.scale.setScalar(context.home ? 1 : clamp(Math.tan(celestial.sunAngularRadius) * celestialDistance / 5.1, .22, 3));
     this.moon.lookAt(this.camera.position);
     const environment = this.cameraEnvironment ?? OPEN_CAMERA_ENVIRONMENT;
     const sunOpacity = sunVisibility * environment.sunVisibility;
@@ -30971,13 +31193,18 @@ export class VoxelEngine {
     (this.sun.material as THREE.MeshBasicMaterial).opacity = sunOpacity;
     (this.moon.material as THREE.MeshBasicMaterial).opacity = moonOpacity;
     this.sun.visible = sunOpacity > 0.01 && sunHeight > -0.18;
-    this.moon.visible = moonOpacity > 0.01 && sunHeight < 0.22;
+    this.moon.visible = false; // The phase-aware Morrow sphere now owns the Moon.
     (this.stars.material as THREE.PointsMaterial).opacity = clamp(
-      (1 - daylight) * 1.05 * weatherFx.celestialVisibility * environment.directSkyExposure * (1 - caveBackdrop),
+      (environmentPolicy.pressureKPa === 0 ? .85 : 1 - daylight) * 1.05 * weatherFx.celestialVisibility * environment.directSkyExposure * (1 - caveBackdrop),
       0,
       0.95,
     );
     this.stars.position.copy(this.camera.position);
+    this.celestialSkyRenderer ??= new CelestialSkyRenderer(this.scene);
+    this.celestialSkyRenderer.update(context.catalog, celestial, environmentPolicy, this.camera.position,
+      weatherFx.celestialVisibility * environment.directSkyExposure * (1 - caveBackdrop), daylight, context.home,
+      direction => this.world.celestialVisibleAt?.(this.camera.position.x, this.camera.position.y, this.camera.position.z, direction) ?? true);
+    if (this.cloudMesh && environmentPolicy.pressureKPa === 0) this.cloudMesh.visible = false;
     this.directional.target.position.copy(this.camera.position);
     this.directional.position.copy(this.camera.position).addScaledVector(celestialDirection, 55);
     this.world.setLightingEnvironment?.({
@@ -30985,7 +31212,7 @@ export class VoxelEngine {
       skyIntensity: skyLight.hemisphere * 2.25,
       sunColor: this.directional.color,
       sunDirection: celestialDirection,
-      sunIntensity: skyLight.directional * 0.42 + this.lightningFlash * 0.5,
+      sunIntensity: skyLight.directional * 0.42 * (context.home ? 1 : clamp(Math.sqrt(celestial.irradiance), .18, 1.8) * (1 - celestial.eclipse)) + this.lightningFlash * 0.5,
       blockIntensity: 1.35,
       minimumAmbient: underwater ? 0.035 : 0.026,
     });
@@ -31128,7 +31355,7 @@ export class VoxelEngine {
     for (let index = this.particles.length - 1; index >= 0; index -= 1) {
       const particle = this.particles[index];
       particle.life -= dt;
-      particle.velocity.y -= 12 * dt;
+      particle.velocity.y -= gravityAcceleration(12, this.bodyContext().environment.gravityG) * dt;
       particle.mesh.position.addScaledVector(particle.velocity, dt);
       particle.mesh.rotation.x += dt * 5;
       particle.mesh.rotation.y += dt * 4;
@@ -31173,7 +31400,7 @@ export class VoxelEngine {
     for (let index = this.leafParticles.length - 1; index >= 0; index -= 1) {
       const particle = this.leafParticles[index];
       const ground = this.world.surfaceAt(Math.round(particle.state.position.x), Math.round(particle.state.position.z)) + 0.5;
-      const next = stepLeafParticle(particle.state, dt, ground);
+      const next = stepLeafParticle(particle.state, dt, ground, this.bodyContext().environment.gravityG, this.bodyContext().environment.pressureKPa > 0);
       if (!next) {
         this.scene.remove(particle.object);
         this.leafParticles.splice(index, 1);
@@ -32777,6 +33004,11 @@ export class VoxelEngine {
         seed: this.world.seedText,
         location: this.world.locationScope,
         runtimeRevision: this.world.mutationRevision,
+        celestial: { body: this.bodyContext().body.id, kind: this.bodyContext().kind, syntheticDestination: !this.bodyContext().home,
+          universeSeconds: this.universeTimeSeconds, localDayLengthMinutes: this.bodyContext().body.rotation.dayLengthMinutes,
+          environment: this.bodyContext().environment, sun: this.celestialSample?.sunDirection,
+          visibleBodies: this.celestialSkyRenderer?.visibleBodyIds ?? [], skyExposure: this.cameraEnvironment?.directSkyExposure,
+          eclipse: this.celestialSample?.eclipse, bodies: this.celestialSample?.bodies },
         persistence: { dirty: this.persistenceDirty, saving: this.checkpointPromise !== null, error: this.persistenceError },
         day: this.day,
         time: Number(this.worldTime.toFixed(4)),
@@ -32828,6 +33060,7 @@ export class VoxelEngine {
     for (let index = 0; index < steps; index += 1) {
       const dt = Math.min(PHYSICS_STEP, duration - index * PHYSICS_STEP);
       if (dt <= 0 || !this.running || (this.paused && !allowPaused) || this.titleMode) break;
+      this.advanceUniverseClock(dt);
       this.updateBoats(dt);
       this.updatePlayer(dt);
       this.updateMobs(dt);
@@ -32841,6 +33074,7 @@ export class VoxelEngine {
       this.updateHearthroadsSimulation(dt);
       this.magicState = regenerateMana(this.magicState, dt, this.skillState.skills.magic.level);
     }
+    this.updateDayNight(0);
     this.updateGameplayCamera(Math.min(duration, 0.1));
     this.updateTarget();
     this.renderer.render(this.scene, this.camera);
@@ -32880,6 +33114,9 @@ export class VoxelEngine {
     }
     const lighting = this.world.lightingProbeAt(this.position.x, this.position.y + 1, this.position.z);
     this.events.onHud({
+      celestial: { bodyName: this.bodyContext().body.name, gravityG: this.bodyContext().environment.gravityG,
+        pressureKPa: this.bodyContext().environment.pressureKPa, localDayLengthMinutes: this.bodyContext().body.rotation.dayLengthMinutes,
+        synthetic: this.agentTestWorld && !this.bodyContext().home },
       health: clamp(this.health, 0, 10),
       hunger: clamp(this.hunger, 0, 10),
       xp: this.xp,
@@ -33131,7 +33368,7 @@ export class VoxelEngine {
     const fade = stepCloudFade(this.cloudOpacity, this.weatherState, dt);
     this.cloudOpacity = fade.opacity;
     material.opacity = this.cloudOpacity;
-    this.cloudMesh.visible = this.cloudOpacity > 0.008;
+    this.cloudMesh.visible = this.cloudOpacity > 0.008 && this.bodyContext().environment.pressureKPa > 0;
     const cellX = cloudFieldCell(this.camera.position.x, this.cloudDrift.x);
     const cellZ = cloudFieldCell(this.camera.position.z, this.cloudDrift.z);
     const visuals = weatherVisuals(this.weatherState);
@@ -33279,6 +33516,7 @@ export class VoxelEngine {
       level: this.level,
       time: this.worldTime,
       day: this.day,
+      universeTimeSeconds: this.advanceUniverseClock(0),
       weather: this.weather,
       furnaces: Object.fromEntries([...this.furnaces.entries()].map(([key, value]) => [key, {
         ...value,
@@ -33367,6 +33605,7 @@ export class VoxelEngine {
           ...(slot.durability !== undefined ? { durability: slot.durability } : {}),
           ...(slot.metadata ? { metadata: slot.metadata } : {}),
           x: drop.mesh.position.x, y: drop.mesh.position.y, z: drop.mesh.position.z, age: drop.age,
+          ...(this.bodyContext().environment.gravityG === 0 ? { velocity: drop.velocity.toArray() as [number, number, number] } : {}),
         };
       }),
       options: { ...this.worldOptions, enabledFactions: [...this.worldOptions.enabledFactions] },
@@ -33389,7 +33628,8 @@ export class VoxelEngine {
       agentPlatform: normalizeAgentWorldSave(this.agentWorldState),
       agentCustody: this.serializeAgentCustody(),
       locationPlayerState: { schema: 1, creativeFlying: this.creativeFlying, boatId: this.mountedBoatId,
-        creatureId: this.mountedCreatureId, creatureSeat: this.mountedCreatureSeat },
+        creatureId: this.mountedCreatureId, creatureSeat: this.mountedCreatureSeat,
+        ...(this.bodyContext().environment.gravityG === 0 ? { velocity: this.velocity.toArray() as [number, number, number] } : {}) },
       agentWorldFingerprint: this.agentWorldFingerprint,
       ...(this.agentTestWorld ? { agentTestWorld: true } : {}),
       savedAt: Date.now(),
@@ -33453,6 +33693,7 @@ export class VoxelEngine {
   }
 
   dispose() {
+    this.celestialSkyRenderer?.dispose();
     this.disposed = true;
     this.unlockFullscreenEscape();
     this.worldStorage.dispose();

@@ -104,15 +104,22 @@ export function integrateSailboat(
   input: SailboatInput,
   deltaSeconds: number,
   waterAt: (x: number, z: number) => boolean,
+  gravityG = 1,
 ): SailboatKinematics {
   const dt = clamp(deltaSeconds, 0, 0.1);
+  if (gravityG === 0 && !waterAt(current.x, current.z)) {
+    // A sail/rudder cannot accelerate in vacuum. Retain the existing hull
+    // momentum; powered zero-G vehicles are a separate equipment system.
+    return { ...current, x: current.x - Math.sin(current.yaw) * current.velocity * dt,
+      z: current.z - Math.cos(current.yaw) * current.velocity * dt };
+  }
   const throttle = clamp(input.forward, -1, 1);
   // Screen-space horizontal controls are intentionally reversed at the boat
   // boundary: D/starboard turns the bow to the player's right in the camera's
   // forward view.  Reverse travel still inverts the rudder naturally below.
   const steer = -clamp(input.turn, -1, 1);
   const targetSpeed = throttle >= 0 ? throttle * SAILBOAT_MAX_SPEED : throttle * SAILBOAT_MAX_SPEED * 0.38;
-  const velocity = current.velocity + (targetSpeed - current.velocity) * (1 - Math.exp(-dt * (throttle ? 2.7 : 1.55)));
+  const velocity = current.velocity + (targetSpeed - current.velocity) * (1 - Math.exp(-dt * (throttle ? 2.7 : 1.55) * Math.sqrt(Math.max(.05, gravityG))));
   const steeringAuthority = 0.38 + Math.min(1, Math.abs(velocity) / SAILBOAT_MAX_SPEED) * 0.92;
   const yaw = wrapAngle(current.yaw + steer * steeringAuthority * dt * (velocity < 0 ? -1 : 1));
   const nextX = current.x - Math.sin(yaw) * velocity * dt;

@@ -55,7 +55,7 @@ export function planLeafParticles(
 }
 
 /** Returns null immediately on terrain impact, as requested, or at expiry. */
-export function stepLeafParticle(particle: LeafParticle, dt: number, groundY: number | undefined): LeafParticle | null {
+export function stepLeafParticle(particle: LeafParticle, dt: number, groundY: number | undefined, gravityG = 1, atmosphere = true): LeafParticle | null {
   const seconds = Math.max(0, Math.min(dt, 0.1));
   const next: LeafParticle = {
     ...particle,
@@ -66,9 +66,11 @@ export function stepLeafParticle(particle: LeafParticle, dt: number, groundY: nu
   };
   if (next.age >= next.lifetime) return null;
   const flutter = Math.sin(next.age * 5.2 + next.rotation) * 0.16;
-  next.velocity.x = next.velocity.x * 0.985 + flutter * seconds;
-  next.velocity.z = next.velocity.z * 0.985 + Math.cos(next.age * 4.3 + next.rotation) * 0.13 * seconds;
-  next.velocity.y = Math.max(-1.35, next.velocity.y - 0.38 * seconds);
+  if (atmosphere) {
+    next.velocity.x = next.velocity.x * 0.985 + flutter * seconds;
+    next.velocity.z = next.velocity.z * 0.985 + Math.cos(next.age * 4.3 + next.rotation) * 0.13 * seconds;
+  }
+  next.velocity.y = gravityG === 0 ? next.velocity.y : Math.max(atmosphere ? -1.35 : -Infinity, next.velocity.y - 0.38 * Math.max(0, gravityG) * seconds);
   next.position.x += next.velocity.x * seconds;
   next.position.y += next.velocity.y * seconds;
   next.position.z += next.velocity.z * seconds;

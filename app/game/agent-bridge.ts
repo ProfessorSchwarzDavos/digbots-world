@@ -61,6 +61,7 @@ export type AgentBrowserBridge = Readonly<{
   diagnosticsNoteScreenshot(): unknown;
   diagnosticsNoteFallback(reason?: string): unknown;
   testPause(paused: boolean): unknown;
+  testEnvironment(input: unknown): unknown;
   testAdvance(milliseconds: number): unknown;
   disconnect(): void;
 }>;
@@ -87,6 +88,7 @@ export type AgentBridgeAdapter = Readonly<{
   diagnosticsNoteScreenshot?(): unknown;
   diagnosticsNoteFallback?(reason?: string): unknown;
   testPause?(paused: boolean): unknown;
+  testEnvironment?(input: unknown): unknown;
   testAdvance?(milliseconds: number): unknown;
   disconnect(): void;
 }>;
@@ -192,6 +194,7 @@ export function createAgentBrowserBridge(adapter: AgentBridgeAdapter): AgentBrow
     diagnosticsNoteScreenshot: () => adapter.diagnosticsNoteScreenshot?.() ?? { ok: false, code: "diagnostics_unavailable" },
     diagnosticsNoteFallback: (reason = "manual visual recovery") => adapter.diagnosticsNoteFallback?.(String(reason).trim().slice(0, 160)) ?? { ok: false, code: "diagnostics_unavailable" },
     testPause: (paused) => adapter.testPause?.(paused === true) ?? { ok: false, code: "test_admin_unavailable" },
+    testEnvironment: (input) => adapter.testEnvironment?.(input) ?? { ok: false, code: "test_admin_unavailable" },
     testAdvance: (milliseconds) => adapter.testAdvance?.(Math.max(0, Math.min(10_000, Math.trunc(milliseconds)))) ?? { ok: false, code: "test_admin_unavailable" },
     disconnect: () => adapter.disconnect(),
   });

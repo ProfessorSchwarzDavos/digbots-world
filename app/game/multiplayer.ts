@@ -30,6 +30,7 @@ import {
 import { TYPESCRIPT_MULTIPLAYER_PROTOCOL } from "./edition";
 import { locationStamp, sameLocationStamp, type LocationStamp } from "./location-address";
 import { canonicalJson } from "./universe-json";
+import { validateCelestialCatalog, type CelestialCatalogSnapshot } from "./celestial-catalog";
 
 /**
  * Browser-only, host-authoritative WebRTC multiplayer transport for Blockwild.
@@ -291,6 +292,7 @@ export type TimeWeatherSnapshot = {
   tick: number;
   worldTime: number;
   day: number;
+  universeTimeSeconds?: number;
   /** Legacy precipitation mirror retained for v1.1 peers. */
   weather: "clear" | "rain";
   weatherState?: NetworkWeatherState;
@@ -572,6 +574,8 @@ export type WorldSnapshot = {
   boats?: SailboatSnapshotEntry[];
   time: TimeWeatherSnapshot;
   worldOptions?: SessionWorldOptions;
+  /** Frozen universe physics and ephemeris; never inferred from a guest save. */
+  celestialCatalog?: CelestialCatalogSnapshot;
   inventory?: InventorySnapshot;
   containers?: ContainerSnapshot[];
   /** Targeted host-owned state for the peer receiving this snapshot. */
@@ -1078,6 +1082,7 @@ function validateTimeWeather(value: unknown): value is TimeWeatherSnapshot {
     && isInteger(value.tick, 0, Number.MAX_SAFE_INTEGER)
     && isFiniteNumber(value.worldTime, 0, 1)
     && isInteger(value.day, 1, 1_000_000)
+    && (value.universeTimeSeconds === undefined || isFiniteNumber(value.universeTimeSeconds, 0, 1e12))
     && (value.weather === "clear" || value.weather === "rain")
     && (value.weatherState === undefined || (isRecord(value.weatherState)
       && ["clear", "overcast", "drizzle", "rain", "thunder", "snow", "sandstorm", "mist", "ashfall"].includes(value.weatherState.kind as string)
@@ -1565,6 +1570,7 @@ export function validatePayload<K extends MultiplayerMessageType>(type: K, value
         && (value.boats === undefined || (Array.isArray(value.boats) && value.boats.length <= 128 && value.boats.every(validateSailboat)))
         && validateTimeWeather(value.time)
         && (value.worldOptions === undefined || validateSessionWorldOptions(value.worldOptions))
+        && (value.celestialCatalog === undefined || validNetworkCelestialCatalog(value.celestialCatalog))
         && (value.inventory === undefined || validateInventorySnapshot(value.inventory))
         && (value.containers === undefined || (Array.isArray(value.containers) && value.containers.length <= 4 && value.containers.every(validateContainerSnapshot)))
         && (value.playerState === undefined || validatePlayerSessionSnapshot(value.playerState))
@@ -1572,6 +1578,10 @@ export function validatePayload<K extends MultiplayerMessageType>(type: K, value
     default:
       return false;
   }
+}
+
+export function validNetworkCelestialCatalog(value: unknown): value is CelestialCatalogSnapshot {
+  try { validateCelestialCatalog(value); return true; } catch { return false; }
 }
 
 export function validateEnvelope(value: unknown): value is MultiplayerEnvelope {

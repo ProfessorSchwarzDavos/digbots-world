@@ -9,18 +9,25 @@ export type LocationPlayerState = Readonly<{
   boatId: string | null;
   creatureId: number | null;
   creatureSeat: number | null;
+  /** Inertial motion belongs to the location, not the travelling inventory. */
+  velocity?: readonly [number, number, number];
 }>;
+
+export function validLocationVelocity(value: unknown): value is [number, number, number] {
+  return Array.isArray(value) && value.length === 3 && value.every(n => typeof n === "number" && Number.isFinite(n) && Math.abs(n) <= 1e6);
+}
 
 export function validateLocationPlayerState(value: unknown): LocationPlayerState | null {
   if (value === undefined) return null;
   if (!isUniverseRecord(value)) throw new Error("Invalid location player binding.");
-  assertExactKeys(value, ["schema", "creativeFlying", "boatId", "creatureId", "creatureSeat"], "Location player binding");
+  assertExactKeys(value, ["schema", "creativeFlying", "boatId", "creatureId", "creatureSeat", ...(Object.hasOwn(value, "velocity") ? ["velocity"] : [])], "Location player binding");
   if (value.schema !== 1 || typeof value.creativeFlying !== "boolean"
     || (value.boatId !== null && (typeof value.boatId !== "string" || !/^[A-Za-z0-9_.:-]{1,160}$/.test(value.boatId)))
     || (value.creatureId !== null && (!Number.isSafeInteger(value.creatureId) || Number(value.creatureId) < 0))
     || (value.creatureSeat !== null && (!Number.isSafeInteger(value.creatureSeat) || Number(value.creatureSeat) < 0 || Number(value.creatureSeat) > 31))
     || (value.boatId !== null && value.creatureId !== null)
-    || (value.creatureId === null && value.creatureSeat !== null)) throw new Error("Invalid location player binding.");
+    || (value.creatureId === null && value.creatureSeat !== null)
+    || value.velocity !== undefined && !validLocationVelocity(value.velocity)) throw new Error("Invalid location player binding.");
   return cloneUniverseJson(value) as LocationPlayerState;
 }
 

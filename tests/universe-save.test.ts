@@ -13,13 +13,14 @@ test("every WorldSave field has exactly one explicit owner, checked against sour
   assert.ok(type && ts.isTypeLiteralNode(type.type));
   const fields = type.type.members.map((member) => member.name!.getText(source)).sort();
   assert.deepEqual(Object.keys(WORLD_SAVE_OWNERS).sort(), fields);
-  assert.equal(fields.length, 89);
+  assert.equal(fields.length, 90);
 });
 
 test("all optional fields, absent/null/empty and unknown metadata survive partition round trips", () => {
   const save = minimal() as WorldSave & Record<string, unknown>;
   for (const key of Object.keys(WORLD_SAVE_OWNERS)) if (!Object.hasOwn(save, key)) save[key] = { syntheticField: key, nested: [null, [], { unicode: "雪", negative: -16 }] };
   save.agentCustody = { schema: 1, agents: {} };
+  save.universeTimeSeconds = 1234.5;
   save.locationPlayerState = { schema: 1, creativeFlying: false, boatId: null, creatureId: null, creatureSeat: null };
   save.multiplayerProgressions = {};
   save.futureLegacyMetadata = { keep: [1, null, "exact"] };
@@ -39,6 +40,15 @@ test("same-coordinate location payloads have independent mutable copies", () => 
   restored.chests["-17,33,0"].push(null);
   assert.equal(composeUniverseSave(b).chests["-17,33,0"].length, 1);
   assert.equal(source.chests["-17,33,0"].length, 1);
+});
+
+test("universe clock survives location composition and fails closed on invalid time", () => {
+  const origin = splitUniverseSave({ ...minimal(), universeTimeSeconds: 12345.5 });
+  const target = splitUniverseSave({ ...minimal(), universeTimeSeconds: 1, time: .8, day: 5 });
+  assert.equal(composeUniverseSave({ ...origin, location: target.location }).universeTimeSeconds, 12345.5);
+  for (const value of [-1, "42", null]) {
+    assert.throws(() => composeUniverseSave({ ...origin, universe: { ...origin.universe, universeTimeSeconds: value } }));
+  }
 });
 
 test("guest journals follow the universe but maps and respawns stay with their location", () => {

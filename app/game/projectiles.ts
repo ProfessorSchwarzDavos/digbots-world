@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { gravityAcceleration } from "./celestial-environment";
 
 export type ArrowOwner = { kind: "mob" | "player"; id: number | string };
 
@@ -29,13 +30,13 @@ export type ArrowStepResult =
 const GRAVITY = 8.2;
 const PROJECTILE_VISUAL_FORWARD = new THREE.Vector3(0, 0, -1);
 
-export function aimArrowVelocity(origin: THREE.Vector3, target: THREE.Vector3, speed = 11.5) {
+export function aimArrowVelocity(origin: THREE.Vector3, target: THREE.Vector3, speed = 11.5, gravityG = 1) {
   const delta = target.clone().sub(origin);
   const horizontal = Math.hypot(delta.x, delta.z);
   const travelTime = Math.max(0.12, horizontal / Math.max(0.1, speed));
   // A light ballistic compensation keeps the visible arrow close to the
   // crosshair while still producing an obvious arc over longer distances.
-  delta.y += GRAVITY * travelTime * travelTime * 0.5;
+  delta.y += gravityAcceleration(GRAVITY, gravityG) * travelTime * travelTime * 0.5;
   return delta.normalize().multiplyScalar(speed);
 }
 
@@ -72,6 +73,7 @@ export function createArrowProjectile(
   target: THREE.Vector3,
   damage = 2,
   speed = 11.5,
+  gravityG = 1,
 ): ArrowProjectile {
   const visual = createArrowVisual();
   visual.position.copy(origin);
@@ -79,7 +81,7 @@ export function createArrowProjectile(
     id,
     owner,
     position: origin.clone(),
-    velocity: aimArrowVelocity(origin, target, speed),
+    velocity: aimArrowVelocity(origin, target, speed, gravityG),
     damage,
     age: 0,
     maxAge: 8,
@@ -102,6 +104,7 @@ export function createVerdantVolleyProjectile(
   damage = 6,
   speed = 29,
   rootSeconds = 0.8,
+  gravityG = 1,
 ): ArrowProjectile {
   const visual = new THREE.Group();
   visual.name = "visible-verdant-volley-projectile";
@@ -140,7 +143,7 @@ export function createVerdantVolleyProjectile(
     id,
     owner,
     position: origin.clone(),
-    velocity: aimArrowVelocity(origin, target, speed),
+    velocity: aimArrowVelocity(origin, target, speed, gravityG),
     damage,
     age: 0,
     maxAge: 4.5,
@@ -160,6 +163,7 @@ export function createWebspinnerProjectile(
   damage = 5,
   speed = 18,
   bindSeconds = 3.2,
+  gravityG = 1,
 ): ArrowProjectile {
   const visual = new THREE.Group();
   visual.name = "visible-webspinner-bind-projectile";
@@ -186,7 +190,7 @@ export function createWebspinnerProjectile(
     id,
     owner,
     position: origin.clone(),
-    velocity: aimArrowVelocity(origin, target, speed),
+    velocity: aimArrowVelocity(origin, target, speed, gravityG),
     damage,
     age: 0,
     maxAge: 3.5,
@@ -203,11 +207,12 @@ export function stepArrowProjectile(
   deltaSeconds: number,
   blockAt: (position: THREE.Vector3) => boolean,
   targetAt: (position: THREE.Vector3, radius: number) => string | number | null,
+  gravityG = 1,
 ): ArrowStepResult {
   const dt = Math.max(0, Math.min(0.1, deltaSeconds));
   projectile.age += dt;
   if (projectile.age >= projectile.maxAge) return { kind: "expired" };
-  projectile.velocity.y -= GRAVITY * dt;
+  projectile.velocity.y -= gravityAcceleration(GRAVITY, gravityG) * dt;
   const travel = projectile.velocity.clone().multiplyScalar(dt);
   const distance = travel.length();
   const steps = Math.max(1, Math.ceil(distance / 0.16));

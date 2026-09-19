@@ -2469,6 +2469,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
       diagnosticsNoteScreenshot: () => engine.noteLocalAgentScreenshot(),
       diagnosticsNoteFallback: (reason) => engine.noteLocalAgentManualFallback(reason),
       testPause: (paused) => engine.setLocalAgentTestPaused(paused),
+      testEnvironment: (input) => engine.configureLocalEnvironmentTest(input),
       testAdvance: (milliseconds) => engine.advanceLocalAgentTest(milliseconds),
       disconnect: () => engine.disconnectMultiplayer(),
     });
@@ -4315,7 +4316,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
     >
       <canvas ref={canvasRef} className="game-canvas" aria-label="Blockwild endless 3D game world" />
       <div className="sky-vignette" aria-hidden="true" />
-      {agentMode && <aside className="agent-client-badge" aria-label="Lightweight companion client"><strong>COMPANION DRONE</strong><span>SEMANTIC CLIENT · RENDER 4 · SIM 3</span><small>Use <code>window.blockwildAgent</code> through the repository skill. Host approval is required.</small></aside>}
+      {agentMode && <aside className="agent-client-badge" aria-label="Lightweight companion client"><strong>{hud.celestial?.synthetic ? `SYNTHETIC · ${hud.celestial.bodyName.toUpperCase()}` : "COMPANION DRONE"}</strong><span>{hud.celestial?.synthetic ? `${hud.celestial.gravityG.toFixed(3)} g · ${hud.celestial.pressureKPa} kPa · ${hud.celestial.localDayLengthMinutes} MIN / DAY` : "SEMANTIC CLIENT · RENDER 4 · SIM 3"}</span><small>{hud.celestial?.synthetic ? "Environment test location. Destination terrain, life support and travel progression are not finished." : <>Use <code>window.blockwildAgent</code> through the repository skill. Host approval is required.</>}</small></aside>}
 
       {started && overlay === null && (
         <div className={`game-hud${settings.showMinimap ? " minimap-enabled" : ""}`} aria-live="polite">

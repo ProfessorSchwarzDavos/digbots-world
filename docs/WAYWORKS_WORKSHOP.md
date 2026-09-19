@@ -43,6 +43,11 @@ from the existing Iron Plate armor.
 | Charging Pedestal | 60 kJ | 2 kW |
 | Grid Cable | no store | shared 4 kW |
 
+Heat Engines accept coal/charcoal or finite heat supplied through a matching
+heat face. Four joules of supplied heat yield one electrical joule; three
+dissipate. Passive radiator losses still apply. Stored waste heat can be recovered
+after fuel is spent, but connecting engines cannot amplify total energy.
+
 Solar follows sky obstruction, daylight, eclipse, weather and body distance.
 Wind requires atmosphere, sky/rotor clearance and weather; forests reduce
 exposure. Waterwheels need adjacent flowing water, not still source blocks.
@@ -103,7 +108,12 @@ Channels isolate connections. Public service allows materials, charging and
 cranking, not configuration/pickup. Owners and up to sixteen explicitly trusted
 player/drone IDs can configure or pick up machines. Trust survives cold reload.
 
-Install actual hotbar modules, up to four per type. Speed reduces time but raises
+Install actual hotbar modules, up to four per supported type. The inspector lists
+supported sockets; incompatible modules remain in your hand. Speed/efficiency
+apply to processors, filters to processors/fuel engines, seal to gas tanks, and
+muffling to moving processors/generators/pumps. Capacity and thermal apply to
+machines/tanks, not Grid Cable. Later vacuum/corrosion and anchor upgrades remain
+part of their environment/logistics phases. Speed reduces time but raises
 energy cost superlinearly. Efficiency lowers cost and throughput. Capacity
 expands energy/fluid/gas storage; seal increases gas capacity; thermal increases
 heat capacity/cooling; filter chooses an item; muffling lowers machine sound,

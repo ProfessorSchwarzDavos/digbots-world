@@ -4,7 +4,7 @@ import { useId, useState, type KeyboardEvent } from "react";
 import { itemName } from "./data";
 import { machineSlots } from "./wayworks-machines";
 import { machineRecipes, recipeCost } from "./wayworks-recipes";
-import { createWorkshop, MATERIAL_PORT_MODES, UPGRADE_KINDS, workshopFluidCapacity, workshopGasCapacity,
+import { createWorkshop, MATERIAL_PORT_MODES, UPGRADE_KINDS, supportedWorkshopUpgrades, workshopFluidCapacity, workshopGasCapacity,
   type MaterialKind, type MaterialPortMode, type WorkshopState } from "./wayworks-stores";
 import type { MachineKind } from "./wayworks";
 import type { WorkshopAction } from "./wayworks-integration";
@@ -25,6 +25,7 @@ export type WayworksPanelProps = Readonly<{
   enabled: boolean;
   ports: Record<WayworksFace, WayworksPortMode>;
   heldItemName?: string;
+  feedback?: string;
   workshop?: WorkshopState;
   network?: { id: string; count: number; energyJ: number; capacityJ: number; revision: number };
   onAction: (action: WayworksPanelAction) => void;
@@ -55,12 +56,21 @@ export function WayworksPanel(props: WayworksPanelProps) {
   const slots = machineSlots(kind as MachineKind), recipes = machineRecipes(kind as MachineKind);
   const fluidCapacity = workshopFluidCapacity(kind as MachineKind, workshop), gasCapacity = workshopGasCapacity(kind as MachineKind, workshop);
   const progress = workshop.cycle ? workshop.cycle.progressMs / workshop.cycle.durationMs * 100 : 0;
-  const statusLabels: Record<string, string> = { "no-power": "Waiting for power", "no-input": "Waiting for ingredients", "no-fuel": "Waiting for fuel",
-    "output-blocked": "Output full or incompatible", "no-water": "Needs a water source directly below", "no-sun": "No sunlight reaching panel", "no-wind": "No usable wind / rotor obstructed",
+  const supported = supportedWorkshopUpgrades(kind as MachineKind);
+  const moduleKinds = UPGRADE_KINDS.filter(upgrade => supported.includes(upgrade) || workshop.upgrades[upgrade] > 0);
+  const passiveTank = kind === "fluid-tank" || kind === "gas-tank";
+  const statusLabels: Record<string, string> = { idle: "Idle", disabled: "Disabled", "no-power": "Waiting for power", "no-input": "Waiting for ingredients", "no-fuel": kind === "heat-engine" ? "Waiting for fuel or supplied heat" : "Waiting for fuel",
+    "output-blocked": "Output full or incompatible", "no-water": kind === "waterwheel-generator" ? "Needs flowing water beside the wheel" : "Needs a water source directly below", "no-sun": "No sunlight reaching panel", "no-wind": "No usable wind / rotor obstructed",
     "control-off": "Stopped by control signal", "heat-limited": "Cooling before next cycle", "buffer-full": "Storage full", working: "Processing", generating: "Generating power", transferring: "Transferring power" };
   const validGauge = Number.isFinite(energyJ) && Number.isFinite(capacityJ) && capacityJ > 0;
   const fill = validGauge ? Math.min(100, Math.max(0, energyJ / capacityJ * 100)) : 0;
   const direction = Number.isInteger(facing) ? directions[facing] : undefined;
+  const feedbackLabels: Record<string, string> = {
+    "invalid-transfer": "Nothing compatible is available to transfer.", backpressure: "The destination is full or contains a different resource.",
+    "cycle-reserved": "Finish or cancel the active cycle before taking its ingredients.", "stale-revision": "Machine changed; inspect it again.",
+    "filtered-item": "The selected item does not match this machine's filter.",
+  };
+  const feedback = props.feedback && props.feedback !== "ok" ? feedbackLabels[props.feedback] ?? props.feedback : "";
 
   function handleKeyDown(event: KeyboardEvent<HTMLElement>) {
     event.stopPropagation();
@@ -92,6 +102,7 @@ export function WayworksPanel(props: WayworksPanelProps) {
           </div>
           <button className="ww-close" type="button" onClick={onClose} aria-label="Close machine inspector" autoFocus>×</button>
         </header>
+        {feedback && <p className="ww-feedback" role="status" aria-live="polite">{feedback}</p>}
 
         <div className="ww-body">
           <div className="ww-state-line">
@@ -100,16 +111,16 @@ export function WayworksPanel(props: WayworksPanelProps) {
           </div>
           <p className="ww-status" role="status">{(statusLabels[status] ?? status.replaceAll("-", " ")) || "Status unavailable"}</p>
 
-          <dl className="ww-readings">
+          {!passiveTank && <><dl className="ww-readings">
             <div><dt>Stored energy</dt><dd>{reading(energyJ, 1_000)} <span>kJ</span></dd></div>
             <div><dt>Capacity</dt><dd>{reading(capacityJ, 1_000)} <span>kJ</span></dd></div>
             <div><dt>Power rate</dt><dd>{reading(rateW)} <span>W</span></dd></div>
           </dl>
           <div className="ww-gauge" role="meter" aria-label="Stored energy" aria-valuemin={0} aria-valuemax={100} aria-valuenow={fill} aria-valuetext={validGauge ? `${reading(energyJ, 1_000)} of ${reading(capacityJ, 1_000)} kJ` : "Storage gauge unavailable"}>
             <span className="ww-gauge-fill" style={{ width: `${fill}%` }} />
-          </div>
+          </div></>}
 
-          {props.network && <p className="ww-help" data-network-id={props.network.id}>Grid segment: {props.network.count} blocks · {reading(props.network.energyJ, 1000)} / {reading(props.network.capacityJ, 1000)} kJ · topology {props.network.revision}</p>}
+          {props.network && !passiveTank && <p className="ww-help" data-network-id={props.network.id}>Grid segment: {props.network.count} blocks · {reading(props.network.energyJ, 1000)} / {reading(props.network.capacityJ, 1000)} kJ · topology {props.network.revision}</p>}
           <p className="ww-selected">Selected: {heldItemName || "Empty hand"}. Close the inspector to change hotbar slots. Simulation pauses while inspecting.</p>
 
           {slots.length > 0 && <section className="ww-materials" aria-label="Machine inventory">
@@ -121,7 +132,7 @@ export function WayworksPanel(props: WayworksPanelProps) {
                 <button type="button" disabled={!workshop.slots[slot] || (!!workshop.cycle && (slot === "input" || slot === "reagent"))} onClick={() => onAction({ kind: "slot", slot, direction: "extract", maximum: 64 })}>Take</button>
               </div>
             </div>)}
-            {slots.includes("fuel") && <p className="ww-help">{kind === "biofuel-engine" ? "Uses pressed Biofuel Pellets." : "Uses coal or charcoal."} Unconverted fuel: {reading(workshop.burnJ, 1000)} kJ.</p>}
+            {slots.includes("fuel") && <p className="ww-help">{kind === "biofuel-engine" ? "Uses pressed Biofuel Pellets." : "Uses coal, charcoal or supplied heat. Four joules of heat produce one joule of electricity; the rest dissipates."} Unconverted fuel: {reading(workshop.burnJ, 1000)} kJ.</p>}
           </section>}
 
           {(fluidCapacity > 0 || gasCapacity > 0) && <section className="ww-materials" aria-label="Measured resource storage">
@@ -177,9 +188,9 @@ export function WayworksPanel(props: WayworksPanelProps) {
             <div className="ww-inline-actions"><button type="button" onClick={() => onAction({ kind: "copy" })}>Copy configuration</button><button type="button" onClick={() => onAction({ kind: "paste" })}>Paste compatible</button></div>
             <p className="ww-help">Filter: {workshop.upgrades.filter > 0 && workshop.filterItem !== null ? itemName(workshop.filterItem) : "none"}. Requires a Filter Module.</p>
             <div className="ww-inline-actions"><button type="button" onClick={() => onAction({ kind: "filter-held" })}>Filter to selected item</button><button type="button" onClick={() => onAction({ kind: "clear-filter" })}>Clear filter</button></div>
-            <h3>Installed modules</h3><p className="ww-help">Speed raises energy cost superlinearly. Efficiency saves energy but slows work. Select a module to install; select an empty slot to remove.</p>
-            <button className="ww-primary" type="button" onClick={() => onAction({ kind: "upgrade-install" })}>Install selected module</button>
-            <div className="ww-module-list">{UPGRADE_KINDS.map((upgrade) => <div key={upgrade}><span>{upgrade} · {workshop.upgrades[upgrade]} / 4</span><button type="button" disabled={!workshop.upgrades[upgrade]} onClick={() => onAction({ kind: "upgrade-remove", upgrade })}>Remove one</button></div>)}</div>
+            <h3>Installed modules</h3><p className="ww-help">Supported: {supported.length ? supported.join(", ") : "none"}. Speed raises energy cost superlinearly. Efficiency saves energy but slows work. Select a module to install; select an empty slot to remove.</p>
+            <button className="ww-primary" type="button" disabled={!supported.length} onClick={() => onAction({ kind: "upgrade-install" })}>Install selected module</button>
+            <div className="ww-module-list">{moduleKinds.map((upgrade) => <div key={upgrade}><span>{upgrade} · {workshop.upgrades[upgrade]} / 4</span><button type="button" disabled={!workshop.upgrades[upgrade]} onClick={() => onAction({ kind: "upgrade-remove", upgrade })}>Remove one</button></div>)}</div>
           </details>
 
           {kind === "hand-dynamo" && (

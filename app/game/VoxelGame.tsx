@@ -140,7 +140,7 @@ import { MinimapHud, NavigationHud, StatusEffectsHud } from "./NavigationHud";
 import { statusEffectViewsFromBuffs } from "./status-effects";
 import { WaygridCreaturePanel, WaygridItemPanel } from "./WaygridPanels";
 import { WayworksPanel } from "./WayworksPanel";
-import { hasWayworksIcon, WayworksIcon } from "./wayworks-ui";
+import { hasWayworksIcon, wayworksMetadataSummary, WayworksIcon } from "./wayworks-ui";
 import { CharacterStudio } from "./CharacterStudio";
 import { AquariumPanel } from "./AquariumPanel";
 import { GuildPanel } from "./GuildPanel";
@@ -1350,6 +1350,8 @@ function bestiaryObservation(definition: MobDefinition, progress: BestiaryProgre
 
 function itemMetadataSummary(slot: InventorySlot | null) {
   if (!slot?.metadata) return "";
+  const workshop = wayworksMetadataSummary(slot);
+  if (workshop) return ` · ${workshop}`;
   if (ITEMS[slot.item]?.lifeSupportKind) return " · Finite life-support stores";
   const orb = captureOrbFromInventorySlot(slot);
   if (orb?.creature) {
@@ -2338,6 +2340,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
         },
         onOverlayRequest: (kind: OverlayKind, key?: string) => {
           if (!startedRef.current) return;
+          if (kind === "wayworks") setToast("");
           if (kind === "spell-wheel" && key === "close") {
             setOverlay(null);
             engine.activate();
@@ -5121,7 +5124,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
       {overlay === "orb-rack" && renderOrbStationPanel("orb-rack", hud.activeOrbRack)}
       {overlay === "healing-station" && renderOrbStationPanel("healing-station", hud.activeHealingStation)}
       {overlay === "wayworks" && hud.activeWayworks && (
-        <WayworksPanel {...hud.activeWayworks} onClose={resume}
+        <WayworksPanel {...hud.activeWayworks} feedback={toast} onClose={resume}
           onInspectResource={resource => engineRef.current?.inspectWorkshopResource(resource)}
           onAction={action => engineRef.current?.workshopAction(action, hud.activeWayworks!.revision)} />
       )}

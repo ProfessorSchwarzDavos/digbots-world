@@ -1,10 +1,20 @@
 "use client";
 
-import { Item, ITEMS, type ItemCode } from "./data";
+import { Item, ITEMS, type InventorySlot, type ItemCode } from "./data";
 import { machineKindForBlock } from "./wayworks-integration";
 import { isWayworksItem } from "./wayworks-item-models";
+import { portableResource } from "./wayworks-machines";
 
 export const hasWayworksIcon = (item: ItemCode) => item === Item.FieldWrench || !!machineKindForBlock(item) || isWayworksItem(item);
+
+export function wayworksMetadataSummary(slot: InventorySlot): string | null {
+  if (slot.item === Item.FluidCanister || slot.item === Item.GasCylinder) {
+    const content = portableResource(slot);
+    return content === undefined || content?.kind === "item" ? "Invalid container data" : content
+      ? `${content.quantity / 1000} ${slot.item === Item.GasCylinder ? "standard L" : "L"} ${content.resource}` : "Empty container";
+  }
+  return machineKindForBlock(slot.item) && slot.metadata?.wayworks ? "Sealed machine stores and modules" : null;
+}
 
 /** Compact silhouettes share the brass/ceramic language of the world models. */
 export function WayworksIcon({ item, small = false }: { item: ItemCode; small?: boolean }) {

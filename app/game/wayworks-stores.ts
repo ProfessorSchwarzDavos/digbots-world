@@ -39,6 +39,17 @@ export const UPGRADE_ITEMS: Readonly<Record<UpgradeKind, ItemCode>> = {
   speed: Item.SpeedModule, efficiency: Item.EfficiencyModule, capacity: Item.CapacityModule,
   filter: Item.FilterModule, muffling: Item.MufflingModule, seal: Item.SealModule, thermal: Item.ThermalModule,
 };
+/** Only advertise sockets with an implemented effect on this machine. */
+export function supportedWorkshopUpgrades(kind: MachineKind): readonly UpgradeKind[] {
+  if (kind === "grid-cable") return [];
+  const processing = ["powered-crusher", "enrichment-mill", "electric-smelter", "alloy-infuser", "plate-press", "precision-sawmill"].includes(kind);
+  const fueled = kind === "heat-engine" || kind === "biofuel-engine";
+  const moving = processing || fueled || ["hand-dynamo", "wind-rotor", "waterwheel-generator", "fluid-pump"].includes(kind);
+  return UPGRADE_KINDS.filter(upgrade => upgrade === "capacity" || upgrade === "thermal"
+    || ((upgrade === "speed" || upgrade === "efficiency") && processing)
+    || (upgrade === "filter" && (processing || fueled))
+    || (upgrade === "muffling" && moving) || (upgrade === "seal" && kind === "gas-tank"));
+}
 export function createWorkshop(): WorkshopState {
   const ports = () => Object.fromEntries(FACES.map((face) => [face, face === "front" ? "output" : face === "back" ? "input" : "service"])) as Record<LocalFace, MaterialPortMode>;
   return { schema: 1, slots: { input: null, reagent: null, fuel: null, output: null, byproduct: null }, fluid: null, chemical: null,

@@ -5,6 +5,7 @@ import { advanceMachine, transferMachineItem, transferPortableResource, portable
 import { applyWorkshopAction, machineKindForBlock, parseWorkshopAction, placedWorkshopMachine } from "../app/game/wayworks-integration.ts";
 import { MACHINE_RECIPES, recipeCost } from "../app/game/wayworks-recipes.ts";
 import { createMachine, machineCapacity, normalizeMachine, type MachineState } from "../app/game/wayworks.ts";
+import { supportedWorkshopUpgrades, UPGRADE_ITEMS, UPGRADE_KINDS } from "../app/game/wayworks-stores.ts";
 
 test("all processor recipes debit exactly the declared power and ingredients", () => {
   for (const recipe of MACHINE_RECIPES) {
@@ -61,6 +62,7 @@ test("heat and biofuel generators convert finite consumed fuel, preserve residue
     for (let i = 0; i < 100; i++) {
       const result = advanceMachine(state, 250); generated += result.generatedJ; consumed += result.fuelConsumed;
       state = normalizeMachine(JSON.parse(JSON.stringify(result.state)), kind, "home", "local");
+      if (consumed === 1 && state.workshop.burnJ === 0) break;
     }
     assert.equal(consumed, 1); assert.equal(generated * 4 + state.workshop.burnJ, joules);
     assert.equal(state.workshop.slots.fuel, null);
@@ -144,6 +146,31 @@ test("upgrades trade power for speed, consume actual modules and cannot shrink o
   capacity.machine.workshop.fluid = { resource: "water", amount: 70000 };
   const remove = applyWorkshopAction(capacity.machine, "b", null, capacity.machine.revision, { kind: "upgrade-remove", upgrade: "capacity" });
   assert.equal(remove.ok, false); assert.equal(remove.machine.workshop.upgrades.capacity, 1);
+});
+
+test("machine sockets reject ineffective modules without consuming them", () => {
+  for (const kind of ["powered-crusher", "heat-engine", "fluid-pump", "fluid-tank", "gas-tank", "grid-battery", "grid-cable"] as const) {
+    const state = createMachine(kind, "home", "local");
+    for (const upgrade of UPGRADE_KINDS) {
+      const held = { item: UPGRADE_ITEMS[upgrade], count: 1 };
+      const result = applyWorkshopAction(state, "a", held, 0, { kind: "upgrade-install" });
+      assert.equal(result.ok, supportedWorkshopUpgrades(kind).includes(upgrade), `${kind}/${upgrade}`);
+      if (!result.ok) { assert.deepEqual(result.held, held); assert.deepEqual(result.machine, state); }
+    }
+  }
+});
+
+test("heat engines can consume supplied heat without fuel or energy amplification", () => {
+  let state = createMachine("heat-engine", "home", "local"); state.workshop.heatJ = 20000;
+  const first = advanceMachine(state, 1000);
+  assert.equal(first.fuelConsumed, 0); assert.equal(first.generatedJ, 2400);
+  assert.equal(first.state.workshop.heatJ, 8400); // 2kJ radiated, 9.6kJ converted/dissipated.
+  let generated = first.generatedJ; state = first.state;
+  for (let i = 0; i < 20; i++) { const step = advanceMachine(state, 1000); generated += step.generatedJ; state = step.state; }
+  assert.ok(generated <= 5000); assert.equal(state.workshop.heatJ, 0);
+  assert.equal(state.status, "no-fuel"); assert.equal(state.workshop.slots.fuel, null);
+  const full = createMachine("heat-engine", "home", "local"); full.energyJ = machineCapacity(full.kind); full.workshop.heatJ = 20000;
+  const stopped = advanceMachine(full, 1000); assert.equal(stopped.generatedJ, 0); assert.equal(stopped.state.workshop.heatJ, 18000);
 });
 
 test("extension migration preserves old finite power and malformed state/opaque intents fail closed", () => {

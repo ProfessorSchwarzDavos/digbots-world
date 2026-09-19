@@ -102,8 +102,19 @@ export function advanceMachine(input: MachineState, elapsedMs: number, environme
   if (!workshopRunning(workshop)) { state.status = "control-off"; return finish(); }
   if (state.kind === "heat-engine" || state.kind === "biofuel-engine") {
     const room = machineCapacity(state.kind, workshop) - state.energyJ;
+    if (room <= 0) { state.status = "buffer-full"; return finish(); }
+    // Imported heat is a finite alternate input. A quarter becomes electricity;
+    // the remainder dissipates, so connecting engines cannot amplify energy.
+    if (state.kind === "heat-engine" && workshop.burnJ === 0 && workshop.heatJ >= 4) {
+      const allowance = machineRate(state.kind) * dt + workshop.burnRemainder;
+      const produced = Math.min(Math.floor(allowance / 1000), Math.floor(workshop.heatJ / 4), room);
+      workshop.burnRemainder = produced < Math.floor(allowance / 1000) ? 0 : allowance % 1000;
+      workshop.heatJ -= produced * 4; state.energyJ += produced;
+      result.generatedJ = produced; state.status = produced > 0 ? "generating" : "idle";
+      return finish();
+    }
     const thermalRoom = Math.floor((workshopHeatCapacity(workshop) - workshop.heatJ) / 3);
-    if (room <= 0 || thermalRoom <= 0) { state.status = room <= 0 ? "buffer-full" : "heat-limited"; return finish(); }
+    if (thermalRoom <= 0) { state.status = "heat-limited"; return finish(); }
     const fuel = workshop.slots.fuel;
     const validFuel = plain(fuel) && (state.kind === "biofuel-engine" ? fuel!.item === Item.BiofuelPellet : fuel!.item === Item.Coal || fuel!.item === Item.Charcoal);
     if (workshop.burnJ === 0 && validFuel) {

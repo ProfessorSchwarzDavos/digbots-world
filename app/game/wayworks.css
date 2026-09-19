@@ -35,6 +35,7 @@
 .ww-state-line { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px 16px; color: #605039; font-size: 12px; }
 .ww-switch-state { font-weight: 700; }
 .ww-status { margin: 12px 0 18px; padding-left: 10px; border-left: 3px solid #94672b; font-weight: 700; }
+.ww-feedback { position: sticky; top: 0; z-index: 1; margin: 0; padding: 12px 24px; border-bottom: 2px solid #967b4e; background: #f6eac8; color: #40301b; font-weight: 700; box-shadow: 0 3px 7px rgb(42 31 15 / 16%); }
 .ww-readings { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0 0 12px; }
 .ww-readings dt { margin-bottom: 4px; color: #63543e; font-size: 12px; }
 .ww-readings dd { margin: 0; font-size: 21px; font-weight: 700; font-variant-numeric: tabular-nums; }

@@ -1612,3 +1612,23 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   presentation-only guest/paused rendering added. Manual visuals still pending.
 - No production build or browser started; source remains dirty on 89986cb.
   Frozen recovery and all prior receipts remain untouched. Full CF4 incomplete.
+
+## CF4 full workshop - 2026-09-19 19:00 UTC
+
+- Committed `2b5434a` (Build finite Wayworks workshop): twenty machine kinds,
+  fourteen processing recipes, typed guest/agent custody, authored models/items,
+  cached power topology and canonical Waygrid integration. Focused 193/193,
+  final TypeScript and scoped lint passed; isolated production full-r1 passed.
+- Normal browser controls verified ore processing/extraction, wrench-only edits,
+  all resource selectors, copy/paste/trust/signal/rotation round-trips, 390px
+  inspector and keyboard focus, exact fluid/gas transfers, physical capacity
+  modules, and filled-tank break/pickup/place/cold reload (3L plus module).
+- Official unchanged web-game client reached gameplay with twenty machines and
+  no errors. Screenshot personally reviewed. Browser-r1's harness timeout killed
+  its own browser; completed receipts retained and browser-r2 used a new explicit
+  synthetic world. Its checkpoint is saved, browser closed. No real saves used.
+- Found and fixing hidden inspector feedback, wrong metadata tooltips, and
+  waterwheel's incorrect source-water hint. Tanks now prioritize resource stores.
+  Requirement review also adds finite supplied-heat conversion and declared,
+  enforced upgrade compatibility; focused regressions and rebuild pending.
+- Full CF4 requirement handoff/remaining runtime visuals still open. No CF5 work.

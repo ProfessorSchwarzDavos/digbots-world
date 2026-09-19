@@ -3,6 +3,9 @@ import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { WayworksPanel, type WayworksPanelProps } from "../app/game/WayworksPanel";
+import { BlockId, Item } from "../app/game/data";
+import { wayworksMetadataSummary } from "../app/game/wayworks-ui";
+import { createMachine } from "../app/game/wayworks";
 
 const base: WayworksPanelProps = {
   name: "Workshop Battery", kind: "battery", energyJ: 12_345, capacityJ: 100_000,
@@ -68,4 +71,27 @@ test("small integer joules remain visible and missing readings are not fabricate
   assert.match(missing, /Status unavailable/);
   assert.match(missing, /Front faces unknown/);
   assert.doesNotMatch(missing, /NaN|Infinity/);
+});
+
+test("operation feedback remains inside the modal and explains rejected transfers", () => {
+  assert.match(render({ feedback: "Select the Field Wrench first." }), /class="ww-feedback" role="status" aria-live="polite">Select the Field Wrench first\./);
+  assert.match(render({ feedback: "backpressure" }), /destination is full or contains a different resource/);
+  assert.doesNotMatch(render({ feedback: "ok" }), /ww-feedback/);
+});
+
+test("tanks prioritize measured contents and only advertise supported sockets", () => {
+  const html = render({ kind: "gas-tank", capacityJ: 0, energyJ: 0 });
+  assert.doesNotMatch(html, /Stored energy<\/dt>|Storage gauge unavailable/);
+  assert.match(html, /Gas storage/);
+  assert.match(html, /Supported: capacity, seal, thermal/);
+  assert.doesNotMatch(html, /speed · 0/);
+  assert.match(render({ kind: "waterwheel-generator", status: "no-water" }), /Needs flowing water beside the wheel/);
+  assert.match(render({ kind: "fluid-pump", status: "no-water" }), /Needs a water source directly below/);
+});
+
+test("resource and machine metadata never masquerade as creature data", () => {
+  assert.equal(wayworksMetadataSummary({ item: Item.FluidCanister, count: 1, metadata: { wayworksResource: { kind: "fluid", resource: "water", quantity: 1500 } } }), "1.5 L water");
+  assert.equal(wayworksMetadataSummary({ item: Item.GasCylinder, count: 1, metadata: { wayworksResource: { kind: "chemical", resource: "oxygen", quantity: 1000 } } }), "1 standard L oxygen");
+  assert.equal(wayworksMetadataSummary({ item: Item.GasCylinder, count: 1 }), "Empty container");
+  assert.equal(wayworksMetadataSummary({ item: BlockId.FluidTank, count: 1, metadata: { wayworks: createMachine("fluid-tank", "L", "owner") } }), "Sealed machine stores and modules");
 });

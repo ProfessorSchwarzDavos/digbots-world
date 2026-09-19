@@ -4,7 +4,7 @@ import { configureMachine, createMachine, MACHINE_FACES, machineCapacity, normal
 import { transferMachineItem, transferPortableResource } from "./wayworks-machines";
 import { machineEndpoint, withMachineEndpoint } from "./wayworks-machines";
 import { transferResource, type ResourceEndpoint } from "./wayworks-resources";
-import { MATERIAL_KINDS, MATERIAL_PORT_MODES, UPGRADE_ITEMS, UPGRADE_KINDS, validWorkshopItem, workshopFluidCapacity, workshopGasCapacity, workshopHeatCapacity, workshopRunning,
+import { MATERIAL_KINDS, MATERIAL_PORT_MODES, UPGRADE_ITEMS, UPGRADE_KINDS, supportedWorkshopUpgrades, validWorkshopItem, workshopFluidCapacity, workshopGasCapacity, workshopHeatCapacity, workshopRunning,
   type MaterialKind, type MaterialPortMode, type UpgradeKind, type WorkshopSlot, type WorkshopState } from "./wayworks-stores";
 
 export const WAYWORKS_BLOCKS: Readonly<Partial<Record<BlockId, MachineKind>>> = Object.freeze({
@@ -119,7 +119,8 @@ export function applyWorkshopAction(state: MachineState, key: string, held: Inve
     case "upgrade-install": {
       if (workshop.cycle) return fail("Finish or cancel the current cycle before changing upgrades.");
       const upgrade = UPGRADE_KINDS.find((kind) => UPGRADE_ITEMS[kind] === held?.item);
-      if (!upgrade || !held || held.metadata || held.durability !== undefined || workshop.upgrades[upgrade] >= 4) return fail("Select a compatible module; maximum four per type.");
+      if (!upgrade || !held || held.metadata || held.durability !== undefined || workshop.upgrades[upgrade] >= 4
+        || !supportedWorkshopUpgrades(state.kind).includes(upgrade)) return fail("Select a supported module; maximum four per type.");
       workshop.upgrades[upgrade] += 1;
       selected = held.count > 1 ? { ...held, count: held.count - 1 } : null;
       break;

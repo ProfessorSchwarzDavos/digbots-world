@@ -1,12 +1,19 @@
 import * as THREE from "three";
-import { configureMachine, advancePowerGrid, machineCapacity, machineRate, type MachineState } from "./wayworks";
-import { machineKindForBlock, chargeLifeSupportItem, placedWorkshopMachine, restoreWorkshop, type WorkshopAction } from "./wayworks-integration";
-import { createWayworksModel, updateWayworksModel } from "./wayworks-models";
+import { advancePowerGrid, localFaceForWorldDirection, machineCapacity, machineRate, normalizeMachine, type MachineState } from "./wayworks";
+import { applyWorkshopAction, machineKindForBlock, parseWorkshopAction, placedWorkshopMachine, restoreWorkshop, WAYWORKS_BLOCKS, type WorkshopAction, type WorkshopClipboard } from "./wayworks-integration";
+import { PowerTopologyCache } from "./wayworks-network";
+import { advanceMachine, portableResource } from "./wayworks-machines";
+import { advanceMachineLinks, exportMachineToWaygrid } from "./wayworks-links";
+import { workshopAuthorized, workshopFluidCapacity, workshopGasCapacity, workshopRunning } from "./wayworks-stores";
+import { operateWaygrid, type WaygridOperation } from "./wayworks-waygrid";
+import { compareProtectedCustody, validCustodyItem } from "./wayworks-custody";
+import { isWayworksItem } from "./wayworks-item-models";
+import { createWayworksModel, updateWayworksModel, updateWayworksPortOverlay } from "./wayworks-models";
 import { createWaystarCatalog, validateCelestialCatalog, type CelestialCatalogSnapshot, type CelestialBodyDefinition } from "./celestial-catalog";
 import { bodyEnvironment, gravityAcceleration, gravityGait, contactPushOffSpeed, effectiveFallDistance, type BodyEnvironment } from "./celestial-environment";
 import { localBodyClock, secondsFromLocalClock, sampleCelestialSky, type CelestialSkySample } from "./celestial-ephemeris";
 import { CelestialSkyRenderer } from "./celestial-sky";
-import { EMPTY_LIFE_SUPPORT, normalizeLifeSupportState, stepLifeSupport, operateLifeSupport, maneuverImpulse, constrainTether, lifeSupportResourceTotals, validLifeSupportOperation, type LifeSupportState, type LifeSupportHud, type LifeSupportOperation, type EvaTether } from "./life-support";
+import { EMPTY_LIFE_SUPPORT, normalizeLifeSupportState, stepLifeSupport, operateLifeSupport, maneuverImpulse, constrainTether, validLifeSupportOperation, type LifeSupportState, type LifeSupportHud, type LifeSupportOperation, type EvaTether } from "./life-support";
 import { craftLifeSupportSupply } from "./life-support-crafting";
 import { isSharedModelGeometry, sharedModelGeometryDiagnostics } from "./shared-model-geometry";
 import { CreatureLodBatcher, type CreatureLodInstance } from "./creature-lod-batcher";
@@ -643,6 +650,8 @@ import {
   type ContainerOperation,
   type ContainerSnapshot,
   type FacilityAction,
+  type FacilityOperation,
+  validFacilityOperation,
   type SharedFacilityKind,
   type InventoryAction,
   type ItemStackSnapshot,
@@ -898,7 +907,6 @@ import {
   createDigitalCreatureArchive,
   createDigitalItemVault,
   depositCreatureOrb,
-  depositDigitalItem,
   digitalCellCounts,
   digitalCreatureCapacity,
   digitalItemUtilization,
@@ -908,8 +916,6 @@ import {
   removeDigitalCreatureCell,
   removeDigitalItemCell,
   stepDigitalCreatureHealing,
-  withdrawCreatureOrb,
-  withdrawDigitalItem,
   type DigitalCreatureArchive,
   type DigitalItemVault,
   type DigitalStorageTier,
@@ -1282,7 +1288,8 @@ export type HudState = {
   activeOrbRack?: OrbRackHudState | null;
   activeHealingStation?: HealingStationHudState | null;
   activeWaygridItems?: WaygridItemHudState | null;
-  activeWayworks?: (MachineState & { name: string; capacityJ: number; rateW: number; heldItemName: string }) | null;
+  activeWayworks?: (MachineState & { name: string; capacityJ: number; rateW: number; heldItemName: string;
+    network?: { id: string; count: number; energyJ: number; capacityJ: number; revision: number } }) | null;
   activeWaygridCreatures?: WaygridCreatureHudState | null;
   activeAquarium?: AquariumHudState | null;
   activeGolemForge?: GolemForgeState | null;
@@ -4239,6 +4246,14 @@ export class VoxelEngine {
   activeWayworksKey: string | null = null;
   wayworksAccumulator = 0;
   wayworksActionReadyAt = 0;
+  wayworksTopology = new PowerTopologyCache();
+  wayworksNetworks: readonly { id: string; nodeKeys: readonly string[]; energyJ: number; capacityJ: number }[] = [];
+  wayworksTopologyRevision = 0;
+  wayworksClipboard: WorkshopClipboard | null = null;
+  wayworksSoundAt = 0;
+  wayworksOverlayResource: "energy" | "item" | "fluid" | "chemical" | "heat" = "energy";
+  wayworksActorReady = new Map<string, number>();
+  wayworksActorClipboards = new Map<string, WorkshopClipboard | null>();
   digitalCreatureArchive: DigitalCreatureArchive = createDigitalCreatureArchive();
   aquariums = new Map<string, AquariumState>();
   fieldPerches = new Map<string, FieldPerchState>();
@@ -6517,6 +6532,30 @@ export class VoxelEngine {
         this.paused = true; this.configureLocalEnvironmentTest({ platform: true, face: "horizon" });
         await this.saveNow(false); break;
       }
+      case "wayworks-full": {
+        // Explicit synthetic gallery only. Initial stores are fixture inputs,
+        // never evidence of generated power, pumped liquid or player progression.
+        this.paused = true; this.configureLocalEnvironmentTest({ platform: true, face: "horizon" });
+        this.inventory = blankInventory(); this.wayworks.clear(); this.clearWayworksModels();
+        const items = [Item.FieldWrench, Item.RawIron, Item.Coal, BlockId.WildwoodLog, Item.IronIngot, Item.FluidCanister, Item.GasCylinder, Item.IronPickaxe, Item.EvaPowerCell,
+          Item.CopperIngot, Item.SpeedModule, Item.EfficiencyModule, Item.CapacityModule, Item.FilterModule, Item.MufflingModule, Item.SealModule, Item.ThermalModule,
+          BlockId.FieldBattery, BlockId.GridCable, Item.CrushedIron, Item.EnrichedIron, Item.StoneDust, Item.MachineAlloy, Item.IronSheet, Item.CopperSheet, Item.Sawdust, Item.BiofuelPellet];
+        items.forEach((item, index) => { this.inventory[index] = { item, count: Math.min(maxStack(item), item >= Item.SpeedModule && item <= Item.ThermalModule ? 2 : 8),
+          ...(ITEMS[item].maxDurability ? { durability: ITEMS[item].maxDurability } : {}) }; });
+        this.inventory[8]!.metadata = { serial: "cf4-full-synthetic-cell", lifeSupport: { schema: 1, oxygenMl: 0, energyJ: 0, scrubberSeconds: 0, leak: 0, sockets: [] } };
+        this.equipment.back = { item: Item.EvaManeuverRig, count: 1, metadata: { serial: "cf4-full-synthetic-rig", lifeSupport: { schema: 1, oxygenMl: 0, energyJ: 0, scrubberSeconds: 0, leak: 0, sockets: [null, null] } } };
+        Object.entries(WAYWORKS_BLOCKS).forEach(([block, kind], index) => {
+          const x = (index % 5 - 2) * 3, z = [-6, -3, 3, 6][Math.floor(index / 5)], y = 111;
+          this.world.setBlock(x, y, z, Number(block) as BlockId, true, true);
+          const state = placedWorkshopMachine(kind!, { item: Number(block), count: 1 }, this.world.locationScope?.locationId ?? "home-preview", "local", 0);
+          state.energyJ = Math.min(24_000, machineCapacity(state.kind));
+          if (kind === "fluid-tank") state.workshop.fluid = { resource: "water", amount: 4000 };
+          if (kind === "gas-tank") state.workshop.chemical = { resource: "oxygen", amount: 12000 };
+          this.wayworks.set(blockKey(x, y, z), state);
+        });
+        this.world.setBlock(4, 111, 0, BlockId.CraftingTable, true, true);
+        this.selected = 0; this.emitHud(true); await this.saveNow(false); break;
+      }
       default: break;
     }
     return created ? { ok: true as const, world: created } : { ok: false as const, code: "world_create_failed" };
@@ -7842,7 +7881,7 @@ export class VoxelEngine {
     if (separator <= 0) return null;
     const kind = id.slice(0, separator) as SharedFacilityKind;
     const key = id.slice(separator + 1);
-    return ["apiary", "morph-loom", "orb-rack", "healing-station", "waygrid-items", "waygrid-creatures", "aquarium", "golem-forge", "alchemy", "distillery", "sugarworks"].includes(kind) && key
+    return ["apiary", "morph-loom", "orb-rack", "healing-station", "waygrid-items", "waygrid-creatures", "aquarium", "golem-forge", "alchemy", "distillery", "sugarworks", "wayworks"].includes(kind) && key
       ? { kind, key }
       : null;
   }
@@ -7851,6 +7890,7 @@ export class VoxelEngine {
     const coords = key.split(",").map(Number);
     if (coords.length !== 3 || !coords.every(Number.isFinite)) return false;
     const block = this.world.getBlock(coords[0], coords[1], coords[2]);
+    if (kind === "wayworks") return machineKindForBlock(block) !== undefined;
     if (kind === "apiary") return block === BlockId.Apiary || block === BlockId.WildBeehive;
     const expected: Partial<Record<SharedFacilityKind, BlockId>> = {
       "orb-rack": BlockId.CaptureOrbRack,
@@ -7879,7 +7919,7 @@ export class VoxelEngine {
       if (kind === "distillery" && !this.distilleries.has(key)) this.distilleries.set(key, createDistillery());
       if (kind === "sugarworks" && !this.sugarworks.has(key)) this.sugarworks.set(key, createSugarworks());
     }
-    const state: unknown = kind === "apiary" ? this.apiaries.get(key)
+    const state: unknown = kind === "wayworks" ? this.wayworks.get(key) : kind === "apiary" ? this.apiaries.get(key)
       : kind === "morph-loom" ? this.morphLooms.get(key)
       : kind === "orb-rack" ? this.orbRacks.get(key)
         : kind === "healing-station" ? this.healingStations.get(key)
@@ -7894,7 +7934,11 @@ export class VoxelEngine {
   }
 
   private applySharedFacilityState(kind: SharedFacilityKind, key: string, state: Record<string, unknown>) {
-    if (kind === "apiary") this.apiaries.set(key, restoreApiaryStorage({ [key]: state as ApiaryBlockState }).get(key) ?? createEmptyApiaryBlock());
+    if (kind === "wayworks") {
+      const [x, y, z] = key.split(",").map(Number), expectedKind = machineKindForBlock(this.world.getBlock(x, y, z));
+      if (expectedKind && typeof state.ownerId === "string") this.wayworks.set(key, normalizeMachine(state, expectedKind, this.world.locationScope?.locationId ?? "home-preview", state.ownerId));
+    }
+    else if (kind === "apiary") this.apiaries.set(key, restoreApiaryStorage({ [key]: state as ApiaryBlockState }).get(key) ?? createEmptyApiaryBlock());
     else if (kind === "morph-loom") this.morphLooms.set(key, normalizeOrbMorphLoom(state));
     else if (kind === "orb-rack") this.orbRacks.set(key, restoreOrbRackStorage({ [key]: state as OrbRackState }).get(key) ?? createOrbRack());
     else if (kind === "healing-station") this.healingStations.set(key, restoreHealingStationStorage({ [key]: state as CreatureHealerState }).get(key) ?? createCreatureHealer());
@@ -7910,7 +7954,7 @@ export class VoxelEngine {
   }
 
   private activeSharedFacility(): { id: string; kind: SharedFacilityKind; key: string } | null {
-    const pair: [SharedFacilityKind, string | null] = this.activeApiaryKey ? ["apiary", this.activeApiaryKey]
+    const pair: [SharedFacilityKind, string | null] = this.activeWayworksKey ? ["wayworks", this.activeWayworksKey] : this.activeApiaryKey ? ["apiary", this.activeApiaryKey]
       : this.activeMorphLoomKey ? ["morph-loom", this.activeMorphLoomKey]
         : this.activeOrbRackKey ? ["orb-rack", this.activeOrbRackKey]
         : this.activeHealingStationKey ? ["healing-station", this.activeHealingStationKey]
@@ -8046,13 +8090,9 @@ export class VoxelEngine {
         return;
       }
       const next = normalizeMultiplayerPlayerState(action.state, peer.identity.id, action.state.variant);
-      const resources = (state: PlayerSessionSnapshot) => {
-        const slots = [...state.inventory, ...(state.craftGrid ?? []), state.cursor, state.trash, ...Object.values(state.equipment), state.offhand].map(slot => inventorySlotFromNetwork(slot ?? null));
-        return { ...lifeSupportResourceTotals(slots), workshopJ: slots.reduce((sum, slot) => sum + (slot && machineKindForBlock(slot.item) ? Math.max(0, Number((slot.metadata?.wayworks as MachineState | undefined)?.energyJ) || 0) * slot.count : 0), 0) };
-      };
-      const beforeResources = resources(current), afterResources = resources(next);
-      if (Object.keys(beforeResources).some(key => afterResources[key as keyof typeof afterResources] > beforeResources[key as keyof typeof beforeResources] + .001)) {
-        this.multiplayer.sendPlayerState({ ...action, state: current, status: "rejected", reason: "Finite life-support resources must be transferred by the host." }, peer.identity.id); return;
+      const custody = (state: PlayerSessionSnapshot) => [...state.inventory, ...(state.craftGrid ?? []), state.cursor, state.trash, ...Object.values(state.equipment), state.offhand];
+      if (!compareProtectedCustody(custody(current), custody(action.state)).ok) {
+        this.multiplayer.sendPlayerState({ ...action, state: current, status: "rejected", reason: "Finite equipment and machine resources require a host-authorized transfer." }, peer.identity.id); return;
       }
       next.lifeSupport = current.lifeSupport;
       this.multiplayerPlayerStates.set(peer.identity.id, next);
@@ -8833,6 +8873,7 @@ export class VoxelEngine {
     const session = this.multiplayer;
     if (!session) return;
     if (session.role === "host" && action.status !== "accepted" && peer.identity) {
+      if (action.actorId !== peer.identity.id) return;
       if (action.kind === "close") {
         this.multiplayerPeerActiveFacilities.delete(peer.identity.id);
         session.sendFacilityAction({ ...action, status: "accepted" }, peer.identity.id);
@@ -8849,13 +8890,65 @@ export class VoxelEngine {
       }
       const currentState = this.sharedFacilityState(parts.kind, parts.key, true);
       if (!currentState) { this.rejectFacilityAction(action, peer.identity.id, "That facility has no shared inventory yet."); return; }
-      const revision = this.multiplayerFacilityRevisions.get(action.facilityId) ?? 0;
+      if (parts.kind === "wayworks" && !this.workshopActorAccess(this.wayworks.get(parts.key)!, peer.identity.id)) {
+        this.rejectFacilityAction(action, peer.identity.id, "The owner has not opened this machine for public service."); return;
+      }
+      const revision = this.currentFacilityRevision(parts.kind, parts.key, currentState);
       if (action.kind === "open") {
         this.multiplayerPeerActiveFacilities.set(peer.identity.id, action.facilityId);
         const response: FacilityAction = { ...action, state: currentState, expectedRevision: revision, playerState: this.ensureHostPlayerSession(peer.identity), status: "accepted" };
         session.sendFacilityAction(response, peer.identity.id);
         this.multiplayerPeerFacilitySignatures.set(`${peer.identity.id}|${action.facilityId}`, `${revision}:${JSON.stringify(currentState)}`);
         return;
+      }
+      if (action.kind === "transact") {
+        const player = this.ensureHostPlayerSession(peer.identity);
+        const reject = (reason: string) => this.rejectFacilityAction(action, peer.identity!.id, reason, currentState, player, revision);
+        if (action.state !== undefined || action.playerState !== undefined || !validFacilityOperation(action.operation)
+          || this.multiplayerPeerActiveFacilities.get(peer.identity.id) !== action.facilityId) { reject("Open this facility before sending a semantic operation."); return; }
+        if (action.expectedRevision !== revision || action.expectedPlayerRevision !== player.revision) { reject("State changed; refresh both revisions and retry."); return; }
+        if (player.revision >= Number.MAX_SAFE_INTEGER) { reject("Player revision exhausted; reconnect before another operation."); return; }
+        let inventory = player.inventory.map(inventorySlotFromNetwork);
+        const equipment = { ...player.equipment }; let offhand = player.offhand;
+        let commit = () => {};
+        let reason = "ok";
+        if (parts.kind === "wayworks" && action.operation.kind === "workshop") {
+          const state = this.wayworks.get(parts.key)!, operation = action.operation.action, index = action.operation.inventorySlot;
+          if (index >= inventory.length) { reject("Inventory slot is unavailable."); return; }
+          if (!this.workshopActorAccess(state, peer.identity.id, operation)) { reject("Public service does not grant machine configuration authority."); return; }
+          if ((operation.kind === "crank" || operation.kind === "charge") && performance.now() < (this.wayworksActorReady.get(peer.identity.id) ?? 0)) { reject("Wait for the last effort or charge transfer to settle."); return; }
+          const target = operation.kind === "charge" ? operation.target ?? "held" : "held";
+          const selected = target === "back" ? inventorySlotFromNetwork(player.equipment.back ?? null) : target === "offhand" ? inventorySlotFromNetwork(player.offhand ?? null) : inventory[index];
+          const result = applyWorkshopAction(state, parts.key, selected, state.revision, operation, this.wayworksActorClipboards.get(peer.identity.id) ?? null);
+          if (!result.ok) { reject(result.reason); return; }
+          if (target === "back") equipment.back = networkItemStack(result.held);
+          else if (target === "offhand") offhand = networkItemStack(result.held);
+          else inventory[index] = result.held;
+          commit = () => {
+            this.wayworks.set(parts.key, result.machine);
+            this.wayworksActorClipboards.set(peer.identity!.id, result.clipboard);
+            if (operation.kind === "crank" || operation.kind === "charge") this.wayworksActorReady.set(peer.identity!.id, performance.now() + 1000);
+            if (operation.kind === "rotate") this.world.setBlockFacing?.(coords[0], coords[1], coords[2], normalizeBlockFacing(result.machine.facing), true);
+          };
+          reason = result.reason;
+        } else if ((parts.kind === "waygrid-items" || parts.kind === "waygrid-creatures") && action.operation.kind === "waygrid") {
+          if (action.operation.action.kind.endsWith("creature") !== (parts.kind === "waygrid-creatures")) { reject("Wrong terminal for this resource."); return; }
+          const result = operateWaygrid(this.digitalItemVault, this.digitalCreatureArchive, inventory, action.operation.action);
+          if (!result.ok) { reject(result.reason); return; }
+          const power = this.waygridPowerSource(parts.key, result.powerJ);
+          if (!power) { reject(`Needs ${result.powerJ} J from an adjacent output/service battery or generator.`); return; }
+          inventory = result.inventory.map(cloneSlot); reason = result.reason;
+          commit = () => {
+            this.wayworks.set(power.key, { ...power.state, revision: power.state.revision + 1, energyJ: power.state.energyJ - power.joules });
+            this.digitalItemVault = result.vault; this.digitalCreatureArchive = result.archive;
+          };
+        } else { reject("Unsupported facility operation."); return; }
+        const next = normalizeMultiplayerPlayerState({ ...player, revision: player.revision + 1, inventory: inventory.map(networkItemStack), equipment, offhand }, peer.identity.id, player.variant);
+        commit();
+        this.multiplayerPlayerStates.set(peer.identity.id, next);
+        const state = this.sharedFacilityState(parts.kind, parts.key)!;
+        session.sendFacilityAction({ ...action, state, playerState: next, expectedRevision: this.currentFacilityRevision(parts.kind, parts.key, state), expectedPlayerRevision: next.revision, status: "accepted", reason }, peer.identity.id);
+        this.saveSoon(); this.emitHud(true); return;
       }
       // Every workstation now has a shared host-authored view. Mutating their
       // heterogeneous production state requires a typed intent; never accept
@@ -8876,6 +8969,10 @@ export class VoxelEngine {
         this.multiplayerFacilitySignatures.set(action.facilityId, JSON.stringify(action.state));
       }
       if (ownResponse && action.playerState) this.applyLocalPlayerSessionSnapshot(action.playerState, true);
+      if (ownResponse && action.kind === "close" && action.status === "rejected" && parts?.kind === "wayworks") {
+        this.activeWayworksKey = null; this.activeNetworkFacilityId = null;
+        this.restoreGuestFacilityPlayerBaseline();
+      }
       if (ownResponse && action.reason) this.events.onToast(action.reason);
       this.emitHud(true);
     }
@@ -8887,6 +8984,30 @@ export class VoxelEngine {
     this.queueCriticalReliableRequest(`host-facility-reject:${peerId}:${action.requestId}`, () => this.multiplayer?.sendFacilityAction(response, peerId) ?? 0, 4_000);
   }
 
+  private currentFacilityRevision(kind: SharedFacilityKind, key: string, state: Record<string, unknown>) {
+    if (kind === "wayworks") return Number(state.revision) || 0;
+    const identity = kind === "waygrid-items" || kind === "waygrid-creatures" ? `${kind}:shared` : this.sharedFacilityId(kind, key);
+    const signature = JSON.stringify(state);
+    this.multiplayerFacilitySignatures ??= new Map();
+    if (this.multiplayerFacilitySignatures.get(identity) !== signature) {
+      this.multiplayerFacilitySignatures.set(identity, signature);
+      this.multiplayerFacilityRevisions.set(identity, (this.multiplayerFacilityRevisions.get(identity) ?? 0) + 1);
+    }
+    return this.multiplayerFacilityRevisions.get(identity) ?? 0;
+  }
+
+  private requestSemanticFacilityOperation(facility: { id: string; kind: SharedFacilityKind }, operation: FacilityOperation) {
+    const session = this.multiplayer;
+    if (!session || session.role !== "guest" || !session.identity || this.multiplayerPendingFacilityMutations.has(facility.id)) return false;
+    const action: FacilityAction = { requestId: `facility_tx_${Date.now().toString(36)}_${(++this.multiplayerTick).toString(36)}`,
+      actorId: session.identity.id, facilityId: facility.id, facilityKind: facility.kind, kind: "transact", operation,
+      expectedRevision: this.multiplayerFacilityRevisions.get(facility.id) ?? 0,
+      expectedPlayerRevision: this.multiplayerPlayerStateRevision, status: "request" };
+    const queued = this.queueCriticalReliableRequest(`facility-tx:${action.requestId}`, () => session.sendFacilityAction(action));
+    if (queued) this.multiplayerPendingFacilityMutations.add(facility.id);
+    return queued;
+  }
+
   private syncMultiplayerFacilities() {
     const session = this.multiplayer;
     if (!session || !session.role) return;
@@ -8895,9 +9016,18 @@ export class VoxelEngine {
       for (const [peerId, facilityId] of this.multiplayerPeerActiveFacilities) {
         const parts = this.sharedFacilityParts(facilityId);
         if (!parts || !session.getPeer(peerId)) continue;
+        const pose = this.remotePlayers.get(peerId)?.target, coords = parts.key.split(",").map(Number);
+        if (parts.kind === "wayworks" && (!pose || Math.hypot(coords[0] - pose.x, coords[1] - pose.y, coords[2] - pose.z) > 8
+          || !this.sharedFacilityExists(parts.kind, parts.key) || !this.workshopActorAccess(this.wayworks.get(parts.key)!, peerId))) {
+          this.multiplayerPeerActiveFacilities.delete(peerId);
+          this.multiplayerPeerFacilitySignatures.delete(`${peerId}|${facilityId}`);
+          session.sendFacilityAction({ requestId: `facility_revoked_${Date.now().toString(36)}`, actorId: peerId, facilityId,
+            facilityKind: parts.kind, kind: "close", status: "rejected", reason: "Machine access ended. Move within reach or ask the owner to reopen service." }, peerId);
+          continue;
+        }
         const state = this.sharedFacilityState(parts.kind, parts.key);
         if (!state) continue;
-        const revision = this.multiplayerFacilityRevisions.get(facilityId) ?? 0;
+        const revision = this.currentFacilityRevision(parts.kind, parts.key, state);
         const signature = `${revision}:${JSON.stringify(state)}`;
         const peerKey = `${peerId}|${facilityId}`;
         if (this.multiplayerPeerFacilitySignatures.get(peerKey) === signature) continue;
@@ -9754,7 +9884,19 @@ export class VoxelEngine {
       const playerPoses = [this.localNetworkPose(), ...[...this.remotePlayers.values()].map((player) => player.target)]
         .filter((pose): pose is PlayerPose => Boolean(pose));
       const valid = Boolean(remote) && placement.valid && action.edits.length > 0 && action.edits.length <= 2_048 && action.edits.every((edit) => {
-        if (machineKindForBlock(edit.type) || machineKindForBlock(this.world.getBlock(edit.x, edit.y, edit.z))) return false;
+        const existing = this.world.getBlock(edit.x, edit.y, edit.z), incomingMachine = machineKindForBlock(edit.type), existingMachine = machineKindForBlock(existing);
+        if (incomingMachine || existingMachine) {
+          if (!peer.identity || !playerState || action.edits.length !== 1 || action.effect) return false;
+          const held = inventorySlotFromNetwork(playerState.inventory[playerState.selected]);
+          if (incomingMachine) {
+            if (existing === undefined || (existing !== BlockId.Air && !BLOCKS[existing]?.replaceable) || this.wayworks.size >= 256
+              || !held || held.item !== edit.type || !validCustodyItem(held) || this.mode === "survival" && !placement.consumed) return false;
+          } else {
+            const state = this.wayworks.get(blockKey(edit.x, edit.y, edit.z));
+            if (edit.type !== BlockId.Air || !state || this.mode !== "survival" || !this.toolCanHarvest(existing!, held)
+              || !this.workshopActorAccess(state, peer.identity.id, { kind: "rotate" })) return false;
+          }
+        }
         const definition = BLOCKS[edit.type as BlockId];
         const dx = edit.x - remote!.target.x;
         const dy = edit.y - (remote!.target.y + 1);
@@ -9798,6 +9940,12 @@ export class VoxelEngine {
           action.effect?.kind === "tree-fell",
         );
         this.applyBlockEditFacings(action.edits, true);
+        for (const edit of action.edits) {
+          const kind = machineKindForBlock(edit.type);
+          if (kind && held && peer.identity) this.wayworks.set(blockKey(edit.x, edit.y, edit.z), placedWorkshopMachine(kind,
+            this.mode === "builder" ? { item: held.item, count: 1 } : held,
+            this.world.locationScope?.locationId ?? "home-preview", peer.identity.id, edit.facing ?? 0));
+        }
         this.publishDestructionTombstones(action.edits
           .filter((edit) => edit.type === BlockId.Air)
           .map((edit) => ({ kind: "block" as const, cause: "broken" as const, block: { x: edit.x, y: edit.y, z: edit.z } })));
@@ -9839,6 +9987,12 @@ export class VoxelEngine {
         const key = blockKey(edit.x, edit.y, edit.z);
         if (!this.chests.has(key) && !this.chestStorageKey(key).includes("|")) this.chests.set(key, Array.from({ length: 27 }, () => null));
         this.resolveChest(key);
+      }
+      for (const edit of action.edits) {
+        const key = blockKey(edit.x, edit.y, edit.z), kind = machineKindForBlock(edit.type);
+        if (kind && this.wayworks.get(key)?.kind !== kind) this.wayworks.set(key, placedWorkshopMachine(kind,
+          { item: edit.type, count: 1 }, this.world.locationScope?.locationId ?? "home-preview", "local", edit.facing ?? 0));
+        if (!kind && this.wayworks.has(key)) { this.wayworks.delete(key); this.clearWayworksModels(key); }
       }
       this.lightRefreshTimer = 0;
       if (action.status === "rejected" && action.reason) this.events.onToast(action.reason);
@@ -12740,43 +12894,52 @@ export class VoxelEngine {
   private wayworksHud() {
     const state = this.activeWayworksKey ? this.wayworks.get(this.activeWayworksKey) : undefined;
     if (!state) return null;
+    const network = this.wayworksNetworks?.find((entry) => entry.nodeKeys.includes(this.activeWayworksKey!));
     return { ...state, name: state.kind.split("-").map(word => word[0].toUpperCase() + word.slice(1)).join(" "),
-      capacityJ: machineCapacity(state.kind), rateW: machineRate(state.kind), heldItemName: this.selectedSlot() ? itemName(this.selectedSlot()!.item) : "Empty hand" };
+      capacityJ: machineCapacity(state.kind, state.workshop), rateW: machineRate(state.kind), heldItemName: this.selectedSlot() ? itemName(this.selectedSlot()!.item) : "Empty hand",
+      ...(network ? { network: { id: network.id, count: network.nodeKeys.length,
+        energyJ: network.nodeKeys.reduce((sum, key) => sum + (this.wayworks.get(key)?.energyJ ?? 0), 0),
+        capacityJ: network.capacityJ, revision: this.wayworksTopologyRevision } } : {}) };
+  }
+
+  private workshopActorAccess(state: MachineState, actor: string, action?: WorkshopAction) {
+    if (!state || state.locationId !== (this.world.locationScope?.locationId ?? "home-preview")) return false;
+    const owner = state.ownerId === actor || state.ownerId === "local" && (actor === "local" || actor === this.multiplayer?.identity.id);
+    if (owner || state.workshop.trusted.includes(actor)) return true;
+    if (!workshopAuthorized(state.workshop, state.ownerId, actor)) return false;
+    return !action || ["crank", "charge", "slot", "portable", "oxygen"].includes(action.kind);
   }
 
   /** Host-owned intent: panel callbacks carry no replacement state or quantities. */
   workshopAction(action: WorkshopAction, expectedRevision: number) {
     const key = this.activeWayworksKey, state = key ? this.wayworks.get(key) : undefined;
     const fail = (message: string) => { this.events.onToast(message); this.emitHud(true); return false; };
+    if (key && this.multiplayer?.role === "guest") return this.requestSemanticFacilityOperation({ id: this.sharedFacilityId("wayworks", key), kind: "wayworks" },
+      { kind: "workshop", action, inventorySlot: this.selected });
     // The host owns this local universe; a transient room identity is not a
     // durable save owner. Guest edits are denied until typed admission exists.
     if (!key || !state || this.multiplayer?.role === "guest" || state.ownerId !== "local") return fail("Only the workshop owner can operate this machine.");
     const [x, y, z] = key.split(",").map(Number);
     if (Math.hypot(x - this.position.x, y - this.position.y, z - this.position.z) > 6 || machineKindForBlock(this.world.getBlock(x, y, z)) !== state.kind || state.locationId !== (this.world.locationScope?.locationId ?? "home-preview")) return fail("Machine is out of reach or no longer present.");
-    if (action.kind === "charge") {
-      if (performance.now() < this.wayworksActionReadyAt) return fail("Charge transfer is settling.");
-      const transfer = chargeLifeSupportItem(state, this.selectedSlot(), expectedRevision);
-      if (!transfer.ok) return fail(transfer.reason);
-      this.wayworks.set(key, transfer.machine); this.inventory[this.selected] = transfer.slot;
-      this.wayworksActionReadyAt = performance.now() + 1000;
-      this.events.onToast(transfer.reason);
-    } else {
-      if ((action.kind === "rotate" || action.kind === "port") && this.selectedSlot()?.item !== Item.FieldWrench) return fail("Select the Field Wrench to configure ports or rotate.");
-      if (action.kind === "crank" && performance.now() < this.wayworksActionReadyAt) return fail("Wait for the flywheel to complete its turn.");
-      const configured = configureMachine(state, expectedRevision, action);
-      if (!configured.ok) return fail(configured.reason);
-      this.wayworks.set(key, configured.state);
-      if (action.kind === "crank") this.wayworksActionReadyAt = performance.now() + 1000;
-      if (action.kind === "rotate") this.world.setBlockFacing?.(x, y, z, normalizeBlockFacing(configured.state.facing), true);
-      this.events.onToast(configured.reason);
-    }
+    if ((action.kind === "crank" || action.kind === "charge") && performance.now() < this.wayworksActionReadyAt) return fail("Wait for this transfer to settle.");
+    const target = action.kind === "charge" ? action.target ?? "held" : "held";
+    const selected = target === "back" ? this.equipment.back : target === "offhand" ? this.offhand : this.selectedSlot();
+    const result = applyWorkshopAction(state, key, selected, expectedRevision, action, this.wayworksClipboard);
+    if (!result.ok) return fail(result.reason);
+    this.wayworks.set(key, result.machine); this.wayworksClipboard = result.clipboard;
+    if (target === "back") this.equipment.back = result.held;
+    else if (target === "offhand") this.offhand = result.held;
+    else this.inventory[this.selected] = result.held;
+    if (action.kind === "crank" || action.kind === "charge") this.wayworksActionReadyAt = performance.now() + 1000;
+    if (action.kind === "rotate") this.world.setBlockFacing?.(x, y, z, normalizeBlockFacing(result.machine.facing), true);
+    this.events.onToast(result.reason);
     this.saveSoon(); this.emitHud(true); return true;
   }
 
   updateWayworks(dt: number) {
-    if (this.multiplayer?.role === "guest") return;
+    if (this.multiplayer?.role === "guest") { this.renderWayworks(); return; }
     this.wayworksAccumulator += this.paused ? 0 : Math.max(0, dt);
-    if (this.wayworksAccumulator < .25) return;
+    if (this.wayworksAccumulator < .25) { this.renderWayworks(); return; }
     const elapsedMs = Math.min(1000, Math.floor(this.wayworksAccumulator * 1000)); this.wayworksAccumulator = 0;
     const radius = this.settings.simulationDistance * CHUNK_SIZE;
     const nodes = [...this.wayworks].flatMap(([key, state]) => {
@@ -12785,30 +12948,96 @@ export class VoxelEngine {
       if (block !== undefined && machineKindForBlock(block) !== state.kind) { this.wayworks.delete(key); return []; }
       if (block === undefined || Math.hypot(x - this.position.x, z - this.position.z) > radius) return [];
       let exposed = true;
-      if (state.kind === "sunplate-array") for (let skyY = y + 1; skyY <= MAX_Y; skyY++) {
+      if (state.kind === "sunplate-array" || state.kind === "wind-rotor") for (let skyY = y + 1; skyY <= MAX_Y; skyY++) {
         const overhead = this.world.getBlock(x, skyY, z);
         if (overhead === undefined || BLOCKS[overhead]?.solid) { exposed = false; break; }
       }
-      const body = this.bodyContext().body;
+      const { body, environment } = this.bodyContext();
       const solarExposure = exposed ? this.daylightAmount() * (1 - (this.celestialSample?.eclipse ?? 0)) * (this.weatherState.kind === "clear" ? 1 : .35) / Math.max(1, (body.orbit?.semiMajorAxisAu ?? 1) ** 2) : 0;
-      return [{ key, x, y, z, state, solarExposure }];
+      const biomeName = String(BIOME_NAMES[this.world.biomeAt(x, z)] ?? "").toLowerCase();
+      const biomeWind = /forest|wood|jungle/.test(biomeName) ? .55 : /mountain|peak|cliff/.test(biomeName) ? 1.2 : 1;
+      const clearRotor = [[1, 0], [-1, 0], [0, 1], [0, -1]].every(([dx, dz]) => {
+        const neighbor = this.world.getBlock(x + dx, y + 1, z + dz); return neighbor !== undefined && !BLOCKS[neighbor]?.solid;
+      });
+      const windExposure = exposed && clearRotor && environment.pressureKPa > 0 ? Math.min(1, environment.wind * biomeWind * Math.max(.1, this.weatherState.windSpeed) / 2.5) : 0;
+      const flowingNeighbors = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0], [0, -1, 0]].filter(([dx, dy, dz]) => {
+        const cell = this.liquidCells.get(blockKey(x + dx, y + dy, z + dz));
+        return this.world.getBlock(x + dx, y + dy, z + dz) === BlockId.Water && cell?.kind === "water" && !cell.source && (cell.falling || cell.level > 0);
+      }).length;
+      return [{ key, x, y, z, state, solarExposure, windExposure, waterFlow: Math.min(1, flowingNeighbors / 2) }];
     }).slice(0, 256);
-    const result = advancePowerGrid(nodes, elapsedMs);
+    const result = advancePowerGrid(nodes, elapsedMs, this.wayworksTopology);
+    this.wayworksNetworks = result.networks; this.wayworksTopologyRevision = result.topologyRevision;
     for (const [key, state] of Object.entries(result.states)) this.wayworks.set(key, state);
-    const visible = new Set(nodes.map(node => node.key));
-    // Models remain owned by this engine and are disposed together at location/load boundaries.
-    for (const [key, model] of this.wayworksModels) {
-      if (!visible.has(key) || model.userData.wayworksKind !== this.wayworks.get(key)?.kind) this.clearWayworksModels(key);
+    if (result.reason === "ok") for (const node of nodes) {
+      const sourceKey = blockKey(node.x, node.y - 1, node.z);
+      const hasSource = this.world.getBlock(node.x, node.y - 1, node.z) === BlockId.Water && this.liquidCells.get(sourceKey)?.source !== false;
+      const stepped = advanceMachine(this.wayworks.get(node.key)!, elapsedMs, { waterAvailableMl: hasSource ? 1000 : 0 });
+      if (stepped.waterConsumedMl === 1000) {
+        this.liquidCells.delete(sourceKey);
+        this.world.setBlock(node.x, node.y - 1, node.z, BlockId.Air, true, true);
+        this.notifyLiquidChanged(node.x, node.y - 1, node.z);
+        this.publishBlockEdits([{ x: node.x, y: node.y - 1, z: node.z, type: BlockId.Air }], "break");
+      }
+      this.wayworks.set(node.key, stepped.state);
     }
-    for (const node of nodes) {
-      const state = this.wayworks.get(node.key)!;
-      let model = this.wayworksModels.get(node.key);
-      if (!model) { model = createWayworksModel(state.kind); this.wayworksModels.set(node.key, model); this.scene.add(model); }
-      model.visible = true; model.position.set(node.x, node.y - .5, node.z); model.rotation.y = blockFacingYaw(normalizeBlockFacing(state.facing));
-      updateWayworksModel(model, { fill: state.energyJ / Math.max(1, machineCapacity(state.kind)), active: state.enabled && state.energyJ > 0, time: performance.now() / 1000 });
+    const linked = advanceMachineLinks(nodes.map((node) => ({ ...node, state: this.wayworks.get(node.key)! })), elapsedMs);
+    if (linked.reason === "ok") for (const [key, state] of linked.states) this.wayworks.set(key, state);
+    // Adjacent vault terminals receive through their existing immutable item authority.
+    for (const node of nodes) for (const [dx, dy, dz] of [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0], [0, 1, 0], [0, -1, 0]]) {
+      let state = this.wayworks.get(node.key)!;
+      const port = state.workshop.resourcePorts.item[localFaceForWorldDirection(state.facing, dx, dy, dz)];
+      if (state.ownerId !== "local" || !["output", "both"].includes(port) || this.world.getBlock(node.x + dx, node.y + dy, node.z + dz) !== BlockId.WaygridVaultTerminal) continue;
+      for (const slot of ["output", "byproduct"] as const) {
+        const remaining = linked.budgets.get(`${node.key}/item`) ?? 0;
+        if (remaining <= 0) continue;
+        const exported = exportMachineToWaygrid(state, this.digitalItemVault, slot, remaining);
+        if (!exported.ok) continue;
+        linked.budgets.set(`${node.key}/item`, remaining - exported.moved);
+        state = exported.machine; this.wayworks.set(node.key, state); this.digitalItemVault = exported.vault;
+      }
+    }
+    this.renderWayworks();
+    if (!this.paused && !this.agentMode && performance.now() >= this.wayworksSoundAt) {
+      const audible = nodes.filter((node) => ["generating", "working"].includes(this.wayworks.get(node.key)!.status))
+        .map((node) => ({ node, distance: Math.hypot(node.x - this.position.x, node.y - this.position.y, node.z - this.position.z) }))
+        .filter((entry) => entry.distance < 12).sort((a, b) => a.distance - b.distance)[0];
+      if (audible) {
+        const state = this.wayworks.get(audible.node.key)!;
+        this.audio.playMachine(state.kind.includes("smelter") ? 90 : state.kind.includes("saw") ? 260 : 145,
+          (1 - audible.distance / 12) / (1 + state.workshop.upgrades.muffling * 2));
+      }
+      this.wayworksSoundAt = performance.now() + 900;
     }
     if (nodes.length) this.persistenceDirty = true;
     if (this.activeWayworksKey) this.emitHud(true);
+  }
+
+  inspectWorkshopResource(resource: "energy" | "item" | "fluid" | "chemical" | "heat") {
+    this.wayworksOverlayResource = resource; this.renderWayworks();
+  }
+
+  /** Presentation never advances stores, including guest and paused views. */
+  private renderWayworks() {
+    const visible = new Set<string>(), radius = this.settings.simulationDistance * CHUNK_SIZE;
+    const wrench = this.selectedSlot()?.item === Item.FieldWrench;
+    for (const [key, state] of this.wayworks) {
+      const [x, y, z] = key.split(",").map(Number), distance = Math.hypot(x - this.position.x, y - this.position.y, z - this.position.z);
+      if (distance > radius || machineKindForBlock(this.world.getBlock(x, y, z)) !== state.kind) continue;
+      visible.add(key);
+      let model = this.wayworksModels.get(key);
+      if (model && model.userData.wayworksKind !== state.kind) { this.clearWayworksModels(key); model = undefined; }
+      if (!model) { model = createWayworksModel(state.kind); this.wayworksModels.set(key, model); this.scene.add(model); }
+      model.visible = true; model.position.set(x, y - .5, z); model.rotation.y = blockFacingYaw(normalizeBlockFacing(state.facing));
+      const fluidCapacity = workshopFluidCapacity(state.kind, state.workshop), gasCapacity = workshopGasCapacity(state.kind, state.workshop);
+      updateWayworksModel(model, { fill: state.energyJ / Math.max(1, machineCapacity(state.kind, state.workshop)),
+        progress: state.workshop.cycle ? state.workshop.cycle.progressMs / state.workshop.cycle.durationMs : 0,
+        fluidFill: gasCapacity ? (state.workshop.chemical?.amount ?? 0) / gasCapacity : fluidCapacity ? (state.workshop.fluid?.amount ?? 0) / fluidCapacity : 0,
+        active: !this.paused && state.enabled && ["generating", "transferring", "working"].includes(state.status), time: performance.now() / 1000 });
+      const resource = this.wayworksOverlayResource;
+      updateWayworksPortOverlay(model, wrench && distance < 8, resource === "energy" ? state.ports : state.workshop.resourcePorts[resource], resource);
+    }
+    for (const [key] of this.wayworksModels) if (!visible.has(key)) this.clearWayworksModels(key);
   }
 
   registerWaygridBlock(type: BlockId, key: string) {
@@ -14985,81 +15214,45 @@ export class VoxelEngine {
     this.emitHud(true);
   }
 
+  private waygridPowerSource(key: string, joules: number) {
+    const [x, y, z] = key.split(",").map(Number);
+    if (![x, y, z].every(Number.isSafeInteger) || !Number.isSafeInteger(joules) || joules <= 0) return null;
+    for (const [dx, dy, dz] of [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0], [0, 1, 0], [0, -1, 0]]) {
+      const sourceKey = blockKey(x + dx, y + dy, z + dz), state = this.wayworks.get(sourceKey);
+      if (!state || !state.enabled || !workshopRunning(state.workshop) || state.ownerId !== "local" || state.revision >= Number.MAX_SAFE_INTEGER
+        || state.locationId !== (this.world.locationScope?.locationId ?? "home-preview") || state.energyJ < joules
+        || machineKindForBlock(this.world.getBlock(x + dx, y + dy, z + dz)) !== state.kind) continue;
+      const port = state.ports[localFaceForWorldDirection(state.facing, -dx, -dy, -dz)];
+      if (["output", "both", "service"].includes(port)) return { key: sourceKey, state, joules };
+    }
+    return null;
+  }
+
+  private localWaygridOperation(operation: WaygridOperation) {
+    const creatures = operation.kind.endsWith("creature"), key = creatures ? this.activeWaygridCreatureKey : this.activeWaygridItemKey;
+    const fail = (reason: string) => { this.events.onToast(reason); return false; };
+    if (!key) return fail("Open a Waygrid terminal first.");
+    if (this.multiplayer?.role === "guest") return this.requestSemanticFacilityOperation({ id: this.sharedFacilityId(creatures ? "waygrid-creatures" : "waygrid-items", key), kind: creatures ? "waygrid-creatures" : "waygrid-items" }, { kind: "waygrid", action: operation });
+    const [x, y, z] = key.split(",").map(Number);
+    if (Math.hypot(x - this.position.x, y - this.position.y, z - this.position.z) > 6
+      || this.world.getBlock(x, y, z) !== (creatures ? BlockId.WaygridCreatureArchive : BlockId.WaygridVaultTerminal)) return fail("Terminal out of reach.");
+    const result = operateWaygrid(this.digitalItemVault, this.digitalCreatureArchive, this.inventory, operation);
+    if (!result.ok) return fail(result.reason);
+    const power = this.waygridPowerSource(key, result.powerJ);
+    if (!power) return fail(`Needs ${result.powerJ} J from an adjacent battery or generator with an output/service face.`);
+    this.wayworks.set(power.key, { ...power.state, revision: power.state.revision + 1, energyJ: power.state.energyJ - power.joules });
+    this.digitalItemVault = result.vault; this.digitalCreatureArchive = result.archive; this.inventory = result.inventory.map(cloneSlot);
+    this.audio.play("pickup"); this.events.onToast(`${result.reason} Used ${result.powerJ} J.`); this.saveSoon(); this.emitHud(true); return true;
+  }
+
   depositSelectedIntoWaygrid(kind: "items" | "creatures", inventoryIndex = this.selected) {
-    const safeIndex = clamp(Math.floor(inventoryIndex), 0, this.inventory.length - 1);
-    const slot = this.inventory[safeIndex];
-    if (!slot) {
-      this.events.onToast(kind === "items" ? "Select a stack to deposit." : "Select a filled Capture Orb to archive.");
-      return false;
-    }
-    if (kind === "creatures") {
-      const orb = captureOrbUnitFromInventorySlot(slot);
-      if (!orb?.creature) {
-        this.events.onToast("The Creature Archive accepts one filled Capture Orb at a time.");
-        return false;
-      }
-      const result = depositCreatureOrb(this.digitalCreatureArchive, orb);
-      if (!result.accepted) {
-        this.events.onToast(result.reason === "deployed" ? "Recall this attuned creature before archiving its orb."
-          : result.reason === "full" ? "The Creature Archive needs another memory cell."
-            : result.reason === "duplicate" ? "That orb is already in the archive." : "Only filled Capture Orbs can be archived.");
-        return false;
-      }
-      this.digitalCreatureArchive = result.state;
-      slot.count -= 1;
-      if (slot.count <= 0) this.inventory[safeIndex] = null;
-      this.events.onToast(`${orb.creature.name ?? orb.creature.kind} entered the Creature Archive.`);
-    } else {
-      const result = depositDigitalItem(this.digitalItemVault, slot);
-      if (result.accepted <= 0) {
-        this.events.onToast("The Waygrid Vault is full. Add or upgrade a memory cell.");
-        return false;
-      }
-      this.digitalItemVault = result.state;
-      this.inventory[safeIndex] = result.remainder;
-      this.events.onToast(`Deposited ${result.accepted.toLocaleString()} ${ITEMS[slot.item]?.name ?? "items"}.`);
-    }
-    this.audio.play("pickup");
-    this.saveSoon();
-    this.emitHud(true);
-    return true;
+    return this.localWaygridOperation({ kind: kind === "items" ? "deposit-item" : "deposit-creature", inventorySlot: inventoryIndex });
   }
-
   withdrawWaygridItem(signature: string, count: number) {
-    const source = this.digitalItemVault.stacks.find((slot) => digitalStackSignature(slot) === signature);
-    if (!source) return false;
-    const amount = Math.min(Math.max(1, Math.floor(count)), source.count, this.inventoryCapacity(source.item));
-    if (amount <= 0) {
-      this.events.onToast("Make room in your pack before withdrawing that item.");
-      return false;
-    }
-    const result = withdrawDigitalItem(this.digitalItemVault, source.item, amount, signature);
-    if (!result.withdrawn) return false;
-    const leftover = this.addItem(result.withdrawn.item, result.withdrawn.count, result.withdrawn.durability, MAIN_THEN_HOTBAR, result.withdrawn.metadata);
-    if (leftover > 0) return false;
-    this.digitalItemVault = result.state;
-    this.audio.play("pickup");
-    this.saveSoon();
-    this.emitHud(true);
-    return true;
+    return this.localWaygridOperation({ kind: "withdraw-item", signature, count: Math.min(64, Math.max(1, Math.floor(count))) });
   }
-
   withdrawWaygridCreature(orbId: string) {
-    const candidate = this.digitalCreatureArchive.orbs.find((orb) => orb.orbId === orbId);
-    if (!candidate) return false;
-    const slot = captureOrbInventorySlot(candidate);
-    if (this.inventoryCapacity(slot.item) < 1) {
-      this.events.onToast("Make one pack slot before withdrawing this Capture Orb.");
-      return false;
-    }
-    const result = withdrawCreatureOrb(this.digitalCreatureArchive, orbId);
-    if (!result.orb) return false;
-    if (this.addItem(slot.item, 1, slot.durability, MAIN_THEN_HOTBAR, slot.metadata) > 0) return false;
-    this.digitalCreatureArchive = result.state;
-    this.audio.play("pickup");
-    this.saveSoon();
-    this.emitHud(true);
-    return true;
+    return this.localWaygridOperation({ kind: "withdraw-creature", orbId });
   }
 
   machineClick(machine: "furnace" | "wheat-mill" | "chest" | "apiary" | "morph-loom" | "orb-rack" | "healing-station", index: number, button: "left" | "right", shift = false) {
@@ -19064,6 +19257,20 @@ export class VoxelEngine {
           return;
         }
       }
+      if (heldSlot?.item === Item.FluidCanister && this.target.type === BlockId.Water) {
+        if (this.multiplayer?.role === "guest") { this.events.onToast("Use a host-owned pump or tank to fill this canister in multiplayer."); return; }
+        const content = portableResource(heldSlot);
+        const isSource = this.liquidCells.get(key)?.source !== false;
+        if (content === undefined || content && (content.kind !== "fluid" || content.resource !== "water") || !isSource
+          || (content?.quantity ?? 0) > 7000) { this.events.onToast("Canister needs room for 1 L and a full water source."); return; }
+        this.inventory[this.selected] = { ...cloneSlot(heldSlot)!, metadata: { ...heldSlot.metadata,
+          wayworksResource: { kind: "fluid", resource: "water", quantity: (content?.quantity ?? 0) + 1000 } } };
+        this.liquidCells.delete(key);
+        this.world.setBlock(this.target.x, this.target.y, this.target.z, BlockId.Air, true, true);
+        this.publishBlockEdits([{ x: this.target.x, y: this.target.y, z: this.target.z, type: BlockId.Air }], "break");
+        this.notifyLiquidChanged(this.target.x, this.target.y, this.target.z);
+        this.placeCooldown = .26; this.audio.play("splash"); this.events.onToast("Collected 1 L water."); this.saveSoon(); this.emitHud(true); return;
+      }
       if (heldSlot && heldDefinition?.useKind === "bucket") {
         const placement = this.world.getBlock(this.target.placeX, this.target.placeY, this.target.placeZ);
         const trackedTargetLiquid = this.liquidCells.get(blockKey(this.target.x, this.target.y, this.target.z));
@@ -19225,7 +19432,6 @@ export class VoxelEngine {
       }
       if (this.target.type === BlockId.CraftingTable) { this.openOverlay("crafting", key); return; }
       if (machineKindForBlock(this.target.type)) {
-        if (this.multiplayer?.role === "guest") { this.events.onToast("Workshop controls are host-only in this development checkpoint."); return; }
         this.openOverlay("wayworks", key); return;
       }
       if (this.target.type === BlockId.Furnace) { this.openOverlay("furnace", key); return; }
@@ -19336,8 +19542,7 @@ export class VoxelEngine {
     const itemDefinition = ITEMS[slot.item];
     const requestedType = itemDefinition?.placeBlock;
     if (requestedType === undefined) return;
-    if (machineKindForBlock(requestedType) && this.wayworks.size >= 256) { this.events.onToast("This workshop checkpoint supports 256 placed power blocks per location."); return; }
-    if (machineKindForBlock(requestedType) && this.multiplayer?.role === "guest") { this.events.onToast("Workshop placement is host-only in this checkpoint."); return; }
+    if (machineKindForBlock(requestedType) && this.wayworks.size >= 256) { this.events.onToast("A location supports up to 256 loaded workshop blocks."); return; }
     const replacesTarget = BLOCKS[this.target.type]?.replaceable;
     const x = replacesTarget ? this.target.x : this.target.placeX;
     const y = replacesTarget ? this.target.y : this.target.placeY;
@@ -19849,9 +20054,14 @@ export class VoxelEngine {
   }
 
   breakTarget() {
-    if (this.target && machineKindForBlock(this.target.type) && this.multiplayer?.role === "guest") { this.events.onToast("Workshop removal is host-only in this checkpoint."); return; }
     if (!this.target || this.target.type === BlockId.Bedrock || Boolean(BLOCKS[this.target.type]?.liquid)) return;
     const { x, y, z, type } = this.target;
+    const workshop = this.wayworks.get(blockKey(x, y, z));
+    if (workshop && (workshop.energyJ > 0 || workshop.workshop.fluid || workshop.workshop.chemical || workshop.workshop.burnJ > 0 || workshop.workshop.heatJ > 0
+      || Object.values(workshop.workshop.slots).some(Boolean) || Object.values(workshop.workshop.upgrades).some((count) => count > 0))
+      && (this.mode !== "survival" || !this.toolCanHarvest(type, this.selectedSlot()))) {
+      this.events.onToast("This machine contains resources. Use the correct pickaxe in Survival for sealed pickup, or empty it first."); return;
+    }
     const veinHeart = type === BlockId.LivingVein ? this.nearbyVeinmetalHeart(x, y, z) : null;
     const ownsBreakLoot = this.multiplayer?.role !== "guest";
     const exhibitTopology = type === BlockId.ButterflyExhibit ? this.exhibitTopologyAt(x, y, z) : null;
@@ -31046,6 +31256,8 @@ export class VoxelEngine {
 
   clearEntities() {
     this.clearWayworksModels(); this.wayworks?.clear(); this.activeWayworksKey = null; this.wayworksAccumulator = 0;
+    this.wayworksTopology?.clear(); this.wayworksNetworks = []; this.wayworksTopologyRevision = 0; this.wayworksClipboard = null;
+    this.wayworksActorReady?.clear(); this.wayworksActorClipboards?.clear();
     this.celestialCreatureVelocity?.clear();
     this.universeTimeSeconds = undefined; this.clockLocalTime = undefined; this.clockLocalDay = undefined;
     this.zeroGPushHeld = false; this.evaTether = null; this.equipmentSwap = null; this.socketSwap = null; this.evaRoll = 0;
@@ -32134,7 +32346,7 @@ export class VoxelEngine {
         } else if (item === Item.Banana) {
           addBox([0.1, 0.34, 0.09], [-0.08, 0, 0], 0xf4d34f, [0, 0, -0.5]);
           addBox([0.1, 0.34, 0.09], [0.08, 0.04, 0], 0xf4d34f, [0, 0, 0.5]);
-        } else if (definition.heldModel || definition.lifeSupportKind || machineKindForBlock(item) || definition.iconKind === "shield" || item === BlockId.CraftingTable || item === Item.DeepgearLanternItem || definition.useKind === "net" || (definition.useKind === "release-creature" && definition.creatureKind
+        } else if (definition.heldModel || definition.lifeSupportKind || machineKindForBlock(item) || isWayworksItem(item) || item === Item.FieldWrench || definition.iconKind === "shield" || item === BlockId.CraftingTable || item === Item.DeepgearLanternItem || definition.useKind === "net" || (definition.useKind === "release-creature" && definition.creatureKind
           && BUTTERFLY_ORDER.includes(definition.creatureKind as ButterflyKind))) {
           const selectedSlot = this.selectedSlot();
           const filledCaptureOrb = item === Item.CaptureOrb && Boolean(captureOrbFromInventorySlot(selectedSlot)?.creature);
@@ -32856,6 +33068,63 @@ export class VoxelEngine {
         slots: targetInventory.map((slot, index) => slot ? { index, item: slot.item, name: ITEMS[slot.item]?.name, count: slot.count } : null),
       });
     }
+    if (command.kind === "workshop_place" || command.kind === "workshop_pickup") {
+      const inventory = this.agentInventories.get(command.agentId) ?? [], index = Number(args.inventorySlot);
+      if (!Number.isInteger(index) || index < 0 || index >= inventory.length || args.expectedInventoryRevision !== (this.agentInventoryRevisions.get(command.agentId) ?? 0)
+        || !this.agentAuthority.get(command.agentId)?.granted.includes("inventory.self.write")) return blocked("workshop_inventory_stale", "Refresh the authorized drone inventory before moving a machine.");
+      const target = command.kind === "workshop_place" ? args.target as { x: number; y: number; z: number } : blockPositionFromKey(String(args.targetId).replace(/^workshop:/u, ""));
+      if (!target || ![target.x, target.y, target.z].every(Number.isSafeInteger) || target.y < MIN_Y || target.y > MAX_Y
+        || Math.hypot(target.x - pose.x, target.y - pose.y, target.z - pose.z) > 5.5) return blocked("workshop_out_of_reach", "Use an integer loaded cell within 5.5 blocks.");
+      const key = blockKey(target.x, target.y, target.z), current = this.world.getBlock(target.x, target.y, target.z);
+      if (current === undefined) return blocked("workshop_chunk_unloaded", "The machine cell is not loaded.");
+      if (command.kind === "workshop_place") {
+        const slot = inventory[index], kind = slot ? machineKindForBlock(slot.item) : undefined;
+        if (!slot || !kind || !validCustodyItem(slot) || this.wayworks.size >= 256 || (current !== BlockId.Air && !BLOCKS[current]?.replaceable)) return blocked("workshop_place_invalid", "Select a valid machine and an empty cell; a location supports 256 machines.");
+        const edit = { ...target, type: slot.item as BlockId, facing: Number(args.facing) };
+        if (blockEditIntersectsPlayer(edit, { x: this.position.x, y: this.position.y, z: this.position.z }, this.currentPlayerHeight())
+          || [...this.remotePlayers.values()].some(remote => remote.model.modelKind !== "drone" && blockEditIntersectsPlayer(edit, remote.target, PLAYER_HEIGHT * playerVariantHeightScale(remote.target.variant ?? "male")))) return blocked("workshop_occupied", "The machine would intersect a human player.");
+        const state = placedWorkshopMachine(kind, slot, this.world.locationScope?.locationId ?? "home-preview", "local", edit.facing);
+        state.workshop.trusted = [...new Set([...state.workshop.trusted, command.agentId])].slice(-16);
+        this.world.setBlock(target.x, target.y, target.z, edit.type, true, true); this.world.setBlockFacing?.(target.x, target.y, target.z, normalizeBlockFacing(edit.facing), true);
+        this.wayworks.set(key, state); inventory[index] = slot.count > 1 ? { ...cloneSlot(slot)!, count: slot.count - 1 } : null;
+        this.publishBlockEdits([edit], "place");
+      } else {
+        const state = this.wayworks.get(key);
+        if (!state || machineKindForBlock(current) !== state.kind || args.expectedMachineRevision !== state.revision || !this.workshopActorAccess(state, command.agentId, { kind: "rotate" })) return blocked("workshop_pickup_denied", "Machine changed or its owner has not trusted this drone.");
+        if (!inventory.some(slot => this.toolCanHarvest(current, slot))) return blocked("workshop_pickaxe_required", "Sealed pickup requires the correct pickaxe in the drone pack.");
+        const moved = transferAgentStacksExact([{ item: current, count: 1, metadata: { wayworks: structuredClone(state) } }], inventory, { sourceSlot: 0, destinationSlot: index, count: 1 });
+        if (!moved.ok) return blocked("workshop_pack_full", "Choose an empty destination slot for the sealed machine.");
+        this.world.setBlock(target.x, target.y, target.z, BlockId.Air, true, true); this.wayworks.delete(key); this.clearWayworksModels(key);
+        this.agentInventories.set(command.agentId, moved.destination);
+        this.publishBlockEdits([{ ...target, type: BlockId.Air }], "break");
+      }
+      this.saveSoon();
+      return completed("workshop_moved", "The host committed the machine and its exact stores together.", { inventoryRevision: this.bumpAgentInventoryRevision(command.agentId), targetId: key });
+    }
+    if (command.kind === "workshop_get" || command.kind === "workshop_operate") {
+      const key = String(args.targetId ?? "").replace(/^workshop:/u, ""), target = blockPositionFromKey(key);
+      const state = this.wayworks.get(key);
+      if (!target || !state || Math.hypot(target.x - pose.x, target.y - pose.y, target.z - pose.z) > 5.5
+        || machineKindForBlock(this.world.getBlock(target.x, target.y, target.z)) !== state.kind || !this.workshopActorAccess(state, command.agentId)) return blocked("workshop_unavailable", "Machine is unavailable, private or out of reach.");
+      if (command.kind === "workshop_get") return completed("workshop_ready", "Host-authored machine state and revision.", { targetId: key, machine: structuredClone(state), inventoryRevision: this.agentInventoryRevisions.get(command.agentId) ?? 0 });
+      const operation = parseWorkshopAction(args.operation), inventory = this.agentInventories.get(command.agentId) ?? [], index = Number(args.inventorySlot);
+      if (!operation || !Number.isInteger(index) || index < 0 || index >= inventory.length
+        || args.expectedInventoryRevision !== (this.agentInventoryRevisions.get(command.agentId) ?? 0) || args.expectedMachineRevision !== state.revision) return blocked("workshop_stale", "Refresh machine and inventory revisions before retrying.");
+      if (!this.agentAuthority.get(command.agentId)?.granted.includes("inventory.self.write") || !this.workshopActorAccess(state, command.agentId, operation)) return blocked("workshop_denied", "This operation requires inventory custody and machine-owner permission.");
+      if ((operation.kind === "crank" || operation.kind === "charge") && performance.now() < (this.wayworksActorReady.get(command.agentId) ?? 0)) return blocked("workshop_cooldown", "Wait for the previous effort or transfer to settle.");
+      const equipment = this.agentEquipment.get(command.agentId) ?? blankEquipment();
+      const chargeTarget = operation.kind === "charge" ? operation.target ?? "held" : "held";
+      if (chargeTarget === "offhand") return blocked("workshop_equipment_unavailable", "Drone equipment has no offhand charge socket.");
+      const result = applyWorkshopAction(state, key, chargeTarget === "back" ? equipment.back : inventory[index], state.revision, operation, this.wayworksActorClipboards.get(command.agentId) ?? null);
+      if (!result.ok) return blocked("workshop_rejected", result.reason);
+      if (chargeTarget === "back") { equipment.back = result.held; this.agentEquipment.set(command.agentId, equipment); }
+      else inventory[index] = result.held;
+      this.wayworks.set(key, result.machine); this.wayworksActorClipboards.set(command.agentId, result.clipboard);
+      if (operation.kind === "crank" || operation.kind === "charge") this.wayworksActorReady.set(command.agentId, performance.now() + 1000);
+      if (operation.kind === "rotate") this.world.setBlockFacing?.(target.x, target.y, target.z, normalizeBlockFacing(result.machine.facing), true);
+      this.saveSoon();
+      return completed("workshop_committed", result.reason, { machine: structuredClone(result.machine), inventoryRevision: this.bumpAgentInventoryRevision(command.agentId) });
+    }
     if (command.kind === "inventory_get" || command.kind === "agent_inventory_open_for_host") {
       const inventory = this.agentInventories.get(command.agentId) ?? [];
       return completed("inventory_ready", "Host-owned drone inventory and equipment returned.", { revision: this.agentInventoryRevisions.get(command.agentId) ?? 0, equipment: structuredClone(this.agentEquipment.get(command.agentId) ?? blankEquipment()), slots: inventory.map((slot, index) => slot ? { ...cloneSlot(slot), index, name: ITEMS[slot.item]?.name } : null) });
@@ -33007,7 +33276,7 @@ export class VoxelEngine {
       const targets: Array<{ x: number; y: number; z: number; type: BlockId }> = [];
       for (let x = Math.floor(pose.x - radius); x <= Math.ceil(pose.x + radius) && targets.length < 128; x += 1) for (let z = Math.floor(pose.z - radius); z <= Math.ceil(pose.z + radius) && targets.length < 128; z += 1) for (let y = Math.floor(pose.y - radius); y <= Math.ceil(pose.y + radius); y += 1) {
         const type = this.world.getBlock(x, y, z);
-        if (type !== undefined && requested.has(type) && !isMatureCultivatedPlant(type)) targets.push({ x, y, z, type });
+        if (type !== undefined && requested.has(type) && !isMatureCultivatedPlant(type) && !machineKindForBlock(type)) targets.push({ x, y, z, type });
       }
       if (!targets.length) return completed("resource_not_found", "No matching resource blocks were found inside the bounded loaded area.", { gathered: 0 });
       const first = targets[0];
@@ -33044,12 +33313,14 @@ export class VoxelEngine {
       const removals = Array.isArray(args.removals) ? (args.removals as Array<{ x: number; y: number; z: number }>).map((cell) => ({ ...cell })) : [];
       const duplicate = new Set<string>();
       const warnings: string[] = [];
+      if (removals.some(cell => machineKindForBlock(this.world.getBlock(cell.x, cell.y, cell.z)))) return blocked("workshop_typed_pickup_required", "Use workshop_pickup to preserve machine contents.");
       for (const placement of placements) {
         const cellKey = blockKey(placement.x, placement.y, placement.z);
         if (duplicate.has(cellKey)) return blocked("duplicate_build_cell", `The build plan addresses ${cellKey} more than once.`);
         duplicate.add(cellKey);
         const definition = BLOCKS[placement.block as BlockId];
         const current = this.world.getBlock(placement.x, placement.y, placement.z);
+        if (machineKindForBlock(placement.block) || machineKindForBlock(current)) return blocked("workshop_typed_placement_required", "Use workshop_place or workshop_pickup for instance-preserving machines.");
         if (!definition || placement.block === BlockId.Air || placement.y < MIN_Y || placement.y > MAX_Y) return blocked("invalid_build_cell", `The placement at ${cellKey} uses an invalid block or world height.`);
         if (current === undefined) return blocked("build_chunk_unloaded", `The placement at ${cellKey} is outside loaded host terrain.`);
         if (current !== BlockId.Air && !BLOCKS[current]?.replaceable && placement.replace !== true) return blocked("build_cell_occupied", `The placement at ${cellKey} would replace ${BLOCKS[current]?.name ?? "a solid block"} without explicit replace permission.`);
@@ -33226,6 +33497,7 @@ export class VoxelEngine {
         if (job.removalIndex < job.preview.removals.length) {
           const cell = job.preview.removals[job.removalIndex++];
           const current = this.world.getBlock(cell.x, cell.y, cell.z);
+          if (machineKindForBlock(current)) { this.cancelAgentBuild(agentId, "workshop_site_changed", "A machine entered the build site. Use typed sealed pickup first."); break; }
           if (current === undefined) { this.cancelAgentBuild(agentId, "build_chunk_unloaded", `The build stopped before ${blockKey(cell.x, cell.y, cell.z)} because its chunk unloaded.`); break; }
           if (current !== BlockId.Air) {
             this.world.setBlock(cell.x, cell.y, cell.z, BlockId.Air, true, true);
@@ -33239,6 +33511,7 @@ export class VoxelEngine {
         if (job.placementIndex < job.preview.placements.length) {
           const cell = job.preview.placements[job.placementIndex];
           const current = this.world.getBlock(cell.x, cell.y, cell.z);
+          if (machineKindForBlock(current) || machineKindForBlock(cell.block)) { this.cancelAgentBuild(agentId, "workshop_site_changed", "Use typed workshop placement for machines."); break; }
           if (current === undefined || (current !== BlockId.Air && !BLOCKS[current]?.replaceable && cell.replace !== true)) {
             this.cancelAgentBuild(agentId, "build_site_changed", `The build stopped at ${blockKey(cell.x, cell.y, cell.z)} because the approved cell changed. Unplaced materials were returned.`);
             break;
@@ -33285,6 +33558,15 @@ export class VoxelEngine {
     const selfPosition = { x: selfPose.x, y: selfPose.y, z: selfPose.z };
     const distanceToSelf = (position: { x: number; y: number; z: number }) => Math.hypot(position.x - selfPose.x, position.y - selfPose.y, position.z - selfPose.z);
     const nearby: AgentNearbyEntity[] = [];
+    for (const [key, state] of this.wayworks ?? []) {
+      const position = blockPositionFromKey(key);
+      if (!position || machineKindForBlock(this.world.getBlock(position.x, position.y, position.z)) !== state.kind) continue;
+      const distance = distanceToSelf(position);
+      if (distance > 20) continue;
+      const accessible = this.workshopActorAccess(state, agentId);
+      nearby.push({ id: `workshop:${key}`, kind: "workstation", name: state.kind.replaceAll("-", " "), position, distance,
+        state: accessible ? `${state.status}; revision:${state.revision}; use workshop_get` : "private", interactable: accessible && distance <= 5.5 });
+    }
     for (const mob of this.mobs) {
       const position = { x: mob.group.position.x, y: mob.group.position.y, z: mob.group.position.z };
       const distance = distanceToSelf(position);

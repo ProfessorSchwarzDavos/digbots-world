@@ -3,7 +3,12 @@ import test from "node:test";
 import * as THREE from "three";
 import { createWayworksModel, updateWayworksModel, type WayworksModelKind } from "../app/game/wayworks-models.ts";
 
-const kinds: readonly WayworksModelKind[] = ["hand-dynamo", "sunplate-array", "field-battery", "charging-pedestal", "grid-cable"];
+const kinds: readonly WayworksModelKind[] = [
+  "hand-dynamo", "sunplate-array", "field-battery", "charging-pedestal", "grid-cable",
+  "heat-engine", "wind-rotor", "waterwheel-generator", "biofuel-engine", "grid-battery", "ship-battery-bank",
+  "powered-crusher", "enrichment-mill", "electric-smelter", "alloy-infuser", "plate-press", "precision-sawmill",
+  "fluid-pump", "fluid-tank", "gas-tank",
+];
 const faces = ["front", "back", "left", "right", "top", "bottom"];
 
 function resources(root: THREE.Group) {
@@ -27,7 +32,7 @@ test("machine meshes remain finite and inside one cell at all sampled animation 
       for (const number of normals.array) assert.ok(Number.isFinite(number), `${kind} finite normals`);
     }
     for (const fill of [0, 0.5, 1, NaN, Infinity, -1, 2]) {
-      for (const time of [0, 0.37, 1.1, 4.7, NaN, Infinity]) {
+      for (const time of [0, 0.37, 1.1, 4.7, NaN, Infinity, Number.MAX_VALUE, -Number.MAX_VALUE]) {
         updateWayworksModel(root, { fill, active: true, time });
         const bounds = new THREE.Box3().setFromObject(root, true);
         assert.ok(bounds.min.x >= -0.5 && bounds.max.x <= 0.5, `${kind} x bounds ${bounds.min.x},${bounds.max.x}`);
@@ -68,6 +73,21 @@ test("models carry distinct authored mechanisms and truthful battery and empty-c
     "field-battery": ["battery-charge-column", "battery-cage-upright", "battery-carry-handle"],
     "charging-pedestal": ["charging-dish", "charging-induction-ring", "cell-contact"],
     "grid-cable": ["x-cable-insulation", "y-copper-conductor", "z-copper-conductor"],
+    "heat-engine": ["hearth-masonry-jamb", "heat-engine-piston", "heat-exchanger-fin"],
+    "wind-rotor": ["cloth-wind-rotor", "cream-cloth-panel", "wind-timber-mast"],
+    "waterwheel-generator": ["wildwood-waterwheel", "waterwheel-paddle", "waterwheel-rear-dynamo"],
+    "biofuel-engine": ["biofuel-copper-vat", "biofuel-iron-cylinder", "biofuel-piston"],
+    "grid-battery": ["grid-accumulator-cell", "grid-busbar", "bank-charge-column-1"],
+    "ship-battery-bank": ["ship-replaceable-module-2", "ship-module-retaining-rail", "ship-shock-mount"],
+    "powered-crusher": ["crusher-left-roller", "crusher-right-roller", "crusher-flared-hopper"],
+    "enrichment-mill": ["enrichment-separator-drum", "mill-separator-rib", "concentrate-tray"],
+    "electric-smelter": ["smelter-kiln-back", "smelter-heating-element", "kiln-slide-tray"],
+    "alloy-infuser": ["alloy-ceramic-crucible", "alloy-stirring-head", "infusion-copper-reservoir"],
+    "plate-press": ["plate-press-ram", "press-anvil", "press-guide-rod"],
+    "precision-sawmill": ["precision-saw-blade", "saw-cutting-tooth", "sawmill-split-table"],
+    "fluid-pump": ["pump-volute-body", "pump-impeller", "pump-rising-outlet"],
+    "fluid-tank": ["fluid-level-window", "tank-frame-upright", "fluid-drain-valve"],
+    "gas-tank": ["gas-pressure-shoulder", "gas-safe-vent-handwheel", "pressure-rating-plate"],
   };
   for (const kind of kinds) {
     const root = createWayworksModel(kind);
@@ -88,6 +108,86 @@ test("models carry distinct authored mechanisms and truthful battery and empty-c
   assert.ok(Math.abs(core.position.y - 0.54) < 0.00001);
   const charger = createWayworksModel("charging-pedestal", { active: true });
   assert.equal(charger.getObjectByName("inserted-cell"), undefined, "an energized charger does not manufacture an inserted cell");
+});
+
+test("powered mechanisms move only while active and return to their readable idle pose", () => {
+  const moving: [WayworksModelKind, string, "rotation" | "position", "x" | "y" | "z"][] = [
+    ["heat-engine", "heat-engine-piston", "position", "y"],
+    ["wind-rotor", "cloth-wind-rotor", "rotation", "z"],
+    ["waterwheel-generator", "wildwood-waterwheel", "rotation", "z"],
+    ["biofuel-engine", "biofuel-piston", "position", "z"],
+    ["powered-crusher", "crusher-left-roller", "rotation", "z"],
+    ["enrichment-mill", "enrichment-separator-drum", "rotation", "z"],
+    ["alloy-infuser", "alloy-stirring-head", "rotation", "y"],
+    ["plate-press", "plate-press-ram", "position", "y"],
+    ["precision-sawmill", "precision-saw-blade", "rotation", "z"],
+    ["fluid-pump", "pump-impeller", "rotation", "z"],
+  ];
+  for (const [kind, name, transform, axis] of moving) {
+    const root = createWayworksModel(kind);
+    const part = root.getObjectByName(name)!;
+    const initial = part[transform][axis];
+    updateWayworksModel(root, { active: true, time: .37 });
+    assert.notEqual(part[transform][axis], initial, `${kind} moves`);
+    updateWayworksModel(root, { active: false, time: 3 });
+    assert.equal(part[transform][axis], initial, `${kind} returns to idle pose`);
+    updateWayworksModel(root, { active: true, time: 0 });
+    assert.equal(part[transform][axis], initial, `${kind} reduced motion`);
+  }
+});
+
+test("full mechanism cycles respect the block envelope and use reflection-independent materials", () => {
+  for (const kind of kinds) {
+    const root = createWayworksModel(kind, { active: true, fill: 1, fluidFill: 1, progress: 1 });
+    for (let frame = 0; frame < 160; frame += 1) {
+      updateWayworksModel(root, { time: frame * .05 });
+      const bounds = new THREE.Box3().setFromObject(root, true);
+      assert.ok(bounds.min.x >= -.5 && bounds.max.x <= .5, `${kind} x sweep`);
+      assert.ok(bounds.min.z >= -.5 && bounds.max.z <= .5, `${kind} z sweep`);
+      assert.ok(bounds.min.y >= -.001 && bounds.max.y <= 1.001, `${kind} y sweep`);
+    }
+    for (const surface of resources(root).materials) {
+      if (surface instanceof THREE.MeshStandardMaterial) {
+        assert.ok(surface.metalness <= .15, `${kind} does not require missing environment reflections`);
+        assert.ok(Number.isFinite(surface.emissiveIntensity));
+      }
+    }
+  }
+});
+
+test("tank quantity is independent of energy and transparent contents do not cast shadows", () => {
+  for (const kind of ["fluid-tank", "gas-tank"] as const) {
+    const root = createWayworksModel(kind, { fill: 1, fluidFill: 0 });
+    const window = root.getObjectByName(kind === "fluid-tank" ? "fluid-level-window" : "gas-quantity-window") as THREE.Mesh;
+    assert.equal(window.visible, false, "charged tank must not invent contents");
+    updateWayworksModel(root, { fluidFill: .25 });
+    assert.equal(window.scale.y, .25);
+    assert.ok(Math.abs(window.position.y - .35) < .00001);
+    const needle = root.getObjectByName("gauge-needle")!;
+    assert.ok(Math.abs(needle.rotation.z - Math.PI * .35) < .00001, "tank gauge measures contents");
+    updateWayworksModel(root, { fill: .6, time: 2 });
+    assert.equal(window.scale.y, .25, "partial energy updates preserve fluid quantity");
+    updateWayworksModel(root, { fluidFill: NaN });
+    assert.equal(window.visible, false);
+    const surface = window.material as THREE.MeshStandardMaterial;
+    assert.equal(surface.transparent, true);
+    assert.ok(surface.opacity >= .4 && surface.opacity <= .8);
+    assert.equal(surface.depthWrite, false);
+    assert.equal(window.castShadow, false);
+    assert.equal(window.receiveShadow, false);
+  }
+});
+
+test("process gauges preserve normalized progress independently from charge", () => {
+  const root = createWayworksModel("plate-press", { fill: 1, progress: .25 });
+  const needle = root.getObjectByName("gauge-needle")!;
+  const initial = needle.rotation.z;
+  updateWayworksModel(root, { fill: 0 });
+  assert.equal(needle.rotation.z, initial);
+  updateWayworksModel(root, { progress: 1 });
+  assert.notEqual(needle.rotation.z, initial);
+  updateWayworksModel(root, { progress: Infinity });
+  assert.equal(root.userData.wayworksProgress, 0);
 });
 
 test("updates reuse scene and GPU references, clamp state, and support stable reduced motion", () => {

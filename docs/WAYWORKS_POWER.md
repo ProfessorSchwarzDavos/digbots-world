@@ -1,4 +1,9 @@
-# Wayworks power — local development checkpoint
+# Wayworks power — historical five-block checkpoint
+
+This page preserves the original five-block development description. For the
+current twenty-block implementation, see [Wayworks workshop](WAYWORKS_WORKSHOP.md).
+The limits and unsupported-operation statements below describe that older slice,
+not the current local source.
 
 This implements a small Home workshop loop, not the complete Celestial Frontiers
 machine roster. It is local/host-only; guest and agent workshop operations are

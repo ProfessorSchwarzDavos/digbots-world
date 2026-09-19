@@ -1,4 +1,7 @@
 import type { DragonState } from "./dragons";
+import { machineKindForBlock, parseWorkshopAction, type WorkshopAction } from "./wayworks-integration";
+import { validCustodyItem } from "./wayworks-custody";
+import { validWaygridOperation, type WaygridOperation } from "./wayworks-waygrid";
 import { validLifeSupportItem, validLifeSupportOperation, EMPTY_LIFE_SUPPORT, type LifeSupportOperation, type LifeSupportState } from "./life-support";
 import type { CharacterColors, CharacterSkillAllocation } from "./character-profiles";
 import type { FactionRace } from "./factions";
@@ -403,13 +406,22 @@ export type ContainerSnapshot = {
   slots: ItemStackSnapshot[];
   machine?: { progress: number; burn: number; burnMax: number };
 };
-export type SharedFacilityKind = "apiary" | "morph-loom" | "orb-rack" | "healing-station" | "waygrid-items" | "waygrid-creatures" | "aquarium" | "golem-forge" | "alchemy" | "distillery" | "sugarworks";
+export type SharedFacilityKind = "apiary" | "morph-loom" | "orb-rack" | "healing-station" | "waygrid-items" | "waygrid-creatures" | "aquarium" | "golem-forge" | "alchemy" | "distillery" | "sugarworks" | "wayworks";
+export type FacilityOperation = { kind: "workshop"; action: WorkshopAction; inventorySlot: number }
+  | { kind: "waygrid"; action: WaygridOperation };
+export function validFacilityOperation(value: unknown): value is FacilityOperation {
+  if (!isRecord(value)) return false;
+  if (value.kind === "workshop") return Object.keys(value).every((key) => ["kind", "action", "inventorySlot"].includes(key))
+    && isInteger(value.inventorySlot, 0, 35) && parseWorkshopAction(value.action) !== null;
+  return value.kind === "waygrid" && Object.keys(value).every((key) => ["kind", "action"].includes(key)) && validWaygridOperation(value.action);
+}
 export type FacilityAction = {
   requestId: string;
   actorId: string;
   facilityId: string;
   facilityKind: SharedFacilityKind;
-  kind: "open" | "close" | "update";
+  kind: "open" | "close" | "update" | "transact";
+  operation?: FacilityOperation;
   expectedRevision?: number;
   expectedPlayerRevision?: number;
   state?: Record<string, unknown>;
@@ -1225,7 +1237,8 @@ function validateItemStack(value: unknown): value is ItemStackSnapshot {
     && isInteger(value.count, 1, 65_535)
     && (value.durability === undefined || isInteger(value.durability, 0, 1_000_000))
     && validateBoundedMetadata(value.metadata)
-    && validLifeSupportItem(value as { item: number; count: number; metadata?: unknown }));
+    && validLifeSupportItem(value as { item: number; count: number; metadata?: unknown })
+    && (!(machineKindForBlock(Number(value.item)) || isRecord(value.metadata) && ("wayworks" in value.metadata || "wayworksResource" in value.metadata)) || validCustodyItem(value)));
 }
 
 function validateInventorySnapshot(value: unknown): value is InventorySnapshot {
@@ -1456,12 +1469,15 @@ export function validatePayload<K extends MultiplayerMessageType>(type: K, value
       return isId(value.requestId)
         && isId(value.actorId)
         && isShortString(value.facilityId, 96)
-        && ["apiary", "morph-loom", "orb-rack", "healing-station", "waygrid-items", "waygrid-creatures", "aquarium", "golem-forge", "alchemy", "distillery", "sugarworks"].includes(value.facilityKind as string)
-        && (value.kind === "open" || value.kind === "close" || value.kind === "update")
+        && ["apiary", "morph-loom", "orb-rack", "healing-station", "waygrid-items", "waygrid-creatures", "aquarium", "golem-forge", "alchemy", "distillery", "sugarworks", "wayworks"].includes(value.facilityKind as string)
+        && (value.kind === "open" || value.kind === "close" || value.kind === "update" || value.kind === "transact")
+        && (value.kind === "transact" ? validFacilityOperation(value.operation) && isInteger(value.expectedRevision, 0, Number.MAX_SAFE_INTEGER)
+          && isInteger(value.expectedPlayerRevision, 0, Number.MAX_SAFE_INTEGER) : value.operation === undefined)
         && (value.expectedRevision === undefined || isInteger(value.expectedRevision, 0, Number.MAX_SAFE_INTEGER))
         && (value.expectedPlayerRevision === undefined || isInteger(value.expectedPlayerRevision, 0, Number.MAX_SAFE_INTEGER))
         && validateFacilityState(value.state)
         && (value.playerState === undefined || validatePlayerSessionSnapshot(value.playerState))
+        && (value.kind !== "transact" || (value.status !== undefined && value.status !== "request") || (value.state === undefined && value.playerState === undefined))
         && validateStatusFields(value);
     case "player-state":
       return isId(value.requestId)

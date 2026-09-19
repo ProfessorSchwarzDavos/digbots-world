@@ -28,13 +28,13 @@ test("machine inspector keeps energy, capacity, and rate distinct and reports au
 
 test("all six local faces have labeled native controls with current modes", () => {
   const html = render();
-  assert.equal((html.match(/<select /g) ?? []).length, 6);
+  assert.equal((html.match(/<select[^>]+aria-label="(?:Front|Back|Left|Right|Top|Bottom) energy port"/g) ?? []).length, 6);
   for (const [face, mode] of Object.entries(base.ports)) {
     const label = face[0].toUpperCase() + face.slice(1);
     const select = html.match(new RegExp(`<select[^>]+aria-label="${label} energy port"[^>]*>(.*?)</select>`))?.[1];
     assert.ok(select, `Missing ${face} selector`);
     assert.match(select, new RegExp(`<option value="${mode}" selected="">`));
-    assert.equal((select.match(/<option /g) ?? []).length, 4);
+    assert.equal((select.match(/<option /g) ?? []).length, 7);
   }
 });
 
@@ -44,7 +44,8 @@ test("only the hand dynamo offers cranking and only the pedestal offers charging
   assert.match(dynamo, />Turn crank<\/button>/);
   assert.doesNotMatch(dynamo, /Charge selected/);
   const charger = render({ kind: "charging-pedestal", name: "Charging Pedestal", heldItemName: "Charge Cell" });
-  assert.match(charger, /Transfer measured energy from this pedestal to the selected cell or rig/);
+  assert.match(charger, /Transfer up to 2 kJ per second/);
+  assert.match(charger, /Charge equipped back rig/);
   assert.match(charger, /Selected: Charge Cell/);
   assert.match(charger, />Charge selected cell \/ rig<\/button>/);
   assert.doesNotMatch(charger, /Turn crank/);

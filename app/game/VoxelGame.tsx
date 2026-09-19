@@ -140,6 +140,7 @@ import { MinimapHud, NavigationHud, StatusEffectsHud } from "./NavigationHud";
 import { statusEffectViewsFromBuffs } from "./status-effects";
 import { WaygridCreaturePanel, WaygridItemPanel } from "./WaygridPanels";
 import { WayworksPanel } from "./WayworksPanel";
+import { hasWayworksIcon, WayworksIcon } from "./wayworks-ui";
 import { CharacterStudio } from "./CharacterStudio";
 import { AquariumPanel } from "./AquariumPanel";
 import { GuildPanel } from "./GuildPanel";
@@ -1372,6 +1373,7 @@ function itemMetadataSummary(slot: InventorySlot | null) {
 function ItemIcon({ item, slot, small = false }: { item: ItemCode; slot?: InventorySlot | null; small?: boolean }) {
   const definition = ITEMS[item];
   if (definition?.lifeSupportKind) return <LifeSupportIcon item={item} small={small} />;
+  if (hasWayworksIcon(item)) return <WayworksIcon item={item} small={small} />;
   const iconKind = itemIconKind(item);
   const isTool = Boolean(definition?.toolKind) && iconKind.startsWith("tool-");
   const custom = !isTool;
@@ -5120,6 +5122,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
       {overlay === "healing-station" && renderOrbStationPanel("healing-station", hud.activeHealingStation)}
       {overlay === "wayworks" && hud.activeWayworks && (
         <WayworksPanel {...hud.activeWayworks} onClose={resume}
+          onInspectResource={resource => engineRef.current?.inspectWorkshopResource(resource)}
           onAction={action => engineRef.current?.workshopAction(action, hud.activeWayworks!.revision)} />
       )}
       {overlay === "waygrid-items" && (

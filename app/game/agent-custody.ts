@@ -1,5 +1,6 @@
 import { ITEMS, EQUIPMENT_SLOTS, type EquipmentSlot, type InventorySlot } from "./data";
 import { validLifeSupportItem } from "./life-support";
+import { validCustodyItem } from "./wayworks-custody";
 import { cloneUniverseJson, isUniverseRecord, assertExactKeys } from "./universe-json";
 
 /** Location-owned material custody, never session grants or executable jobs.
@@ -26,6 +27,9 @@ export function validateAgentCustody(value: unknown): AgentCustodySave {
     if (entry.durability !== undefined && (typeof entry.durability !== "number" || !Number.isFinite(entry.durability))) throw new Error("Invalid drone item durability.");
     if (entry.metadata !== undefined && !isUniverseRecord(entry.metadata)) throw new Error("Invalid drone item metadata.");
     if (!validLifeSupportItem(entry as InventorySlot)) throw new Error("Invalid drone life-support store.");
+    // Returning is a queue of plain material quantities, not inventory stacks.
+    // Finite or metadata-bearing instances always retain the strict stack check.
+    if (!validCustodyItem(!nullable && entry.metadata === undefined && entry.durability === undefined ? { ...entry, count: 1 } : entry)) throw new Error("Invalid drone finite-resource custody.");
   };
   for (const [id, entry] of Object.entries(value.agents)) {
     if (!/^[A-Za-z0-9_.:-]{1,160}$/.test(id) || !isUniverseRecord(entry)) throw new Error("Invalid drone custody identity.");

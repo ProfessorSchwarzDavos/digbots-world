@@ -1,5 +1,7 @@
 import * as THREE from "three";
 import { createWayworksModel } from "./wayworks-models";
+import { createFieldWrenchModel } from "./wayworks-wrench-model";
+import { createWayworksItemModel, isWayworksItem } from "./wayworks-item-models";
 import { machineKindForBlock } from "./wayworks-integration";
 import { BLOCKS, BlockId, Item, ITEMS, type ItemCode } from "./data";
 import { createButterflyVisual } from "./butterflies";
@@ -27,6 +29,8 @@ export const DRAGON_EQUIPMENT_PALETTES: Readonly<Record<DragonEquipmentElement, 
 
 /** Shared first/third-person, remote-player, dropped-item, and paper-doll model. */
 export function createAvatarHeldItemModel(item: ItemCode, options: { filledCaptureOrb?: boolean; atlas?: THREE.Texture } = {}) {
+  if (item === Item.FieldWrench) return createFieldWrenchModel();
+  if (isWayworksItem(item)) return createWayworksItemModel(item);
   const machineKind = machineKindForBlock(item);
   if (machineKind) { const model = createWayworksModel(machineKind); model.position.y = -.3; model.scale.setScalar(.55); return model; }
   const definition = ITEMS[item];

@@ -61,6 +61,37 @@
 .ww-panel button:disabled { opacity: .5; cursor: not-allowed; }
 .ww-controls { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid #ab966d; }
 .ww-controls button { flex: 1 1 160px; }
+.ww-materials { margin-top: 20px; padding-top: 16px; border-top: 1px solid #ab966d; }
+.ww-panel h3 { margin: 0 0 12px; font: 700 19px/1.2 Georgia, serif; }
+.ww-slot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid #bdad89; }
+.ww-slot > div:first-child { min-width: 0; }
+.ww-slot-label { display: block; margin-bottom: 3px; color: #69573d; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.ww-slot strong { font-size: 13px; }
+.ww-slot-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.ww-slot-actions button { padding: 8px; font-size: 12px; }
+.ww-inline-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.ww-inline-actions button { flex: 1 1 150px; }
+.ww-inline-actions input { min-width: 0; flex: 1 1 200px; padding: 9px; border: 1px solid #9b8e72; background: #fffaf0; color: #2f3936; border-radius: 4px; }
+.ww-slot > span { overflow-wrap: anywhere; min-width: 0; }
+.wayworks-icon { display: block; width: 100%; height: 100%; padding: 2px; box-sizing: border-box; }
+.ww-resource-reading { margin: 0 0 8px; font-weight: 700; font-size: 18px; font-variant-numeric: tabular-nums; }
+.ww-resource-reading span { font-size: 13px; font-weight: 400; }
+.ww-panel .ww-vent { margin-top: 8px; color: #743726; background: transparent; }
+.ww-process-fill { background: #3e7e74; }
+.ww-detail { margin-top: 20px; border-top: 1px solid #ab966d; padding-top: 10px; }
+.ww-detail summary { padding: 8px 0; cursor: pointer; font-weight: 700; min-height: 40px; }
+.ww-detail summary:focus-visible { outline: 3px solid #73501c; outline-offset: 2px; }
+.ww-recipe-list { list-style: none; padding: 0; margin: 0; }
+.ww-recipe-list li { padding: 10px 0; border-bottom: 1px solid #bdad89; }
+.ww-recipe-list strong, .ww-recipe-list span, .ww-recipe-list small { display: block; }
+.ww-recipe-list span { margin: 4px 0; font-size: 12px; }
+.ww-recipe-list small { color: #69573d; }
+.ww-resource-choice { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; align-items: center; margin-top: 12px; }
+.ww-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0; }
+.ww-settings-grid label { display: grid; gap: 5px; }
+.ww-module-list { margin-top: 8px; }
+.ww-module-list > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px solid #bdad89; }
+.ww-module-list span { text-transform: capitalize; }
 
 @media (max-width: 480px) {
   .ww-header { padding: 16px; gap: 10px; }
@@ -70,6 +101,8 @@
   .ww-port-list { grid-template-columns: minmax(0, 1fr); }
   .ww-port { grid-template-columns: minmax(0, 1fr) minmax(0, 180px); }
   .ww-controls button { flex-basis: 130px; }
+  .ww-slot { align-items: stretch; flex-direction: column; gap: 6px; }
+  .ww-slot-actions button { flex: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {

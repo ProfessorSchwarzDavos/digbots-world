@@ -828,6 +828,14 @@ export class SynthAudio {
     oscillator.stop(now + duration + 0.02);
   }
 
+  /** Short, spatially attenuated machine pulse; never changes alarm volume. */
+  playMachine(pitch: number, intensity: number) {
+    const gain = Math.max(0, Math.min(1, intensity));
+    if (gain <= 0) return;
+    this.tone(Math.max(60, Math.min(400, pitch)), .18, .026 * gain, "triangle");
+    this.noiseBurst(.055, 520, .014 * gain, true, .035);
+  }
+
   play(kind: SoundKind, material: BlockId = BlockId.Grass) {
     const definition = BLOCKS[material];
     const stoneLike = definition?.preferredTool === "pickaxe";

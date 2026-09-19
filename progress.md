@@ -14,6 +14,12 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 - Current evidence: TypeScript-r3, 18-file lint-r2, focused-r4 151/151 and final policy/save-r5 17/17 pass. Equal impulse over0.3s rose1.30 blocks on Home and2.23 on Morrow; orbit retained [2,1,-0.5] for1s; keyboard Space contact push produced [0,3,0]. Clock12345.5 and velocity survived cold reload after writer-lease expiry. Reviewed Home/Morrow/Orison/Aerie/roof screenshots and official web-game client gameplay; no recorded browser errors.
 - Retained failed drafts include overly strict floating-point assertions, an initially wrong moon-side/ring orientation, pre-RAF/occluded screenshots and an expected reload lease denial. These are not passes. See ignored CF2/README.md for evidence and scope limits. Full CF1/CFV regression/build/mobile/retention/multiplayer/performance gates remain deferred, not waived. CF3 proposal covers back slot, actual O2 equipment/refilling/alarms and EVA; not implemented at this checkpoint.
 
+## Celestial Frontiers CF4 resume - 2026-09-19
+
+- Revision10 explicitly resumes full CF4 without a time cutoff; director privately monitors half-new-usage boundary. Earlier cutoff notes are historical. Exact89986 recovery accepted: isolated production build, normal finite charging/controls/break-replace/cold reload and official client. All recovered evidence is frozen under CF4-resume-20260919/recovery-manifest.json.
+- Full-machine work continues under CF4-resume-20260919/development/PLAN.md. Primary owns additive resource stores, recipes, runtime, UI and typed operations. Two bounded helpers own cached topology and authored models only. No real saves, release, Rust, cleanup or CF5 start.
+- 17:49UTC:20machine models/kernel integrated,12processor recipes debit exact inputs/power, finitefuel/pump/storage/7upgrades and normalinspector added. Initial32kernel+13machine/integration tests pass; integratedTS passed beforelaterWaygrid wiring. Independent pure-moduleaudit found fractional item starvation, signalcharger bypass and metadata alias; fixes and regressions added. Combined60test receipt retains one obsolete passiveport-negative assertion (corrected), not a pass. Guest/agent semantic operations, final visual proof and fullCF4handoff remain open.
+
 ## Celestial Frontiers CF4 - 2026-09-19 (bounded checkpoint, full phase unfinished)
 
 - Revision9: Home power loop with integerjoule buffers, finite cell transfer, sixface inspector and authored procedural models. Full roster/dependencies accounted in task-local CF4/ROSTER.md; user contract docs/WAYWORKS_POWER.md.
@@ -1592,3 +1598,17 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
 - Baseline checkpoint: TypeScript, ESLint and all 1,121 source tests across 132 test files pass. Six synthetic legacy-save versions, exact normalized hashes, quota rollback and three seeded terrain hashes pass; the first fixture's out-of-range test-coordinate mistake is retained as failed harness evidence, not mislabeled a production regression.
 - Visual checkpoint: four original procedural concept sheets plus existing-production references were personally reviewed. Diagonal projection artifacts were corrected and the sheets re-reviewed. These are reference concepts, not finished models or implemented content.
 - Final baseline: fresh Next and Sites builds plus rendered-HTML validation pass. Eleven isolated browser checks pass, including create/move/jump/pause/save/reload/Continue and desktop/compact title fit, with no captured errors and a 9/9 immediate terrain ring. SwiftShader rendering is not hardware performance evidence. Exact source/build identity, retained artifacts and limitations are recorded in the task-local CF0 handoff; CF1 remains acceptance-gated.
+# CF4 development authority boundary — 2026-09-19 18:10 UTC
+
+- `development-kernel-r2`: 63/63 focused tests pass, including short-step item
+  bandwidth, signal-controlled charger and portable metadata isolation fixes.
+- Typed guest and agent workshop intents now use exact machine/player revisions,
+  reach and owner/public-service checks. Guest access revocation stops updates.
+  Waygrid preserves its existing global item authority and stages power plus
+  inventory after-images together. New authority run 61/62: one test named the
+  packet `facility` instead of `facility-action`; corrected and pending rerun.
+- New exact protected-custody validator and 17 authored item models integrated;
+  helper tests 12/12 and 5/5 pass. Wrench resource-face glyphs and separate
+  presentation-only guest/paused rendering added. Manual visuals still pending.
+- No production build or browser started; source remains dirty on 89986cb.
+  Frozen recovery and all prior receipts remain untouched. Full CF4 incomplete.

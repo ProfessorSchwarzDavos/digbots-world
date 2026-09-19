@@ -64,6 +64,7 @@ export const AGENT_COMMAND_KINDS = [
   "chat_read", "chat_send", "speak", "emote",
   "inventory_get", "inventory_move", "inventory_drop", "inventory_equip", "inventory_life_support", "agent_inventory_open_for_host",
   "interact", "open_container", "container_get", "container_transfer", "use_workstation",
+  "workshop_get", "workshop_operate", "workshop_place", "workshop_pickup",
   "harvest_area", "gather_resource", "build_plan", "build_commit", "build_cancel",
   "memory_pin", "memory_list", "memory_remove", "task_pin", "task_update", "waypoint_pin",
   "world_list", "world_create", "world_load", "world_export", "world_delete",
@@ -330,6 +331,8 @@ const COMMAND_CAPABILITY: Readonly<Partial<Record<AgentCommandKind, AgentCapabil
   agent_inventory_open_for_host: "inventory.self.read",
   interact: "interact.basic", open_container: "container.read", container_get: "container.read", container_transfer: "container.write",
   use_workstation: "interact.basic", harvest_area: "harvest", gather_resource: "harvest",
+  workshop_get: "container.read", workshop_operate: "container.write",
+  workshop_place: "build", workshop_pickup: "build",
   build_plan: "build", build_commit: "build", build_cancel: "build",
   task_pin: "observe.world", task_update: "observe.world", waypoint_pin: "observe.world",
   world_list: "world.admin", world_create: "world.admin", world_load: "world.admin", world_export: "world.admin", world_delete: "world.admin",
@@ -399,6 +402,11 @@ function validateCommandArguments(kind: AgentCommandKind, args: Record<string, u
   if (!validatePlainJson(args)) return false;
   if (kind === "inventory_equip" && (!["head", "chest", "legs", "feet", "back"].includes(String(args.slot)) || !isInteger(args.inventorySlot, 0, 35) || !isInteger(args.expectedInventoryRevision))) return false;
   if (kind === "inventory_life_support" && (!isInteger(args.inventorySlot, 0, 35) || !isInteger(args.expectedInventoryRevision) || !isRecord(args.operation))) return false;
+  if ((kind === "workshop_get" || kind === "workshop_operate") && !isShortString(args.targetId, 96)) return false;
+  if (kind === "workshop_operate" && (!isInteger(args.inventorySlot, 0, 35) || !isInteger(args.expectedInventoryRevision) || !isInteger(args.expectedMachineRevision) || !isRecord(args.operation))) return false;
+  if ((kind === "workshop_place" || kind === "workshop_pickup") && (!isInteger(args.inventorySlot, 0, 35) || !isInteger(args.expectedInventoryRevision))) return false;
+  if (kind === "workshop_place" && (!validateVector(args.target) || !isInteger(args.facing, 0, 3))) return false;
+  if (kind === "workshop_pickup" && (!isShortString(args.targetId, 96) || !isInteger(args.expectedMachineRevision))) return false;
   if ((kind === "move_to" || kind === "face") && !validateVector(args.target)) return false;
   if (kind === "move_relative" && !validateVector(args.delta)) return false;
   if (kind === "follow_player" && (!isId(args.playerId) || (args.minDistance !== undefined && !isFiniteNumber(args.minDistance, 1, 16)) || (args.maxDistance !== undefined && !isFiniteNumber(args.maxDistance, 1.5, 32)))) return false;

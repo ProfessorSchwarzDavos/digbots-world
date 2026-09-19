@@ -14,6 +14,13 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 - Current evidence: TypeScript-r3, 18-file lint-r2, focused-r4 151/151 and final policy/save-r5 17/17 pass. Equal impulse over0.3s rose1.30 blocks on Home and2.23 on Morrow; orbit retained [2,1,-0.5] for1s; keyboard Space contact push produced [0,3,0]. Clock12345.5 and velocity survived cold reload after writer-lease expiry. Reviewed Home/Morrow/Orison/Aerie/roof screenshots and official web-game client gameplay; no recorded browser errors.
 - Retained failed drafts include overly strict floating-point assertions, an initially wrong moon-side/ring orientation, pre-RAF/occluded screenshots and an expected reload lease denial. These are not passes. See ignored CF2/README.md for evidence and scope limits. Full CF1/CFV regression/build/mobile/retention/multiplayer/performance gates remain deferred, not waived. CF3 proposal covers back slot, actual O2 equipment/refilling/alarms and EVA; not implemented at this checkpoint.
 
+## Celestial Frontiers CF4 - 2026-09-19 (bounded checkpoint, full phase unfinished)
+
+- Revision9: Home power loop with integerjoule buffers, finite cell transfer, sixface inspector and authored procedural models. Full roster/dependencies accounted in task-local CF4/ROSTER.md; user contract docs/WAYWORKS_POWER.md.
+- Primary integrated engine/data/save/placement/removal/sharedUI. Isolated helpers delivered kernel/models/UI; all stopped. Cleanup preservation review accepted an empty deletion list.
+- Focused49tests pass after updating explicit WorldSave field count91→92; fullTypeScript and scopedlint pass. Productionbuild and normalgameplay visualpass pending at this entry.
+- Continue from CF4 evidence and current director report. No general polish, release or full-CF4 claim. Fixed11:21UTCdrain/11:31UTCpause controls.
+
 ## Celestial Frontiers CF1 - 2026-09-19 (partial verification deferred)
 
 - Scope: revision 4 location identity, real IndexedDB universe authority, exact legacy backups, runtime/wire ownership and normal player recovery. Home only; all additional locations in validation are synthetic. Fixed pause11:31:05UTC September19 or<=5%remaining. No release or provider action.

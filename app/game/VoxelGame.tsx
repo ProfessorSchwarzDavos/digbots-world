@@ -139,6 +139,7 @@ import {
 import { MinimapHud, NavigationHud, StatusEffectsHud } from "./NavigationHud";
 import { statusEffectViewsFromBuffs } from "./status-effects";
 import { WaygridCreaturePanel, WaygridItemPanel } from "./WaygridPanels";
+import { WayworksPanel } from "./WayworksPanel";
 import { CharacterStudio } from "./CharacterStudio";
 import { AquariumPanel } from "./AquariumPanel";
 import { GuildPanel } from "./GuildPanel";
@@ -5117,6 +5118,10 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
       )}
       {overlay === "orb-rack" && renderOrbStationPanel("orb-rack", hud.activeOrbRack)}
       {overlay === "healing-station" && renderOrbStationPanel("healing-station", hud.activeHealingStation)}
+      {overlay === "wayworks" && hud.activeWayworks && (
+        <WayworksPanel {...hud.activeWayworks} onClose={resume}
+          onAction={action => engineRef.current?.workshopAction(action, hud.activeWayworks!.revision)} />
+      )}
       {overlay === "waygrid-items" && (
         <div onPointerMove={trackCursor}>
           <WaygridItemPanel

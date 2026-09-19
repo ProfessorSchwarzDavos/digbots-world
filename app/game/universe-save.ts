@@ -11,7 +11,7 @@ export const WORLD_SAVE_OWNERS = Object.freeze({
   startingSettlementId: "location", inventory: "player", cursor: "player", trash: "player", craftGrid: "player",
   equipment: "player", lifeSupport: "player", offhand: "player", bestiary: "player", saplings: "location", veinRegrowth: "location",
   selected: "player", health: "player", hunger: "player", xp: "player", level: "player", time: "universe", day: "universe", universeTimeSeconds: "universe",
-  weather: "location", furnaces: "location", wheatMills: "location", chests: "location", contextualLoot: "location",
+  weather: "location", furnaces: "location", wheatMills: "location", wayworks: "location", chests: "location", contextualLoot: "location",
   roadEvents: "location", surfaceRoadGraph: "location", apiaries: "location", morphLooms: "location", orbRacks: "location",
   healingStations: "location", aquariums: "location", fieldPerches: "location", summonContracts: "player", guildBook: "player",
   legendaryEncounters: "location", primeEncounters: "location", digitalItemVault: "universe", digitalCreatureArchive: "universe",

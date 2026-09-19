@@ -2,6 +2,7 @@
 @import "./game/golem-forge.css";
 @import "./game/cardforge.css";
 @import "./game/life-support.css";
+@import "./game/wayworks.css";
 
 :root {
   --font-geist-sans: Arial, Helvetica, sans-serif;

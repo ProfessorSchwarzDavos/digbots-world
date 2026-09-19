@@ -1,4 +1,7 @@
 import * as THREE from "three";
+import { configureMachine, advancePowerGrid, machineCapacity, machineRate, type MachineState } from "./wayworks";
+import { machineKindForBlock, chargeLifeSupportItem, placedWorkshopMachine, restoreWorkshop, type WorkshopAction } from "./wayworks-integration";
+import { createWayworksModel, updateWayworksModel } from "./wayworks-models";
 import { createWaystarCatalog, validateCelestialCatalog, type CelestialCatalogSnapshot, type CelestialBodyDefinition } from "./celestial-catalog";
 import { bodyEnvironment, gravityAcceleration, gravityGait, contactPushOffSpeed, effectiveFallDistance, type BodyEnvironment } from "./celestial-environment";
 import { localBodyClock, secondsFromLocalClock, sampleCelestialSky, type CelestialSkySample } from "./celestial-ephemeris";
@@ -1279,6 +1282,7 @@ export type HudState = {
   activeOrbRack?: OrbRackHudState | null;
   activeHealingStation?: HealingStationHudState | null;
   activeWaygridItems?: WaygridItemHudState | null;
+  activeWayworks?: (MachineState & { name: string; capacityJ: number; rateW: number; heldItemName: string }) | null;
   activeWaygridCreatures?: WaygridCreatureHudState | null;
   activeAquarium?: AquariumHudState | null;
   activeGolemForge?: GolemForgeState | null;
@@ -1539,6 +1543,7 @@ export type WorldSave = {
   weather: Weather;
   furnaces: Record<string, FurnaceState>;
   wheatMills?: Record<string, WheatMillState>;
+  wayworks?: Record<string, MachineState>;
   chests: Record<string, ChestState>;
   contextualLoot?: ContextualLootWorldState;
   roadEvents?: Record<string, RoadEventState>;
@@ -1614,7 +1619,7 @@ export type WorldSave = {
   savedAt: number;
 };
 
-export type OverlayKind = "inventory" | "crafting" | "furnace" | "wheat-mill" | "chest" | "apiary" | "morph-loom" | "orb-rack" | "healing-station" | "waygrid-items" | "waygrid-creatures" | "aquarium" | "golem-forge" | "bestiary" | "creature-camp" | "multiplayer" | "sleep" | "pet" | "dragon" | "magic" | "skills" | "spell-wheel" | "library" | "incubator" | "map" | "quests" | "guilds" | "cardforge" | "cartography" | "alchemy" | "distillery" | "sugarworks" | "sentient" | "trade" | "bank" | "settlement" | "follower";
+export type OverlayKind = "wayworks" | "inventory" | "crafting" | "furnace" | "wheat-mill" | "chest" | "apiary" | "morph-loom" | "orb-rack" | "healing-station" | "waygrid-items" | "waygrid-creatures" | "aquarium" | "golem-forge" | "bestiary" | "creature-camp" | "multiplayer" | "sleep" | "pet" | "dragon" | "magic" | "skills" | "spell-wheel" | "library" | "incubator" | "map" | "quests" | "guilds" | "cardforge" | "cartography" | "alchemy" | "distillery" | "sugarworks" | "sentient" | "trade" | "bank" | "settlement" | "follower";
 export type CameraMode = "first" | "third-rear" | "third-front";
 
 export type MultiplayerUiState = {
@@ -2352,6 +2357,7 @@ export function shouldShowIncorrectToolFeedback(harvested: boolean) {
 }
 
 export function isOpenableBlock(type: BlockId) {
+  if (machineKindForBlock(type)) return true;
   return [
     BlockId.DoorClosedLower, BlockId.DoorClosedUpper, BlockId.DoorOpenLower, BlockId.DoorOpenUpper,
     BlockId.DoorXClosedLower, BlockId.DoorXClosedUpper, BlockId.DoorXOpenLower, BlockId.DoorXOpenUpper,
@@ -4228,6 +4234,11 @@ export class VoxelEngine {
   orbRacks = new Map<string, OrbRackState>();
   healingStations = new Map<string, CreatureHealerState>();
   digitalItemVault: DigitalItemVault = createDigitalItemVault();
+  wayworks = new Map<string, MachineState>();
+  wayworksModels = new Map<string, THREE.Group>();
+  activeWayworksKey: string | null = null;
+  wayworksAccumulator = 0;
+  wayworksActionReadyAt = 0;
   digitalCreatureArchive: DigitalCreatureArchive = createDigitalCreatureArchive();
   aquariums = new Map<string, AquariumState>();
   fieldPerches = new Map<string, FieldPerchState>();
@@ -6179,6 +6190,7 @@ export class VoxelEngine {
     }));
     this.primeEncounters = normalizePrimeEncounterStates(save.primeEncounters);
     this.digitalItemVault = normalizeDigitalItemVault(save.digitalItemVault);
+    this.wayworks = restoreWorkshop(save.wayworks, this.world.locationScope?.locationId ?? "home-preview", "local", (x, y, z) => this.world.getBlock(x, y, z));
     this.digitalCreatureArchive = normalizeDigitalCreatureArchive(save.digitalCreatureArchive);
     this.golemForges = new Map(Object.entries(save.golemForges ?? {}).map(([key, value]) => [key, normalizeGolemForgeState(value)]));
     this.alchemyStands = new Map(Object.entries(save.alchemyStands ?? {}).map(([key, value]) => [key, normalizeAlchemyStand(value)]));
@@ -6492,6 +6504,16 @@ export class VoxelEngine {
           Item.EvaPowerCell, Item.ScrubberCartridge, Item.FieldOxygenReserve].forEach((item, index) => {
           this.inventory[index] = { item, count: 1, ...(ITEMS[item].maxDurability ? { durability: ITEMS[item].maxDurability } : {}) };
         });
+        this.paused = true; this.configureLocalEnvironmentTest({ platform: true, face: "horizon" });
+        await this.saveNow(false); break;
+      }
+      case "wayworks": {
+        this.inventory = blankInventory();
+        [BlockId.HandDynamo, BlockId.GridCable, BlockId.FieldBattery, BlockId.ChargingPedestal, BlockId.SunplateArray, Item.FieldWrench, Item.EvaPowerCell, Item.IronPickaxe].forEach((item, index) => {
+          this.inventory[index] = { item, count: item === BlockId.GridCable ? 12 : 1, ...(ITEMS[item].maxDurability ? { durability: ITEMS[item].maxDurability } : {}) };
+        });
+        const cell = this.inventory[6]!;
+        cell.metadata = { serial: "cf4-synthetic-cell", lifeSupport: { schema: 1, oxygenMl: 0, energyJ: 0, scrubberSeconds: 0, leak: 0, sockets: [] } };
         this.paused = true; this.configureLocalEnvironmentTest({ platform: true, face: "horizon" });
         await this.saveNow(false); break;
       }
@@ -8024,7 +8046,10 @@ export class VoxelEngine {
         return;
       }
       const next = normalizeMultiplayerPlayerState(action.state, peer.identity.id, action.state.variant);
-      const resources = (state: PlayerSessionSnapshot) => lifeSupportResourceTotals([...state.inventory, ...(state.craftGrid ?? []), state.cursor, state.trash, ...Object.values(state.equipment), state.offhand].map(slot => inventorySlotFromNetwork(slot ?? null)));
+      const resources = (state: PlayerSessionSnapshot) => {
+        const slots = [...state.inventory, ...(state.craftGrid ?? []), state.cursor, state.trash, ...Object.values(state.equipment), state.offhand].map(slot => inventorySlotFromNetwork(slot ?? null));
+        return { ...lifeSupportResourceTotals(slots), workshopJ: slots.reduce((sum, slot) => sum + (slot && machineKindForBlock(slot.item) ? Math.max(0, Number((slot.metadata?.wayworks as MachineState | undefined)?.energyJ) || 0) * slot.count : 0), 0) };
+      };
       const beforeResources = resources(current), afterResources = resources(next);
       if (Object.keys(beforeResources).some(key => afterResources[key as keyof typeof afterResources] > beforeResources[key as keyof typeof beforeResources] + .001)) {
         this.multiplayer.sendPlayerState({ ...action, state: current, status: "rejected", reason: "Finite life-support resources must be transferred by the host." }, peer.identity.id); return;
@@ -9729,6 +9754,7 @@ export class VoxelEngine {
       const playerPoses = [this.localNetworkPose(), ...[...this.remotePlayers.values()].map((player) => player.target)]
         .filter((pose): pose is PlayerPose => Boolean(pose));
       const valid = Boolean(remote) && placement.valid && action.edits.length > 0 && action.edits.length <= 2_048 && action.edits.every((edit) => {
+        if (machineKindForBlock(edit.type) || machineKindForBlock(this.world.getBlock(edit.x, edit.y, edit.z))) return false;
         const definition = BLOCKS[edit.type as BlockId];
         const dx = edit.x - remote!.target.x;
         const dy = edit.y - (remote!.target.y + 1);
@@ -12700,6 +12726,91 @@ export class VoxelEngine {
     return null;
   }
 
+  private clearWayworksModels(onlyKey?: string) {
+    for (const [key, group] of this.wayworksModels ?? []) {
+      if (onlyKey !== undefined && key !== onlyKey) continue;
+      group.removeFromParent();
+      const geometries = new Set<THREE.BufferGeometry>(), materials = new Set<THREE.Material>();
+      group.traverse(object => { if (object instanceof THREE.Mesh) { geometries.add(object.geometry); for (const material of Array.isArray(object.material) ? object.material : [object.material]) materials.add(material); } });
+      geometries.forEach(value => value.dispose()); materials.forEach(value => value.dispose());
+      this.wayworksModels.delete(key);
+    }
+  }
+
+  private wayworksHud() {
+    const state = this.activeWayworksKey ? this.wayworks.get(this.activeWayworksKey) : undefined;
+    if (!state) return null;
+    return { ...state, name: state.kind.split("-").map(word => word[0].toUpperCase() + word.slice(1)).join(" "),
+      capacityJ: machineCapacity(state.kind), rateW: machineRate(state.kind), heldItemName: this.selectedSlot() ? itemName(this.selectedSlot()!.item) : "Empty hand" };
+  }
+
+  /** Host-owned intent: panel callbacks carry no replacement state or quantities. */
+  workshopAction(action: WorkshopAction, expectedRevision: number) {
+    const key = this.activeWayworksKey, state = key ? this.wayworks.get(key) : undefined;
+    const fail = (message: string) => { this.events.onToast(message); this.emitHud(true); return false; };
+    // The host owns this local universe; a transient room identity is not a
+    // durable save owner. Guest edits are denied until typed admission exists.
+    if (!key || !state || this.multiplayer?.role === "guest" || state.ownerId !== "local") return fail("Only the workshop owner can operate this machine.");
+    const [x, y, z] = key.split(",").map(Number);
+    if (Math.hypot(x - this.position.x, y - this.position.y, z - this.position.z) > 6 || machineKindForBlock(this.world.getBlock(x, y, z)) !== state.kind || state.locationId !== (this.world.locationScope?.locationId ?? "home-preview")) return fail("Machine is out of reach or no longer present.");
+    if (action.kind === "charge") {
+      if (performance.now() < this.wayworksActionReadyAt) return fail("Charge transfer is settling.");
+      const transfer = chargeLifeSupportItem(state, this.selectedSlot(), expectedRevision);
+      if (!transfer.ok) return fail(transfer.reason);
+      this.wayworks.set(key, transfer.machine); this.inventory[this.selected] = transfer.slot;
+      this.wayworksActionReadyAt = performance.now() + 1000;
+      this.events.onToast(transfer.reason);
+    } else {
+      if ((action.kind === "rotate" || action.kind === "port") && this.selectedSlot()?.item !== Item.FieldWrench) return fail("Select the Field Wrench to configure ports or rotate.");
+      if (action.kind === "crank" && performance.now() < this.wayworksActionReadyAt) return fail("Wait for the flywheel to complete its turn.");
+      const configured = configureMachine(state, expectedRevision, action);
+      if (!configured.ok) return fail(configured.reason);
+      this.wayworks.set(key, configured.state);
+      if (action.kind === "crank") this.wayworksActionReadyAt = performance.now() + 1000;
+      if (action.kind === "rotate") this.world.setBlockFacing?.(x, y, z, normalizeBlockFacing(configured.state.facing), true);
+      this.events.onToast(configured.reason);
+    }
+    this.saveSoon(); this.emitHud(true); return true;
+  }
+
+  updateWayworks(dt: number) {
+    if (this.multiplayer?.role === "guest") return;
+    this.wayworksAccumulator += this.paused ? 0 : Math.max(0, dt);
+    if (this.wayworksAccumulator < .25) return;
+    const elapsedMs = Math.min(1000, Math.floor(this.wayworksAccumulator * 1000)); this.wayworksAccumulator = 0;
+    const radius = this.settings.simulationDistance * CHUNK_SIZE;
+    const nodes = [...this.wayworks].flatMap(([key, state]) => {
+      const [x, y, z] = key.split(",").map(Number);
+      const block = this.world.getBlock(x, y, z);
+      if (block !== undefined && machineKindForBlock(block) !== state.kind) { this.wayworks.delete(key); return []; }
+      if (block === undefined || Math.hypot(x - this.position.x, z - this.position.z) > radius) return [];
+      let exposed = true;
+      if (state.kind === "sunplate-array") for (let skyY = y + 1; skyY <= MAX_Y; skyY++) {
+        const overhead = this.world.getBlock(x, skyY, z);
+        if (overhead === undefined || BLOCKS[overhead]?.solid) { exposed = false; break; }
+      }
+      const body = this.bodyContext().body;
+      const solarExposure = exposed ? this.daylightAmount() * (1 - (this.celestialSample?.eclipse ?? 0)) * (this.weatherState.kind === "clear" ? 1 : .35) / Math.max(1, (body.orbit?.semiMajorAxisAu ?? 1) ** 2) : 0;
+      return [{ key, x, y, z, state, solarExposure }];
+    }).slice(0, 256);
+    const result = advancePowerGrid(nodes, elapsedMs);
+    for (const [key, state] of Object.entries(result.states)) this.wayworks.set(key, state);
+    const visible = new Set(nodes.map(node => node.key));
+    // Models remain owned by this engine and are disposed together at location/load boundaries.
+    for (const [key, model] of this.wayworksModels) {
+      if (!visible.has(key) || model.userData.wayworksKind !== this.wayworks.get(key)?.kind) this.clearWayworksModels(key);
+    }
+    for (const node of nodes) {
+      const state = this.wayworks.get(node.key)!;
+      let model = this.wayworksModels.get(node.key);
+      if (!model) { model = createWayworksModel(state.kind); this.wayworksModels.set(node.key, model); this.scene.add(model); }
+      model.visible = true; model.position.set(node.x, node.y - .5, node.z); model.rotation.y = blockFacingYaw(normalizeBlockFacing(state.facing));
+      updateWayworksModel(model, { fill: state.energyJ / Math.max(1, machineCapacity(state.kind)), active: state.enabled && state.energyJ > 0, time: performance.now() / 1000 });
+    }
+    if (nodes.length) this.persistenceDirty = true;
+    if (this.activeWayworksKey) this.emitHud(true);
+  }
+
   registerWaygridBlock(type: BlockId, key: string) {
     if (type === BlockId.WaygridVaultTerminal) {
       this.digitalItemVault = addDigitalItemCell(this.digitalItemVault, { id: `terminal:item:${key}`, tier: 1 });
@@ -12736,6 +12847,7 @@ export class VoxelEngine {
   }
 
   openOverlay(kind: OverlayKind, key?: string) {
+    this.activeWayworksKey = kind === "wayworks" ? key ?? null : null;
     if (kind !== "chest" && kind !== "furnace" && kind !== "wheat-mill") this.activeNetworkContainerId = null;
     if (kind !== "wheat-mill") this.activeWheatMillKey = null;
     if (kind !== "apiary") this.activeApiaryKey = null;
@@ -12946,6 +13058,7 @@ export class VoxelEngine {
     this.activeWheatMillKey = null;
     this.activeChestKey = null;
     this.activeNetworkContainerId = null;
+    this.activeWayworksKey = null;
     this.activeNetworkFacilityId = null;
     this.activeApiaryKey = null;
     this.activeMorphLoomKey = null;
@@ -13197,7 +13310,7 @@ export class VoxelEngine {
     } else {
       const item = commerceItemCode(itemKey) ?? (/^item-\d+$/u.test(itemKey) ? Number(itemKey.slice(5)) as ItemCode : null);
       if (item === null || !ITEMS[item]) { this.rejectCreatureAction(action, peer.id, "That item cannot be sold here."); return; }
-      if (ITEMS[item].lifeSupportKind) { this.rejectCreatureAction(action, peer.id, "Used life-support equipment requires instance-preserving service, not commodity resale."); return; }
+      if (ITEMS[item].lifeSupportKind || machineKindForBlock(item)) { this.rejectCreatureAction(action, peer.id, "Finite equipment requires instance-preserving service, not commodity resale."); return; }
       let remaining = quantity;
       for (const slot of inventory) if (slot?.item === item) remaining -= Math.min(remaining, slot.count);
       if (remaining > 0) { this.rejectCreatureAction(action, peer.id, "You do not have that many to sell."); return; }
@@ -19111,6 +19224,10 @@ export class VoxelEngine {
         return;
       }
       if (this.target.type === BlockId.CraftingTable) { this.openOverlay("crafting", key); return; }
+      if (machineKindForBlock(this.target.type)) {
+        if (this.multiplayer?.role === "guest") { this.events.onToast("Workshop controls are host-only in this development checkpoint."); return; }
+        this.openOverlay("wayworks", key); return;
+      }
       if (this.target.type === BlockId.Furnace) { this.openOverlay("furnace", key); return; }
       if (this.target.type === BlockId.WheatMill) { this.openOverlay("wheat-mill", key); return; }
       if (this.target.type === BlockId.Chest) { this.openOverlay("chest", key); return; }
@@ -19219,6 +19336,8 @@ export class VoxelEngine {
     const itemDefinition = ITEMS[slot.item];
     const requestedType = itemDefinition?.placeBlock;
     if (requestedType === undefined) return;
+    if (machineKindForBlock(requestedType) && this.wayworks.size >= 256) { this.events.onToast("This workshop checkpoint supports 256 placed power blocks per location."); return; }
+    if (machineKindForBlock(requestedType) && this.multiplayer?.role === "guest") { this.events.onToast("Workshop placement is host-only in this checkpoint."); return; }
     const replacesTarget = BLOCKS[this.target.type]?.replaceable;
     const x = replacesTarget ? this.target.x : this.target.placeX;
     const y = replacesTarget ? this.target.y : this.target.placeY;
@@ -19342,6 +19461,8 @@ export class VoxelEngine {
     );
     for (const edit of placedEdits) this.notifyLiquidChanged(edit.x, edit.y, edit.z);
     const placedKey = blockKey(x, y, z);
+    const workshopKind = machineKindForBlock(type);
+    if (workshopKind) this.wayworks.set(placedKey, placedWorkshopMachine(workshopKind, this.mode === "builder" ? { item: slot.item, count: 1 } : slot, this.world.locationScope?.locationId ?? "home-preview", "local", this.worldBlockFacing(x, y, z)));
     if (type === BlockId.Chest) {
       this.chests.set(placedKey, Array.from({ length: 27 }, () => null));
       this.resolveChest(placedKey);
@@ -19728,6 +19849,7 @@ export class VoxelEngine {
   }
 
   breakTarget() {
+    if (this.target && machineKindForBlock(this.target.type) && this.multiplayer?.role === "guest") { this.events.onToast("Workshop removal is host-only in this checkpoint."); return; }
     if (!this.target || this.target.type === BlockId.Bedrock || Boolean(BLOCKS[this.target.type]?.liquid)) return;
     const { x, y, z, type } = this.target;
     const veinHeart = type === BlockId.LivingVein ? this.nearbyVeinmetalHeart(x, y, z) : null;
@@ -19785,6 +19907,7 @@ export class VoxelEngine {
     }
     const key = blockKey(x, y, z);
     this.unregisterWaygridBlock(type, key, new THREE.Vector3(x, y, z));
+    if (machineKindForBlock(type)) this.wayworks.delete(key);
     if (isEnvironmentLightBlock(type)) this.lightRefreshTimer = 0;
     for (const edit of brokenEdits) this.saplings.delete(blockKey(edit.x, edit.y, edit.z));
     if (veinHeart) {
@@ -19931,6 +20054,12 @@ export class VoxelEngine {
   }
 
   dropBlockLoot(type: BlockId, x: number, y: number, z: number) {
+    if (machineKindForBlock(type)) {
+      const state = this.wayworks.get(blockKey(x, y, z));
+      this.spawnDrop(type, 1, new THREE.Vector3(x, y, z), undefined, state ? { wayworks: state } : undefined);
+      this.wayworks.delete(blockKey(x, y, z));
+      return;
+    }
     let drops: Array<[ItemCode, number]> = [];
     const oreDrop = oreBlockDropRange(type);
     const harvestedPlant = harvestPlant(type, false, Math.random());
@@ -23516,7 +23645,7 @@ export class VoxelEngine {
       const definition = ITEMS[item];
       const catalogItem = playerCommerceItem(item);
       if (!definition || !catalogItem) return false;
-      if (definition.lifeSupportKind) { this.events.onToast("Life-support items cannot be sold as resettable commodity stock."); return false; }
+      if (definition.lifeSupportKind || machineKindForBlock(item)) { this.events.onToast("Finite equipment cannot be sold as resettable commodity stock."); return false; }
       const result = sellToMerchant(this.goldWallet, merchant, catalogItem, quantity, command);
       if (!result.applied) {
         this.events.onToast(result.reason === "merchant-cannot-pay" ? "That merchant's purse is too light for this lot." : "The trade could not be completed.");
@@ -30916,6 +31045,7 @@ export class VoxelEngine {
   }
 
   clearEntities() {
+    this.clearWayworksModels(); this.wayworks?.clear(); this.activeWayworksKey = null; this.wayworksAccumulator = 0;
     this.celestialCreatureVelocity?.clear();
     this.universeTimeSeconds = undefined; this.clockLocalTime = undefined; this.clockLocalDay = undefined;
     this.zeroGPushHeld = false; this.evaTether = null; this.equipmentSwap = null; this.socketSwap = null; this.evaRoll = 0;
@@ -32004,7 +32134,7 @@ export class VoxelEngine {
         } else if (item === Item.Banana) {
           addBox([0.1, 0.34, 0.09], [-0.08, 0, 0], 0xf4d34f, [0, 0, -0.5]);
           addBox([0.1, 0.34, 0.09], [0.08, 0.04, 0], 0xf4d34f, [0, 0, 0.5]);
-        } else if (definition.heldModel || definition.lifeSupportKind || definition.iconKind === "shield" || item === BlockId.CraftingTable || item === Item.DeepgearLanternItem || definition.useKind === "net" || (definition.useKind === "release-creature" && definition.creatureKind
+        } else if (definition.heldModel || definition.lifeSupportKind || machineKindForBlock(item) || definition.iconKind === "shield" || item === BlockId.CraftingTable || item === Item.DeepgearLanternItem || definition.useKind === "net" || (definition.useKind === "release-creature" && definition.creatureKind
           && BUTTERFLY_ORDER.includes(definition.creatureKind as ButterflyKind))) {
           const selectedSlot = this.selectedSlot();
           const filledCaptureOrb = item === Item.CaptureOrb && Boolean(captureOrbFromInventorySlot(selectedSlot)?.creature);
@@ -32282,6 +32412,7 @@ export class VoxelEngine {
     const multiplayerGuest = this.multiplayer?.role === "guest" && this.multiplayerReceivedSnapshot;
     if (this.running && !this.titleMode && !multiplayerGuest) {
       this.updateFurnaces(dt);
+      this.updateWayworks(dt);
       this.updatePersistentMachines(dt);
     }
     if (this.running && !this.titleMode && !this.paused) {
@@ -33352,6 +33483,7 @@ export class VoxelEngine {
           visibleBodies: this.celestialSkyRenderer?.visibleBodyIds ?? [], skyExposure: this.cameraEnvironment?.directSkyExposure,
           eclipse: this.celestialSample?.eclipse, bodies: this.celestialSample?.bodies },
         persistence: { dirty: this.persistenceDirty, saving: this.checkpointPromise !== null, error: this.persistenceError },
+        workshop: [...this.wayworks].map(([key, state]) => ({ key, ...state })),
         day: this.day,
         time: Number(this.worldTime.toFixed(4)),
         biome: BIOME_NAMES[this.world.biomeAt(Math.round(this.position.x), Math.round(this.position.z))],
@@ -33486,6 +33618,7 @@ export class VoxelEngine {
       activeOrbRack: this.activeOrbRackKey ? orbRackHudState(this.orbRacks.get(this.activeOrbRackKey) ?? createOrbRack()) : null,
       activeHealingStation: this.activeHealingStationKey ? healingStationHudState(this.healingStations.get(this.activeHealingStationKey) ?? createCreatureHealer()) : null,
       activeWaygridItems: this.activeWaygridItemKey ? waygridItemHudState(this.digitalItemVault) : null,
+      activeWayworks: this.wayworksHud(),
       activeWaygridCreatures: this.activeWaygridCreatureKey ? waygridCreatureHudState(this.digitalCreatureArchive) : null,
       activeAquarium: this.aquariumHudState(),
       activeGolemForge: this.activeGolemForgeKey ? this.golemForges.get(this.activeGolemForgeKey) ?? createGolemForgeState() : null,
@@ -33902,6 +34035,7 @@ export class VoxelEngine {
       legendaryEncounters: Object.fromEntries([...this.legendaryEncounters.entries()].map(([siteId, state]) => [siteId, normalizeLegendaryEncounterState(state, state.encounterId, siteId)])),
       primeEncounters: Object.fromEntries(this.primeEncounters),
       digitalItemVault: normalizeDigitalItemVault(this.digitalItemVault),
+      wayworks: Object.fromEntries(this.wayworks),
       digitalCreatureArchive: normalizeDigitalCreatureArchive(this.digitalCreatureArchive),
       golemForges: Object.fromEntries([...this.golemForges.entries()].map(([key, value]) => [key, normalizeGolemForgeState(value)])),
       alchemyStands: Object.fromEntries(this.alchemyStands.entries()),

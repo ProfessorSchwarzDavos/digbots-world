@@ -12,6 +12,7 @@ Named releases summarize player-visible changes and the compatibility work that 
 - Added an independent back slot, sealed helmet, finite oxygen tanks and twin-socket rigs, Pressure Weave, a vacuum-incompatible Dive Harness, measured finite-container refill/service, interruptible swaps and contextual oxygen/hazard feedback. Exact tank and supply contents persist through inventory, saves, drops and host transactions.
 - Added finite six-axis EVA propulsion, crouch/contact magnetic boots, location-owned anchor/reel and cargo tether controls, and smooth stable-up/free-roll camera comfort. Machine-powered oxygen production and pressurized habitats remain later work.
 - This is a partially verified local foundation checkpoint. Additional destinations, the remaining expansion, and comprehensive integration verification are unfinished; no release or deployment is implied.
+- Added a bounded host-only Hand Dynamo/Sunplate → cable → Field Battery → Charging Pedestal loop, measured CF3 cell charging, six-face wrench configuration, finite charged drops and location persistence. The remaining CF4 roster, Waygrid power coupling and guest/agent workshop protocols are unfinished.
 
 ## 1.12.0 - Field Archive - 2026-08-01
 

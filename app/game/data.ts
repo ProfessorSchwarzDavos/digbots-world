@@ -332,9 +332,15 @@ export enum BlockId {
   WheatMill = 598,
   FlourCrate = 599,
   BreadCrate = 600,
+  HandDynamo = 621,
+  SunplateArray = 622,
+  FieldBattery = 623,
+  ChargingPedestal = 624,
+  GridCable = 625,
 }
 
 export const Item = {
+  FieldWrench: 626,
   None: 0,
   Stick: 100,
   Coal: 101,
@@ -933,7 +939,7 @@ export type BlockDefinition = {
   color: string;
   preferredTool: BlockTool;
   requiredTier: number;
-  shape?: "cube" | "mooncap" | "cross" | "tall-flower" | "aquatic" | "torch" | "door" | "chest" | "bed" | "exhibit" | "aquarium" | "fireplace" | "bush" | "fruit" | "fence" | "gate" | "apiary" | "wild-hive" | "orb-rack" | "orb-healer" | "cartography" | "alchemy" | "wayshrine" | "distillery" | "sugarworks" | "morph-loom" | "incubator" | "archive-shelf" | "tome-display" | "gold-pile" | "dragon-egg" | "lightning-bug-jar" | "chair" | "table" | "stool" | "shelf" | "barrel";
+  shape?: "wayworks" | "cube" | "mooncap" | "cross" | "tall-flower" | "aquatic" | "torch" | "door" | "chest" | "bed" | "exhibit" | "aquarium" | "fireplace" | "bush" | "fruit" | "fence" | "gate" | "apiary" | "wild-hive" | "orb-rack" | "orb-healer" | "cartography" | "alchemy" | "wayshrine" | "distillery" | "sugarworks" | "morph-loom" | "incubator" | "archive-shelf" | "tome-display" | "gold-pile" | "dragon-egg" | "lightning-bug-jar" | "chair" | "table" | "stool" | "shelf" | "barrel";
   replaceable?: boolean;
   liquid?: "water" | "lava" | "honey" | "syrup";
   /** The block occupies a water source cell; breaking it restores the water. */
@@ -1081,6 +1087,11 @@ export const BLOCKS: Record<number, BlockDefinition> = {
   [BlockId.Cobblestone]: block(BlockId.Cobblestone, "Cobblestone", 35, 35, 35, 1.75, "#6a706f", "pickaxe", 1),
   [BlockId.CraftingTable]: block(BlockId.CraftingTable, "Crafting Table", 36, 37, 11, 1.1, "#9b6536", "axe"),
   [BlockId.Furnace]: block(BlockId.Furnace, "Furnace", 3, 38, 3, 2, "#666c6d", "pickaxe", 1),
+  [BlockId.HandDynamo]: block(BlockId.HandDynamo, "Hand Dynamo", 40, 40, 40, 2, "#b88748", "pickaxe", 1, { layer: "none", shape: "wayworks" }),
+  [BlockId.SunplateArray]: block(BlockId.SunplateArray, "Sunplate Array", 40, 40, 40, 2, "#60b9c4", "pickaxe", 1, { layer: "none", shape: "wayworks" }),
+  [BlockId.FieldBattery]: block(BlockId.FieldBattery, "Field Battery", 40, 40, 40, 2, "#70c5ac", "pickaxe", 1, { layer: "none", shape: "wayworks" }),
+  [BlockId.ChargingPedestal]: block(BlockId.ChargingPedestal, "Charging Pedestal", 40, 40, 40, 2, "#83d8d0", "pickaxe", 1, { layer: "none", shape: "wayworks" }),
+  [BlockId.GridCable]: block(BlockId.GridCable, "Grid Cable", 40, 40, 40, 1, "#bd8d51", "pickaxe", 1, { layer: "none", shape: "wayworks" }),
   [BlockId.Torch]: block(BlockId.Torch, "Torch", 39, 39, 39, 0.05, "#f4bd4f", "hand", 0, { solid: false, layer: "emissive", shape: "torch", replaceable: true }),
   [BlockId.CopperOre]: block(BlockId.CopperOre, "Copper Ore", 40, 40, 40, 1.9, "#b16d4e", "pickaxe", 1),
   [BlockId.GoldOre]: block(BlockId.GoldOre, "Gold Ore", 41, 41, 41, 2.4, "#cda934", "pickaxe", 2),
@@ -1521,7 +1532,7 @@ for (const definition of Object.values(BLOCKS)) {
     id: definition.id,
     name: definition.name,
     color: definition.color,
-    maxStack: 64,
+    maxStack: [BlockId.HandDynamo, BlockId.SunplateArray, BlockId.FieldBattery, BlockId.ChargingPedestal].includes(definition.id) ? 1 : 64,
     placeBlock: definition.id,
     ...(["cross", "tall-flower", "aquatic"].includes(definition.shape ?? "") ? { worldTextureBlock: definition.id } : {}),
     ...(definition.id === BlockId.CraftingTable ? { iconKind: "crafting-table" as const } : {}),
@@ -1546,6 +1557,7 @@ for (const crate of [BlockId.MoonberryCrate, BlockId.SunberryCrate, BlockId.Appl
 }
 
 Object.assign(ITEMS, {
+  [Item.FieldWrench]: { id: Item.FieldWrench, name: "Field Wrench", color: "#c8a169", maxStack: 1, iconKind: "relic" },
   [Item.FieldBreatherHelmet]: { ...armorItem(Item.FieldBreatherHelmet, "Field Breather Helmet", "#d3d6ca", "head", 1, 340), lifeSupportKind: "helmet" },
   [Item.LightOxygenTank]: { id: Item.LightOxygenTank, name: "Light O2 Tank", color: "#a8cec1", maxStack: 1, equipmentSlot: "back", lifeSupportKind: "tank" },
   [Item.ExpeditionOxygenTank]: { id: Item.ExpeditionOxygenTank, name: "Expedition O2 Tank", color: "#74a9a8", maxStack: 1, equipmentSlot: "back", lifeSupportKind: "tank" },
@@ -2434,6 +2446,12 @@ const anyDragonScale: ItemCode[] = [Item.FireDragonScale, Item.IceDragonScale, I
 const anyDragonHeart: ItemCode[] = [Item.FireDragonHeart, Item.IceDragonHeart, Item.SteelDragonHeart, Item.SeaDragonHeart, Item.GoldDragonHeart, Item.SilverDragonHeart];
 
 export const RECIPES: Recipe[] = [
+  { id: "hand-dynamo", name: "Hand Dynamo", width: 3, height: 2, pattern: [Item.IronIngot, Item.GearCluster, Item.IronIngot, BlockId.Planks, Item.Fiber, BlockId.Planks], output: { item: BlockId.HandDynamo, count: 1 }, table: true },
+  { id: "sunplate-array", name: "Sunplate Array", width: 3, height: 2, pattern: [Item.CrystalShard, BlockId.Glass, Item.CrystalShard, Item.IronIngot, Item.IronIngot, Item.IronIngot], output: { item: BlockId.SunplateArray, count: 1 }, table: true },
+  { id: "field-battery", name: "Field Battery", width: 3, height: 2, pattern: [Item.IronIngot, Item.CrystalShard, Item.IronIngot, Item.IronIngot, Item.GearCluster, Item.IronIngot], output: { item: BlockId.FieldBattery, count: 1 }, table: true },
+  { id: "charging-pedestal", name: "Charging Pedestal", width: 3, height: 2, pattern: [Item.IronIngot, Item.CrystalShard, Item.IronIngot, BlockId.StoneBrick, Item.GearCluster, BlockId.StoneBrick], output: { item: BlockId.ChargingPedestal, count: 1 }, table: true },
+  { id: "grid-cable", name: "Grid Cable", width: 3, height: 1, pattern: [Item.Fiber, Item.IronIngot, Item.Fiber], output: { item: BlockId.GridCable, count: 4 }, table: true },
+  { id: "field-wrench", name: "Field Wrench", width: 2, height: 2, pattern: [Item.IronIngot, Item.IronIngot, 0, Item.Stick], output: { item: Item.FieldWrench, count: 1 }, table: false },
   ...([
     ["field-breather", Item.FieldBreatherHelmet, [Item.IronIngot, BlockId.Glass, Item.IronIngot, Item.Fiber, Item.GearCluster, Item.Fiber]],
     ["light-o2-tank", Item.LightOxygenTank, [Item.IronIngot, Item.IronIngot, Item.IronIngot, Item.Fiber, Item.GearCluster, Item.Fiber]],

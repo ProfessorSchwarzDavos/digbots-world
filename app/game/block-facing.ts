@@ -30,6 +30,7 @@ const DIRECTIONAL_SHAPES = new Set([
 
 /** Cubic legacy workstations whose authored front is their side atlas tile. */
 const DIRECTIONAL_CUBES = new Set<BlockId>([
+  BlockId.HandDynamo, BlockId.SunplateArray, BlockId.FieldBattery, BlockId.ChargingPedestal, BlockId.GridCable,
   BlockId.CraftingTable,
   BlockId.Furnace,
   BlockId.GolemForge,

@@ -14,6 +14,11 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
   machine catalog missing from custody validation. Added the same authoritative
   spaceflight catalog used by placement; retain this red receipt and recheck.
   Initial build19 at6dfd449 passed, but final corrected build/browser is pending.
+- Preliminary normal browser build19 caught an omitted HUD admission path: rock
+  discovery opened the overlay but the mission payload still required a nearby
+  ship. Preserved r1 screenshot013/save015; stopped preview/browser/build20.
+  Both HUD/text consumers now share a tested current-mission accessor that admits
+  the active asteroid inspector without a ship. Build20 cancellation retained.
 - Separate engine asteroid local-frame travel remains fail-closed until attached
   metadata has one owner. Runtime field expansion/full CF6/CFV remain unfinished.
   See docs/ASTEROID_CUSTODY.md and CF6/r14-asteroid-runtime/PLAN.md.

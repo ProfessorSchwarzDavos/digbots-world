@@ -107,6 +107,7 @@ function engineFixture() {
   const engine = Object.assign(Object.create(VoxelEngine.prototype), {
     asteroidFields: f.save, orbitalStations: null, persistent: true, activeWorldId: universe, multiplayer: null,
     locationTransitioning: false, spaceflightBusy: false, pendingSpaceArrival: null,
+    spaceflightRoute: "home-orbit", spacefleet: { schema: 1, vehicles: {} }, weather: "clear",
     activeAsteroidPoint: null, position: new THREE.Vector3(f.point.x, f.point.y, f.point.z + 2),
     inventory: [{ item: BlockId.Stone, count: 7 }], events: { onToast: (message: string) => messages.push(message) },
     emitHud: () => {}, saveSoon: () => {},
@@ -123,10 +124,13 @@ function engineFixture() {
 
 test("actual nearby inspector discovers only reached rock and host claim creates no materials", async () => {
   const f = engineFixture(), before = structuredClone(f.engine.inventory);
+  const hudMission = () => Reflect.get(f.engine, "currentSpaceflightMission").call(f.engine);
+  assert.equal(hudMission(), null);
   assert.equal(f.access("local", "build"), false); assert.equal(f.access("guest", "extract"), true);
   assert.equal(await f.engine.spaceflightAction(f.claim()), false, "no active physical inspection");
   f.engine.position.z += 10; assert.equal(f.inspect(), true); assert.deepEqual(f.opened, []);
   f.engine.position.z -= 10; assert.equal(f.inspect(), true); assert.deepEqual(f.opened, ["spaceflight"]);
+  assert.equal(hudMission().ship, null); assert.equal(hudMission().asteroid.id, f.asteroid.id, "inspector must reach HUD without a nearby ship");
   assert.deepEqual(f.registry().asteroids[0].discoveredBy, ["local"]);
   assert(f.registry().asteroids.slice(1).every(entry => !entry.discoveredBy.length), "no field-wide discovery");
   const intent = f.claim(); assert.equal(await f.engine.spaceflightAction(intent), true);

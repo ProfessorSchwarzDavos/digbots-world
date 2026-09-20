@@ -13126,6 +13126,10 @@ export class VoxelEngine {
     return pads.sort((a, b) => a.blockers.length - b.blockers.length)[0] ?? null;
   }
 
+  private currentSpaceflightMission(): SpaceflightMission | null {
+    return this.activeAsteroidPoint || this.nearbySpaceVehicle() ? this.spaceflightMission() : null;
+  }
+
   private spaceflightMission(): SpaceflightMission {
     const ship = this.nearbySpaceVehicle();
     const mission = inspectSpaceflightMission(ship, this.world.locationScope, this.spaceflightRoute, this.launchPadFor(ship), this.weather === "clear");
@@ -14016,6 +14020,7 @@ export class VoxelEngine {
     this.activeWayworksKey = null;
     this.activeNetworkFacilityId = null;
     this.observatoryCharts = null;
+    this.activeAsteroidPoint = null;
     this.activeApiaryKey = null;
     this.activeMorphLoomKey = null;
     this.activeOrbRackKey = null;
@@ -34839,7 +34844,7 @@ export class VoxelEngine {
         : this.targetMob ? { type: "mob", id: this.targetMob.id, name: this.targetMob.name }
           : this.targetBoat ? { type: "boat", id: this.targetBoat.save.id } : null,
       nearbyMobs,
-      spaceflight: this.nearbySpaceVehicle() ? this.spaceflightMission() : null,
+      spaceflight: this.currentSpaceflightMission(),
       boats: [...this.boats.values()].map((boat) => ({ id: boat.save.id, position: [boat.save.x, boat.save.y, boat.save.z], passengers: boat.save.passengers.length, storageSlots: boat.save.inventory.filter(Boolean).length })),
       exhibits: [...this.chests.entries()].filter(([key]) => key.startsWith("exhibit:")).map(([key, slots]) => ({ key, capacity: slots.length, residents: slots.filter(Boolean).length })),
       ecology: {
@@ -34937,7 +34942,7 @@ export class VoxelEngine {
     }
     const lighting = this.world.lightingProbeAt(this.position.x, this.position.y + 1, this.position.z);
     this.events.onHud({
-      spaceflight: this.nearbySpaceVehicle() ? this.spaceflightMission() : null,
+      spaceflight: this.currentSpaceflightMission(),
       celestial: { bodyName: this.bodyContext().body.name, gravityG: this.bodyContext().environment.gravityG,
         pressureKPa: this.bodyContext().environment.pressureKPa, localDayLengthMinutes: this.bodyContext().body.rotation.dayLengthMinutes,
         synthetic: this.agentTestWorld && !this.bodyContext().home },

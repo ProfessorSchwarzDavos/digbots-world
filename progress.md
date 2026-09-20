@@ -2,6 +2,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Committed metadata sourcec386a74/build30 passed134 focused checks, official30,
+  normal paid60-to140 survey and final cold custody-r2 with one canonical owner.
+  Cold rapid Escape exposed a separate delayed pointer-lock grant that resumed
+  the engine behind its visible pause menu and intercepted pointer controls.
+  Keyboard SaveQuit retained the checkpoint; all failed attempts remain evidence.
+  Executable pause-red-r1:1PASS/3FAIL reproduces the race. Late grants now reject
+  behind overlays/title/stopped/pending transitions; lock loss synchronously marks
+  the overlay guard. Explicit resume and shared simulation semantics retained.
+  Corrected pause-r1:125PASS; static80/lint61PASS. Fresh build31 and normal mouse/
+  paused-clock/cold replay are still required; no clean UI acceptance claimed yet.
 - Repository integration now supports explicit canonical orbit metadata admission,
   atomic catalog/stripped-row checkpoints, normal flat facade save/load, exact
   original-request retry despite hydrated voxel ordering, origin capture and

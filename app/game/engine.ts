@@ -4905,12 +4905,25 @@ export class VoxelEngine {
     this.emitHud(true);
   };
 
-  onPointerLockChange = () => {
-    this.locked = document.pointerLockElement === this.canvas;
+  onPointerLockChange = () => { this.syncPointerLockState(); };
+
+  syncPointerLockState() {
+    const acquired = document.pointerLockElement === this.canvas;
+    // A request made while resuming may complete after Escape opened another
+    // overlay. Browser completion is not permission to resume or capture its UI.
+    const obsolete = acquired && (this.gameplayOverlayOpen || this.titleMode || !this.running
+      || this.pendingFieldSurvey || this.locationTransitioning);
+    this.locked = acquired && !obsolete;
+    if (obsolete) document.exitPointerLock();
     if (!this.locked) {
       this.pointerLockMovementSuppression = 0;
       this.resetLookFrameBudget();
-      if (this.running && !this.touchMode) this.paused = !this.multiplayerSimulationActive();
+      if (this.running && !this.touchMode) {
+        this.paused = !this.multiplayerSimulationActive();
+        // Mark this synchronously, before React renders the pause overlay or
+        // another pending browser grant reaches this handler.
+        this.gameplayOverlayOpen = true;
+      }
       this.clearInput();
       this.mineHeld = false;
     } else {
@@ -4924,7 +4937,7 @@ export class VoxelEngine {
       void this.audio.unlock();
     }
     this.events.onLockChange(this.locked);
-  };
+  }
 
   onMouseMove = (event: MouseEvent) => {
     if (!this.locked || document.pointerLockElement !== this.canvas || !this.running || this.gameplayOverlayOpen || this.paused) return;

@@ -37,16 +37,16 @@ function AsteroidControls({ asteroid, onAction }: { asteroid: AsteroidInspection
   const base = { asteroidId: asteroid.id, epoch: asteroid.epoch, registryRevision: asteroid.registryRevision };
   const ids = trusted.split(",").map(value => value.trim()).filter(Boolean);
   const validIds = ids.length <= 64 && new Set(ids).size === ids.length && ids.every(id => /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,159}$/.test(id));
-  return <section className="ww-materials" aria-label="Observed asteroid">
+  return <section className="ww-materials spaceflight-mission" aria-label="Observed asteroid">
     <h3>{asteroid.composition[0].toUpperCase() + asteroid.composition.slice(1)} asteroid</h3>
     <p>{asteroid.id} · inspected at [{asteroid.point.x}, {asteroid.point.y}, {asteroid.point.z}]</p>
     <p role="status">{asteroid.claim ? `Claimed by ${asteroid.claim.ownerId}.` : "Unclaimed. Anyone may extract; claim it before building."}</p>
     {!asteroid.nearby && <p>Return within six blocks of the inspected rock to change this claim.</p>}
     {!asteroid.claim ? <button type="button" disabled={!asteroid.nearby} onClick={() => onAction({ kind: "asteroid-claim", ...base })}>Claim asteroid</button>
       : asteroid.claim.ownerId === "local" ? <>
-        <label>Construction <select value={build} onChange={event => setBuild(event.target.value as AsteroidGrant)}>
+        <label>Construction <select aria-label="Asteroid construction permission" value={build} onChange={event => setBuild(event.target.value as AsteroidGrant)}>
           <option value="owner">Owner only</option><option value="trusted">Trusted builders</option><option value="public">Everyone</option></select></label>
-        <label>Extraction <select value={extract} onChange={event => setExtract(event.target.value as AsteroidGrant)}>
+        <label>Extraction <select aria-label="Asteroid extraction permission" value={extract} onChange={event => setExtract(event.target.value as AsteroidGrant)}>
           <option value="owner">Owner only</option><option value="trusted">Trusted miners</option><option value="public">Everyone</option></select></label>
         <details><summary>Trusted player and agent IDs</summary><label>Trusted IDs <input value={trusted} maxLength={10300}
           onChange={event => setTrusted(event.target.value)} placeholder="Comma-separated authenticated IDs" /></label>

@@ -6,6 +6,7 @@ import { createFieldWrenchModel } from "./wayworks-wrench-model";
 import { createWayworksItemModel, isWayworksItem } from "./wayworks-item-models";
 import { machineKindForBlock } from "./wayworks-integration";
 import { createSpaceflightModel } from "./spaceflight-models";
+import { stationStructureKind } from "./station-kit";
 import { BLOCKS, BlockId, Item, ITEMS, type ItemCode } from "./data";
 import { createButterflyVisual } from "./butterflies";
 import { BUTTERFLY_ORDER, type ButterflyKind } from "./mobs";
@@ -36,6 +37,8 @@ export function createAvatarHeldItemModel(item: ItemCode, options: { filledCaptu
   if (isPressurePart(item)) return createPressurePartModel(item);
   if (isWayworksItem(item)) return createWayworksItemModel(item);
   if (item === Item.SurveyHopper) { const model = createSpaceflightModel("survey-hopper"); model.scale.setScalar(.18); model.position.y = -.32; return model; }
+  const structure = stationStructureKind(item);
+  if (structure) { const model = createSpaceflightModel(structure); model.position.y = -.3; model.scale.setScalar(.55); return model; }
   if (item === BlockId.ReinforcedWindow || item === BlockId.HangarFrame) {
     const model = createPressureModel(item === BlockId.ReinforcedWindow ? "reinforced-window" : "hangar-frame");
     model.position.y = -.3; model.scale.setScalar(.55); return model;

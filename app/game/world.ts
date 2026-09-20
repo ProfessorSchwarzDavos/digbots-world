@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { stationPanelFace } from "./station-kit";
 import { homeLocation, locationId, parseLocationId, universeId, locationStamp as validateLocationStamp, type LocationStamp } from "./location-address";
 import { celestialTerrainSeed, createCelestialTerrain, MORROW_REGIONS, type CelestialTerrain } from "./celestial-terrain";
 import { ChunkMemoryCache, ChunkPersistentCache, type CachedChunkData } from "./chunk-cache";
@@ -8785,6 +8786,15 @@ export class ChunkWorld {
           const environment = definition.layer === "emissive"
             ? Math.max(0.82, shadeAt(lx + dx, y + dy, lz + dz))
             : shadeAt(lx + dx, y + dy, lz + dz);
+          const panel = stationPanelFace(type);
+          if (panel) {
+            const point = (u: number, v: number): [number, number, number] => [0, 1, 2].map(axis =>
+              face.corners[0][axis] + (face.corners[3][axis] - face.corners[0][axis]) * u + (face.corners[1][axis] - face.corners[0][axis]) * v) as [number, number, number];
+            for (const { rect: [u0, v0, u1, v1], tint: panelTint } of panel) {
+              addQuad(bucket, [point(u0, v0), point(u0, v1), point(u1, v1), point(u1, v0)], face.direction, 16, face.shade, panelTint, lx, y, lz, 0, environment);
+            }
+            continue;
+          }
           addQuad(bucket, face.corners, face.direction, tile, face.shade, tint, lx, y, lz, liquidSurfaceInset, environment);
         }
       }

@@ -27,8 +27,8 @@ function visibleBounds(root: THREE.Object3D) {
   return bounds;
 }
 
-test("all eleven authored models have finite geometry, bounded poses and readable materials", () => {
-  assert.equal(SPACEFLIGHT_MODEL_KINDS.length, 11);
+test("all fifteen authored models have finite geometry, bounded poses and readable materials", () => {
+  assert.equal(SPACEFLIGHT_MODEL_KINDS.length, 15);
   for (const kind of SPACEFLIGHT_MODEL_KINDS) {
     const root = createSpaceflightModel(kind);
     assert.equal(root.name, `spaceflight-${kind}`);
@@ -62,6 +62,8 @@ test("each infrastructure identity has a distinct named working assembly", () =>
     "mission-console": "sloped-orbital-chart", "tracking-beacon": "faceted-tracking-dish", "orbital-dock": "docking-capture-collar",
     "recovery-crane": "open-recovery-hook", "station-core": "station-registry-seal", "station-truss": "truss-diagonal-web",
     "station-radiator": "radiator-capillary-fin", "station-observatory": "telescope-recessed-lens",
+    "station-hull": "airtight-hull-shell", "station-bulkhead": "airtight-bulkhead-core",
+    "station-habitation": "habitation-upholstered-seat", "station-greenhouse": "greenhouse-planted-shoot",
   };
   const fingerprints = new Set<string>();
   for (const kind of SPACEFLIGHT_MODEL_KINDS) {

@@ -73,6 +73,52 @@ function fixture(saved?: PressureSave, savedMachines?: Map<string, MachineState>
 const resources = (zone: AirZoneState) => ({ oxygenMilliMoles: zone.oxygenMilliMoles, inertMilliMoles: zone.inertMilliMoles,
   co2MilliMoles: zone.co2MilliMoles, thermalEnergyMilliJ: zone.thermalEnergyMilliJ });
 
+test("actual discovery and cold reconstruction distinguish airtight hull from open station framework", () => {
+  for (const type of [BlockId.StationHull, BlockId.StationBulkhead, BlockId.StationTruss, BlockId.OrbitalDock,
+    BlockId.StationRadiator, BlockId.StationObservatory, BlockId.StationHabitation, BlockId.StationGreenhouse]) {
+    const f = fixture();
+    try {
+      for (let y = 4; y <= 15; y++) f.blocks.set(`4,${y},3`, y === 4 ? type : BlockId.Air);
+      f.host.skyTopAt = () => 4; f.settle();
+      const sealed = type === BlockId.StationHull || type === BlockId.StationBulkhead;
+      const zone = f.runtime.zoneAt(room)!; assert.ok(zone, `missing ${type}`);
+      assert.equal(zone.status === "depressurized", sealed, `${type} ${zone.status}`);
+      assert.equal(totalAirGas(zone), 0);
+      const cold = fixture(f.runtime.snapshot(), structuredClone(f.machines));
+      try {
+        cold.blocks.clear(); for (const [key, block] of f.blocks) cold.blocks.set(key, block);
+        cold.host.skyTopAt = f.host.skyTopAt; cold.settle();
+        assert.equal(cold.runtime.zoneAt(room)?.status, zone.status);
+        assert.equal(totalAirGas(cold.runtime.zoneAt(room)!), 0, "reconstruction must not supply ambient gas");
+      } finally { cold.runtime.dispose(); }
+    } finally { f.runtime.dispose(); }
+  }
+});
+
+test("greenhouse uses finite room CO2 only through a sunlit glazed roof, stopping in darkness and at depletion", () => {
+  const f = fixture();
+  try {
+    const tray = { x: 4, y: 2, z: 3 };
+    f.blocks.set(airCellKey(tray), BlockId.StationGreenhouse);
+    for (let y = 4; y <= 15; y++) f.blocks.set(`4,${y},3`, y === 4 ? BlockId.ReinforcedWindow : BlockId.Air);
+    f.host.skyTopAt = () => 4; f.settle();
+    const zone = f.gas(); f.runtime.topology.replace({ ...zone, co2MilliMoles: 10 });
+    const initial = resources(f.runtime.zoneAt(room)!); f.frame(.2);
+    assert.deepEqual(resources(f.runtime.zoneAt(room)!), initial, "darkness has no conversion");
+    f.host.daylight = () => 1; f.frame(.2);
+    let live = f.runtime.zoneAt(room)!;
+    assert.equal(live.oxygenMilliMoles, initial.oxygenMilliMoles + 4);
+    assert.equal(live.co2MilliMoles, 6); assert.equal(live.thermalEnergyMilliJ, initial.thermalEnergyMilliJ);
+    f.frame(.2); f.frame(.2); live = f.runtime.zoneAt(room)!;
+    assert.equal(live.oxygenMilliMoles, initial.oxygenMilliMoles + 10); assert.equal(live.co2MilliMoles, 0);
+    const exhausted = resources(live); f.frame(.2); assert.deepEqual(resources(f.runtime.zoneAt(room)!), exhausted);
+    f.runtime.topology.replace({ ...live, co2MilliMoles: 10 });
+    f.blocks.set("4,4,3", BlockId.StationHull); f.runtime.onEdit({ x: 4, y: 4, z: 3 }); f.settle();
+    const shaded = resources(f.runtime.zoneAt(room)!); f.frame(.2);
+    assert.deepEqual(resources(f.runtime.zoneAt(room)!), shaded, "opaque ceiling blocks greenhouse light");
+  } finally { f.runtime.dispose(); }
+});
+
 test("runtime discovers a normal loaded sealed cavity through its worker", () => {
   const f = fixture(); try {
     f.settle(); const zone = f.runtime.zoneAt(room); assert.ok(zone);
@@ -81,6 +127,28 @@ test("runtime discovers a normal loaded sealed cavity through its worker", () =>
     assert.deepEqual(zone.controllerIds, [controller]); assert.equal(f.runtime.diagnosticsFor(controller).capacity, 2048);
     assert.ok(f.worker.messages.some(m => m.type === "discover")); assert.equal(f.runtime.topology.lastError, null);
   } finally { f.runtime.dispose(); }
+});
+
+test("radiator boundary requires known geometry and interior heat is conserved in the actual zone", () => {
+  const f = fixture();
+  try {
+    f.settle(); f.gas();
+    assert.equal(f.runtime.machineThermalBoundary(controller), "room");
+    const before = resources(f.runtime.zoneAt(room)!);
+    assert.equal(f.runtime.radiateMachineHeat(controller, 500), 500000);
+    const after = resources(f.runtime.zoneAt(room)!);
+    assert.deepEqual(after, { ...before, thermalEnergyMilliJ: before.thermalEnergyMilliJ + 500000 });
+    f.unload(); f.runtime.onEdit(room); f.settle();
+    assert.equal(f.runtime.machineThermalBoundary(controller), "unknown");
+  } finally { f.runtime.dispose(); }
+  const outside = fixture();
+  try {
+    for (let y = 1; y <= 15; y++) outside.blocks.set(`10,${y},10`, BlockId.Air);
+    outside.host.skyTopAt = () => 0;
+    assert.equal(outside.runtime.machineThermalBoundary("10,2,10"), "exterior");
+    outside.blocks.set("10,4,10", BlockId.StationHull); outside.runtime.onEdit({ x: 10, y: 4, z: 10 });
+    assert.equal(outside.runtime.machineThermalBoundary("10,2,10"), "unknown");
+  } finally { outside.runtime.dispose(); }
 });
 
 test("runtime actions enforce revision, Field Wrench, owner and trusted authorization without partial writes", () => {

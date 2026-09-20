@@ -11,6 +11,7 @@ import { PressureTopology } from "./pressure-topology";
 import { workshopAuthorized, workshopGasCapacity, workshopRunning, workshopStoredTotal } from "./wayworks-stores";
 import type { MachineState } from "./wayworks";
 import type { BodyEnvironment } from "./celestial-environment";
+import { stationSealMask, stationStructureMeta } from "./station-kit";
 
 type BoundaryFlux = { oxygenMilliMoles: number; inertMilliMoles: number; co2MilliMoles: number; thermalEnergyMilliJ: number };
 export type PressureSave = { schema: 1; nextInstallation: number; zones: AirZoneState[]; devices: Record<string, PressureDevice>;
@@ -99,7 +100,10 @@ export class PressureRuntime {
   private solid(point: AirPoint): boolean {
     if (this.closedGateAt(point)) return true;
     if (this.openDoorAt(point)) return false;
-    const type = this.host.blockAt(point); return type === undefined || (BLOCKS[type]?.solid ?? false);
+    const type = this.host.blockAt(point);
+    if (type === undefined) return true;
+    const seal = stationSealMask(type);
+    return seal === undefined ? BLOCKS[type]?.solid ?? false : seal === 63;
   }
   private flagsAt(point: AirPoint): number | undefined {
     const type = this.host.blockAt(point); if (type === undefined) return undefined;
@@ -111,9 +115,25 @@ export class PressureRuntime {
       for (let y = this.host.maxY; y > opaque; y--) if (this.solid({ x: point.x, y, z: point.z })) { top = y; break; }
       this.roof.set(column, top);
     }
-    return 1 | (point.y > top ? 128 : 0);
+    return 1 | ((stationSealMask(type) ?? 0) << 1) | (point.y > top ? 128 : 0);
   }
   exteriorAt(point: AirPoint) { const flags = this.flagsAt(point); return flags !== undefined && (flags & 129) === 129; }
+  machineThermalBoundary(key: string): "room" | "exterior" | "unknown" {
+    const zone = this.zoneAt(this.roomPoint(key));
+    if (zone) return ["sealed", "depressurized", "leaking"].includes(zone.status) ? "room" : "unknown";
+    const point = pressurePoint(key);
+    return point && this.exteriorAt({ ...point, y: point.y + 1 }) ? "exterior" : "unknown";
+  }
+  private greenhouseSkyVisible(point: AirPoint): boolean {
+    // A glazed roof passes sunlight, not pressure. Scan the real loaded column;
+    // unknown cells and opaque ceilings fail closed, even in a bright orbit.
+    for (let y = point.y + 1; y <= this.host.maxY; y++) {
+      const block = this.host.blockAt({ ...point, y });
+      if (block === undefined) return false;
+      if (block !== BlockId.ReinforcedWindow && (BLOCKS[block]?.lightDampening ?? 15) >= 15) return false;
+    }
+    return true;
+  }
   radiateMachineHeat(key: string, joules: number): number {
     if (!Number.isSafeInteger(joules) || joules <= 0) return 0;
     const zone = this.zoneAt(this.roomPoint(key));
@@ -124,6 +144,9 @@ export class PressureRuntime {
   }
   onEdit(point: AirPoint) {
     this.roof.delete(`${point.x},${point.z}`); this.gateSignature = "";
+    // A sealed-to-sealed roof replacement need not change the pressure graph,
+    // but can change greenhouse sunlight. Do not reuse its cached plant count.
+    this.staticConsumers.clear();
     this.topology.invalidate(point);
   }
   private syncMachines() {
@@ -408,6 +431,8 @@ export class PressureRuntime {
           const point = pressurePoint(cell)!, block = this.host.blockAt(point), name = block === undefined ? "" : BLOCKS[block]?.name ?? "";
           if (/fire|torch/i.test(name)) fire++;
           if (/crop|sapling|flower/i.test(name) && (this.host.skyTopAt(point.x, point.z) ?? Infinity) <= point.y + 6) plants++;
+          const tray = block === undefined ? undefined : stationStructureMeta(block);
+          if (tray?.plants && this.greenhouseSkyVisible(point)) plants += tray.plants;
         }
         staticEffects = { revision: original.topologyRevision, fire, plants }; this.staticConsumers.set(id, staticEffects);
       }

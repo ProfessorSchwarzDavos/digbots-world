@@ -4,7 +4,7 @@ import { applyWorkshopAction, machineKindForBlock, parseWorkshopAction, placedWo
 import { PowerTopologyCache } from "./wayworks-network";
 import { advanceMachine, portableResource } from "./wayworks-machines";
 import { advanceMachineLinks, exportMachineToWaygrid, MaterialTopologyCache } from "./wayworks-links";
-import { workshopAuthorized, workshopFluidCapacity, workshopGasCapacity, workshopRunning, workshopStoredTotal } from "./wayworks-stores";
+import { workshopAuthorized, workshopFluidCapacity, workshopGasCapacity, workshopHeatCapacity, workshopRunning, workshopStoredTotal } from "./wayworks-stores";
 import { operateWaygrid, type WaygridOperation } from "./wayworks-waygrid";
 import { compareProtectedCustody, validCustodyItem } from "./wayworks-custody";
 import { isWayworksItem } from "./wayworks-item-models";
@@ -800,6 +800,9 @@ import { inspectLaunchPad, supplyVehicleFromMachine, type LaunchPadCheck } from 
 import { spaceflightMachineKind } from "./spaceflight-catalog";
 import { advanceSpaceCabin, advanceSpaceflight } from "./spaceflight-flight";
 import { createSpaceflightModel, updateSpaceflightModel } from "./spaceflight-models";
+import { stationSceneStructureKind, stationStructureKind } from "./station-kit";
+import { measureStation } from "./station-telemetry";
+import { projectCelestialChart, type CelestialChartProjection } from "./celestial-chart";
 import { celestialTerrainSeed, createCelestialTerrain, morrowRegionAt } from "./celestial-terrain";
 import type { VehicleLocationCommit } from "./universe-storage";
 import {
@@ -4295,6 +4298,7 @@ export class VoxelEngine {
   spaceflightRoute: FirstFlightRoute = "home-orbit";
   spaceflightModels = new Map<string, THREE.Group>();
   private spaceflightBusy = false;
+  private observatoryCharts: { system: CelestialChartProjection; orbit: CelestialChartProjection } | null = null;
   guestPressure: PressurePresentation | null = null;
   guestPressureInspector: PressureInspector | null = null;
   guestPressureOnlyFacility: { id: string; locationId: string } | null = null;
@@ -13114,6 +13118,11 @@ export class VoxelEngine {
     if (this.multiplayer?.role === "host" && this.remotePlayers.size) mission.blockers.push("Other participants still occupy this location. End the shared session before this flight.");
     mission.stations = parseLocationId(this.world.locationScope.locationId).kind === "orbit"
       ? this.orbitalStations ?? createStationRegistry(this.world.locationScope.locationId) : null;
+    if (mission.stations && this.pressureRuntime && this.multiplayer?.role !== "guest") {
+      mission.stationReadings = Object.fromEntries(Object.values(mission.stations.stations).map(station => [station.id,
+        measureStation({ station, actor: { actorId: "local", factionIds: [], guildIds: [] }, machines: this.wayworks,
+          pressure: this.pressureRuntime!, blockAt: (x, y, z) => this.world.getBlock(x, y, z) })]));
+    }
     if (ship && shipDock(ship)) mission.status = "docked";
     return mission;
   }
@@ -13195,6 +13204,24 @@ export class VoxelEngine {
       && this.position.distanceTo(new THREE.Vector3(...ship.transform.position)) <= 6;
     if (!consoleReady && !aboard && !boardingNearby) return fail("Use nearby flight hardware or come within six blocks to board your pilot seat.");
     try {
+      if (action.kind === "observatory-read") {
+        if (!consoleReady || machine.kind !== "station-observatory" || !workshopRunning(machine.workshop)
+          || !this.stationActorAccess("local", ...key.split(",").map(Number) as VehicleVector, "container")) return fail("Use your enabled, authorized nearby observatory.");
+        if (expectedMachineRevision === undefined || machine.revision !== expectedMachineRevision || machine.revision >= Number.MAX_SAFE_INTEGER) return fail("Inspect the observatory again before reading its chart.");
+        if (machine.energyJ < 1000 || workshopHeatCapacity(machine.workshop) - machine.workshop.heatJ < 1000) return fail("The observatory needs 1 kJ and room to reject its computation heat.");
+        const { catalog, body } = this.bodyContext();
+        // These are the explicitly available first-flight charts, not every
+        // catalog body. The current body's identity is observed locally.
+        const input = { catalog, knownBodyIds: ["waystar", "blockwild", "blockwild/morrow", body.id],
+          currentLocationId: this.world.locationScope.locationId, universeSeconds: this.universeTimeSeconds,
+          skySample: this.celestialSample, stationPoints: Object.values(this.orbitalStations?.stations ?? {})
+            .filter(station => stationAllows(station, { actorId: "local", factionIds: [], guildIds: [] }, "dock"))
+            .map(station => ({ id: station.id, name: station.name, locationId: station.locationId, position: station.corePosition })) };
+        const charts = { system: projectCelestialChart(input, "system"), orbit: projectCelestialChart(input, "orbit") };
+        this.wayworks.set(key, { ...machine, energyJ: machine.energyJ - 1000, revision: machine.revision + 1,
+          workshop: { ...machine.workshop, heatJ: machine.workshop.heatJ + 1000 } });
+        this.observatoryCharts = charts; this.saveSoon(); this.emitHud(true); return true;
+      }
       if (action.kind === "route") { firstFlightDestination(this.world.locationScope.locationId, action.route); this.spaceflightRoute = action.route; this.emitHud(true); return true; }
       if (action.kind === "deploy") {
         const held = this.selectedSlot(), pad = this.launchPadFor(null);
@@ -13358,7 +13385,9 @@ export class VoxelEngine {
     return { ...state, name: state.kind.split("-").map(word => word[0].toUpperCase() + word.slice(1)).join(" "),
       pressureOnly: this.multiplayer?.role === "guest" && this.guestPressureOnlyFacility?.id === this.activeNetworkFacilityId
         && this.guestPressureOnlyFacility?.locationId === state.locationId,
-      ...(spaceflightMachineKind(state.kind) ? { flight: this.spaceflightMission() } : {}),
+      ...(spaceflightMachineKind(state.kind) && !["station-truss", "station-radiator", "station-observatory"].includes(state.kind) ? { flight: this.spaceflightMission() } : {}),
+      ...(state.kind === "station-observatory" && this.multiplayer?.role !== "guest" ? { observatoryCharts: this.observatoryCharts } : {}),
+      ...(state.kind === "station-radiator" ? { radiatorBoundary: this.pressureRuntime?.machineThermalBoundary(this.activeWayworksKey!) ?? "unknown" } : {}),
       capacityJ: machineCapacity(state.kind, state.workshop), rateW: machineRate(state.kind), heldItemName: this.selectedSlot() ? itemName(this.selectedSlot()!.item) : "Empty hand",
       pressure: this.multiplayer?.role === "guest" ? this.guestPressureInspector?.diagnostics
         : this.pressureRuntime?.devices.has(this.activeWayworksKey!) ? this.pressureRuntime.diagnosticsFor(this.activeWayworksKey!) : undefined,
@@ -13418,7 +13447,7 @@ export class VoxelEngine {
     this.pressureStructures.clear();
     for (const [chunk, edits] of this.world.edits) {
       const [cx, cz] = chunk.split(",").map(Number);
-      for (const [index, type] of edits) if (type === BlockId.ReinforcedWindow || type === BlockId.HangarFrame) {
+      for (const [index, type] of edits) if (type === BlockId.ReinforcedWindow || type === BlockId.HangarFrame || stationSceneStructureKind(type)) {
         this.pressureStructures.add(blockKey(cx * CHUNK_SIZE + index % CHUNK_SIZE, MIN_Y + Math.floor(index / (CHUNK_SIZE * CHUNK_SIZE)), cz * CHUNK_SIZE + Math.floor(index / CHUNK_SIZE) % CHUNK_SIZE));
       }
       if (this.multiplayer?.role === "guest") for (const [index, type] of edits) {
@@ -13429,7 +13458,7 @@ export class VoxelEngine {
     }
     this.pressureEditObserver = point => {
       const type = this.world.getBlock(point.x, point.y, point.z), key = blockKey(point.x, point.y, point.z);
-      if (type === BlockId.ReinforcedWindow || type === BlockId.HangarFrame) this.pressureStructures.add(key); else this.pressureStructures.delete(key);
+      if (type === BlockId.ReinforcedWindow || type === BlockId.HangarFrame || type !== undefined && stationSceneStructureKind(type)) this.pressureStructures.add(key); else this.pressureStructures.delete(key);
       this.pressureRuntime?.onEdit(point);
     };
     this.world.blockEditObservers.add(this.pressureEditObserver);
@@ -13534,6 +13563,7 @@ export class VoxelEngine {
       const { body, environment } = this.bodyContext();
       const intake = { x: node.x, y: node.y + 1, z: node.z };
       const stepped = advanceMachine(this.wayworks.get(node.key)!, elapsedMs, { waterAvailableMl: hasSource ? 1000 : 0,
+        radiatorBoundary: this.pressureRuntime?.machineThermalBoundary(node.key) ?? "unknown",
         atmosphere: chemistryAtmosphere(body.id, environment, this.pressureRuntime?.exteriorAt(intake) ?? false) });
       if (stepped.waterConsumedMl === 1000) {
         this.liquidCells.delete(sourceKey);
@@ -13614,13 +13644,15 @@ export class VoxelEngine {
     }
     for (const key of this.pressureStructures) {
       const [x, y, z] = key.split(",").map(Number), type = this.world.getBlock(x, y, z);
-      if (Math.hypot(x - this.position.x, y - this.position.y, z - this.position.z) > radius || type !== BlockId.ReinforcedWindow && type !== BlockId.HangarFrame) continue;
+      const structure = type === undefined ? undefined : stationSceneStructureKind(type);
+      if (Math.hypot(x - this.position.x, y - this.position.y, z - this.position.z) > radius || !structure && type !== BlockId.ReinforcedWindow && type !== BlockId.HangarFrame) continue;
       const modelKey = `structure:${key}`, kind = type === BlockId.ReinforcedWindow ? "reinforced-window" : "hangar-frame";
       let model = this.wayworksModels.get(modelKey);
-      if (model && model.userData.pressureKind !== kind) { this.clearWayworksModels(modelKey); model = undefined; }
-      if (!model) { model = createPressureModel(kind); this.wayworksModels.set(modelKey, model); this.scene.add(model); }
+      if (model && (structure ? model.userData.spaceflightKind !== structure : model.userData.pressureKind !== kind)) { this.clearWayworksModels(modelKey); model = undefined; }
+      if (!model) { model = structure ? createSpaceflightModel(structure) : createPressureModel(kind); this.wayworksModels.set(modelKey, model); this.scene.add(model); }
       visible.add(modelKey); model.position.set(x, y - .5, z); model.rotation.y = blockFacingYaw(this.worldBlockFacing(x, y, z));
-      updatePressureModel(model, { time: performance.now() / 1000 });
+      if (structure) updateSpaceflightModel(model, { time: performance.now() / 1000 });
+      else updatePressureModel(model, { time: performance.now() / 1000 });
     }
     for (const [key] of this.wayworksModels) if (!visible.has(key)) this.clearWayworksModels(key);
     const focused = wrench && this.pressureRuntime ? this.activeWayworksKey ?? [...this.pressureRuntime.devices.keys()].find(key => {
@@ -13671,6 +13703,7 @@ export class VoxelEngine {
   }
 
   openOverlay(kind: OverlayKind, key?: string) {
+    this.observatoryCharts = null;
     this.activeWayworksKey = kind === "wayworks" ? key ?? null : null;
     if (kind !== "chest" && kind !== "furnace" && kind !== "wheat-mill") this.activeNetworkContainerId = null;
     if (kind !== "wheat-mill") this.activeWheatMillKey = null;
@@ -13886,6 +13919,7 @@ export class VoxelEngine {
     this.activeNetworkContainerId = null;
     this.activeWayworksKey = null;
     this.activeNetworkFacilityId = null;
+    this.observatoryCharts = null;
     this.activeApiaryKey = null;
     this.activeMorphLoomKey = null;
     this.activeOrbRackKey = null;
@@ -19847,7 +19881,7 @@ export class VoxelEngine {
     }
     if (this.target) {
       const key = blockKey(this.target.x, this.target.y, this.target.z);
-      if (heldSlot?.item === Item.FieldWrench && (this.target.type === BlockId.ReinforcedWindow || this.target.type === BlockId.HangarFrame)) {
+      if (heldSlot?.item === Item.FieldWrench && (this.target.type === BlockId.ReinforcedWindow || this.target.type === BlockId.HangarFrame || stationStructureKind(this.target.type))) {
         const { x, y, z, type } = this.target;
         if (this.multiplayer?.role === "guest" || !this.stationActorAccess("local", x, y, z, "build")
           || this.position.distanceTo(new THREE.Vector3(x, y, z)) > 6 || this.world.getBlock(x, y, z) !== type) {
@@ -19857,7 +19891,7 @@ export class VoxelEngine {
         this.world.setBlockFacing(x, y, z, facing, true);
         this.publishBlockEdits([{ x, y, z, type, facing }], "batch");
         this.placeCooldown = .22; this.saveSoon(); this.emitHud(true);
-        this.events.onToast("Pressure structure rotated; its full-cell seal and stored atmosphere are unchanged."); return;
+        this.events.onToast("Structure rotated; its pressure seals and stored atmosphere are unchanged."); return;
       }
       if (heldSlot?.item === Item.GlassBottle) {
         const trackedTargetLiquid = this.liquidCells.get(key);
@@ -32144,7 +32178,7 @@ export class VoxelEngine {
   clearEntities() {
     for (const model of this.spaceflightModels?.values() ?? []) { model.removeFromParent(); this.disposeObject(model); }
     this.spaceflightModels?.clear();
-    this.clearWayworksModels(); this.wayworks?.clear(); this.activeWayworksKey = null; this.wayworksAccumulator = 0;
+    this.clearWayworksModels(); this.wayworks?.clear(); this.activeWayworksKey = null; this.wayworksAccumulator = 0; this.observatoryCharts = null;
     this.pressureRuntime?.dispose(); this.pressureRuntime = null;
     if (this.pressureEditObserver) this.world.blockEditObservers.delete(this.pressureEditObserver);
     this.pressureEditObserver = null; this.guestPressure = null; this.pressureStructures.clear();
@@ -33241,7 +33275,7 @@ export class VoxelEngine {
         } else if (item === Item.Banana) {
           addBox([0.1, 0.34, 0.09], [-0.08, 0, 0], 0xf4d34f, [0, 0, -0.5]);
           addBox([0.1, 0.34, 0.09], [0.08, 0.04, 0], 0xf4d34f, [0, 0, 0.5]);
-        } else if (definition.heldModel || definition.lifeSupportKind || machineKindForBlock(item) || isWayworksItem(item) || isPressurePart(item) || item === BlockId.ReinforcedWindow || item === BlockId.HangarFrame || item === Item.FieldWrench || definition.iconKind === "shield" || item === BlockId.CraftingTable || item === Item.DeepgearLanternItem || definition.useKind === "net" || (definition.useKind === "release-creature" && definition.creatureKind
+        } else if (definition.heldModel || definition.lifeSupportKind || machineKindForBlock(item) || stationStructureKind(item) || isWayworksItem(item) || isPressurePart(item) || item === BlockId.ReinforcedWindow || item === BlockId.HangarFrame || item === Item.FieldWrench || definition.iconKind === "shield" || item === BlockId.CraftingTable || item === Item.DeepgearLanternItem || definition.useKind === "net" || (definition.useKind === "release-creature" && definition.creatureKind
           && BUTTERFLY_ORDER.includes(definition.creatureKind as ButterflyKind))) {
           const selectedSlot = this.selectedSlot();
           const filledCaptureOrb = item === Item.CaptureOrb && Boolean(captureOrbFromInventorySlot(selectedSlot)?.creature);

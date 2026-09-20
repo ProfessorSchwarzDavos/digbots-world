@@ -92,7 +92,9 @@ const add = (slot: InventorySlot | null, output: MachineRecipe["output"]): Inven
 
 export type MachineStep = { state: MachineState; consumedJ: number; generatedJ: number; radiatedJ: number; fuelConsumed: number; waterConsumedMl: number; completed: string | null };
 /** No wall clock, inventory authority or world writes. Returned finite debit is committed by the host. */
-export function advanceMachine(input: MachineState, elapsedMs: number, environment: ChemistryEnvironment & { waterAvailableMl?: number } = {}): MachineStep {
+export function advanceMachine(input: MachineState, elapsedMs: number, environment: ChemistryEnvironment & {
+  waterAvailableMl?: number; radiatorBoundary?: "room" | "exterior" | "unknown";
+} = {}): MachineStep {
   const state = normalizeMachine(input, input.kind, input.locationId, input.ownerId);
   const result: MachineStep = { state, consumedJ: 0, generatedJ: 0, radiatedJ: 0, fuelConsumed: 0, waterConsumedMl: 0, completed: null };
   const dt = Number.isFinite(elapsedMs) ? Math.max(0, Math.min(1000, Math.floor(elapsedMs))) : 0;
@@ -101,7 +103,10 @@ export function advanceMachine(input: MachineState, elapsedMs: number, environme
   const before = JSON.stringify([state.energyJ, workshop]);
   // Explicit boundary flux: host deposits this heat into a known room, otherwise
   // it dissipates to the body's exterior. It never appears as electricity.
-  result.radiatedJ = Math.min(workshop.heatJ, Math.floor(2000 * (1 + workshop.upgrades.thermal) * dt / 1000));
+  const radiator = state.kind === "station-radiator";
+  const coolingW = radiator ? !state.enabled || !workshopRunning(workshop) ? 0
+    : environment.radiatorBoundary === "exterior" ? 8000 : environment.radiatorBoundary === "room" ? 2000 : 0 : 2000;
+  result.radiatedJ = Math.min(workshop.heatJ, Math.floor(coolingW * (1 + workshop.upgrades.thermal) * dt / 1000));
   workshop.heatJ -= result.radiatedJ;
   const finish = () => {
     if (JSON.stringify([state.energyJ, workshop]) !== before) state.revision += 1;
@@ -109,6 +114,10 @@ export function advanceMachine(input: MachineState, elapsedMs: number, environme
   };
   if (!state.enabled) { state.status = "disabled"; return finish(); }
   if (!workshopRunning(workshop)) { state.status = "control-off"; return finish(); }
+  if (radiator) {
+    state.status = result.radiatedJ > 0 ? "working" : workshop.heatJ > 0 ? "heat-limited" : "no-input";
+    return finish();
+  }
   if (chemistryMachine(state.kind)) {
     Object.assign(result, advanceChemistry(state, dt, environment));
     return finish();

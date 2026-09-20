@@ -11,9 +11,9 @@ import { createStationRegistry } from "../app/game/orbital-station";
 import { createSurveyHopper } from "../app/game/space-vehicle";
 import { planStationFoundation } from "../app/game/station-runtime";
 
-test("eleven flight inventory silhouettes route through the ordinary item renderer", () => {
+test("fifteen flight and station inventory silhouettes route through the ordinary item renderer", () => {
   const shapes = new Set<string>();
-  for (let item = BlockId.LaunchPad; item <= Item.SurveyHopper; item++) {
+  for (const item of [...Array.from({ length: 11 }, (_, index) => BlockId.LaunchPad + index), BlockId.StationHull, BlockId.StationBulkhead, BlockId.StationHabitation, BlockId.StationGreenhouse]) {
     assert.ok(hasSpaceflightIcon(item)); assert.ok(hasWayworksIcon(item));
     const markup = renderToStaticMarkup(createElement(WayworksIcon, { item, small: true }));
     assert.ok(markup.includes(`data-spaceflight-icon="${item}"`));
@@ -21,7 +21,7 @@ test("eleven flight inventory silhouettes route through the ordinary item render
     shapes.add(markup.replace(/data-spaceflight-icon="\d+"/, ""));
     assert.equal(markup, renderToStaticMarkup(createElement(SpaceflightIcon, { item, small: true })));
   }
-  assert.equal(shapes.size, 11);
+  assert.equal(shapes.size, 15);
   assert.equal(hasSpaceflightIcon(BlockId.MineralFrost), false);
 });
 
@@ -55,4 +55,12 @@ test("station controls render independently of the spacecraft branch", () => {
   assert.ok(markup.includes("Independent Station")); assert.ok(markup.includes("Rename station"));
   assert.ok(markup.includes("Station icon")); assert.ok(!markup.includes("Build starter station deck"));
   assert.ok(!markup.includes("Return to cockpit"), "station-only dialog has a context-appropriate close action");
+  assert.ok(markup.includes("Measurements unavailable or private"));
+  const measured = renderToStaticMarkup(createElement(SpaceflightDialog, { mission: {
+    ship: null, pad: null, route: "home-surface", costs: null, blockers: [], status: "orbit", destination: null, stations,
+    stationReadings: { station: { rooms: [{ id: "test-room", status: "sealed", volumeM3: 3, pressureKPa: 99.2, oxygenPercent: 20.1, co2Ppm: 1200,
+      temperatureC: 21.5, breathable: false, blockers: ["high-co2"], occupants: 1, reserveSeconds: 12, rates: undefined }], buffers: null } },
+  }, onClose: () => {}, onAction: () => {} }));
+  for (const text of ["Unsafe: high-co2", "99.2 kPa", "20.10%", "1200 ppm", "12 s", "Stored gas and power are private"]) assert.ok(measured.includes(text), text);
+  assert.ok(!measured.includes("Breathable now"));
 });

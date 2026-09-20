@@ -79,9 +79,25 @@ function StationControls({ station, mission, onAction }: { station: OrbitalStati
   const ship = mission.ship, registryRevision = mission.stations!.revision;
   const docked = ship ? shipDock(ship) : null, owner = station.ownerId === "local";
   const base = { stationId: station.id, registryRevision };
+  const readings = mission.stationReadings?.[station.id];
   return <section aria-label={station.name}>
     <h4>{station.name} · {station.band}</h4>
     <p>Owner {station.ownerId} · {station.pressureZoneIds.length} linked pressure zones · claim extends 24 blocks from its core.</p>
+    <details><summary>Measured habitat and power</summary>
+      {!readings ? <p>Measurements unavailable or private. Keep EVA protection until a live room check is safe.</p> : <>
+        {!readings.rooms.length && <p>No room measured by an authorized loaded controller. Fit life support and check the pressure boundary.</p>}
+        {readings.rooms.map((room, index) => <section key={room.id} aria-label={`Measured room ${index + 1}`}>
+          <p>Room {index + 1} · {room.volumeM3} m³ · {room.breathable ? "Breathable now" : `Unsafe: ${room.blockers.join(", ")}`} · {room.occupants} occupants</p>
+          <dl className="ww-readings"><div><dt>Pressure</dt><dd>{room.pressureKPa.toFixed(1)} kPa</dd></div>
+            <div><dt>Oxygen</dt><dd>{room.oxygenPercent.toFixed(2)}%</dd></div><div><dt>CO₂</dt><dd>{room.co2Ppm} ppm</dd></div>
+            <div><dt>Temperature</dt><dd>{room.temperatureC.toFixed(1)} °C</dd></div></dl>
+          <p>Room O₂ reserve at current consumption: {room.reserveSeconds === null ? "not estimable" : `${room.reserveSeconds} s`}. This excludes supplies and does not predict CO₂, heat or pressure failure.</p>
+          {room.rates && <p>O₂ use / plant production: {room.rates.oxygenConsumedMmolPerSecond} / {room.rates.oxygenProducedMmolPerSecond} mmol/s. CO₂ production / removal: {room.rates.co2ProducedMmolPerSecond} / {room.rates.co2RemovedMmolPerSecond} mmol/s. Gas inflow / outflow: {room.rates.inflowMmolPerSecond} / {room.rates.outflowMmolPerSecond} mmol/s.</p>}
+        </section>)}
+        {readings.buffers ? <p>Authorized loaded buffers: {(readings.buffers.energyJ / 1000).toFixed(1)} / {(readings.buffers.capacityJ / 1000).toFixed(1)} kJ; {(readings.buffers.oxygenMl / 1000).toFixed(2)} standard L stored O₂. {readings.buffers.noPower} machines waiting for power; {readings.buffers.disabled} disabled or control-gated. Measured habitat draw: {readings.buffers.habitatDrawW} W. Buffers are not necessarily connected to the same grid.</p>
+          : <p>Stored gas and power are private; container permission is separate from life-support access.</p>}
+      </>}
+    </details>
     {Object.values(station.docks).map(dock => <div className="ww-controls" key={dock.id}>
       <span>Collar [{dock.position.join(", ")}] · {dock.occupant ? "Occupied" : "Open"}</span>
       {ship && <button type="button" disabled={!!ship.trip || (!!dock.occupant && dock.occupant.vehicleId !== ship.vehicleId)} onClick={() => onAction({ kind: "station-dock", ...base,

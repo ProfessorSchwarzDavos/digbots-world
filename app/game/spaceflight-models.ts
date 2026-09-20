@@ -3,6 +3,7 @@ import * as THREE from "three";
 export const SPACEFLIGHT_MODEL_KINDS = [
   "survey-hopper", "launch-pad", "fuel-gantry", "mission-console", "tracking-beacon",
   "orbital-dock", "recovery-crane", "station-core", "station-truss", "station-radiator", "station-observatory",
+  "station-hull", "station-bulkhead", "station-habitation", "station-greenhouse",
 ] as const;
 export type SpaceflightModelKind = typeof SPACEFLIGHT_MODEL_KINDS[number];
 export type SpaceflightModelState = Readonly<{
@@ -37,7 +38,7 @@ export function createSpaceflightModel(kind: SpaceflightModelKind, state: Spacef
   const colors = {
     iron: 0x839597, ivory: 0xe0d7bb, copper: 0xc18a62, dark: 0x344b50,
     glass: 0x285d64, fuel: 0xd99b52, oxygen: 0x78beca, lamp: 0xf1cc88,
-    flame: 0xf2a85c, hot: 0xffe1a1,
+    flame: 0xf2a85c, hot: 0xffe1a1, leaf: 0x78a878, soil: 0x68564b, fabric: 0xb49b77,
   };
   type Surface = keyof typeof colors;
   // Lazily allocate only used surfaces; all allocations remain reachable by
@@ -100,6 +101,45 @@ export function createSpaceflightModel(kind: SpaceflightModelKind, state: Spacef
   };
 
   switch (kind) {
+    case "station-hull": {
+      box(root, "airtight-hull-shell", .99, 1, .99, "ivory", 0, .5, 0);
+      for (const x of [-.477, .477]) for (const z of [-.477, .477]) box(root, "hull-seam-post", .046, 1, .046, "iron", x, .5, z);
+      for (const y of [.035, .965]) {
+        for (const z of [-.494, .494]) box(root, "hull-copper-edge", .9, .035, .012, "copper", 0, y, z);
+        for (const x of [-.494, .494]) box(root, "hull-copper-edge", .012, .035, .9, "copper", x, y, 0);
+      }
+      break;
+    }
+    case "station-bulkhead": {
+      box(root, "airtight-bulkhead-core", .96, 1, .96, "iron", 0, .5, 0);
+      for (const z of [-.485, .485]) {
+        box(root, "bulkhead-enamel-inset", .76, .76, .025, "ivory", 0, .5, z);
+        box(root, "bulkhead-cross-brace", .84, .035, .026, "copper", 0, .5, z);
+        box(root, "bulkhead-cross-brace", .035, .84, .026, "copper", 0, .5, z);
+      }
+      for (const x of [-.47, .47]) box(root, "bulkhead-edge-frame", .06, 1, 1, "iron", x, .5, 0);
+      break;
+    }
+    case "station-habitation": {
+      for (const x of [-.36, .36]) for (const z of [-.3, .3]) box(root, "bench-deck-anchor", .09, .3, .09, "iron", x, .15, z);
+      box(root, "bench-stowage-shelf", .72, .06, .6, "ivory", 0, .13, 0);
+      box(root, "bench-copper-frame", .88, .09, .78, "copper", 0, .325, 0);
+      box(root, "habitation-upholstered-seat", .83, .13, .73, "fabric", 0, .435, 0);
+      for (const x of [-.23, .23]) box(root, "bench-cushion-seam", .018, .006, .69, "dark", x, .499, 0);
+      break;
+    }
+    case "station-greenhouse": {
+      for (const x of [-.33, .33]) for (const z of [-.3, .3]) box(root, "tray-foot", .075, .2, .075, "iron", x, .1, z);
+      box(root, "greenhouse-root-tray", .88, .17, .82, "ivory", 0, .265, 0);
+      box(root, "greenhouse-growing-medium", .76, .025, .7, "soil", 0, .36, 0);
+      for (const x of [-.2, .2]) for (const z of [-.18, .18]) {
+        const plant = group(root, "greenhouse-planted-shoot", x, .37, z);
+        box(plant, "plant-stem", .027, .31, .027, "leaf", 0, .155, 0);
+        for (const side of [-1, 1]) box(plant, "plant-leaf", .16, .025, .11, "leaf", side * .07, .16 + side * .04, 0).rotation.z = side * .45;
+        box(plant, "plant-new-growth", .09, .025, .08, "leaf", .025, .31, 0).rotation.z = .6;
+      }
+      break;
+    }
     case "survey-hopper": {
       cylinder(root, "heatshield-rim", 1.09, 1.03, .19, "copper", 0, 1.14, 0);
       cylinder(root, "riveted-pressure-hull", 1.03, 1.03, 1.67, "ivory", 0, 2.055, 0);

@@ -14,6 +14,7 @@ const SEAT_BLOCKS = new Set<BlockId>([
   BlockId.DwarfStool,
   BlockId.HearthChair,
   BlockId.MoonboughChair,
+  BlockId.StationHabitation,
 ]);
 
 export function isSeatBlock(block: BlockId | undefined) {

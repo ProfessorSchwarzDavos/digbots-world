@@ -1,5 +1,23 @@
 Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks; add double-tap-forward sprinting; build scalable butterfly exhibit blocks with inventories, flowers, landing behavior, and capacity up to about 20 connected blocks; make recipe-book hover previews and click-to-fill crafting, fix crafting/furnace arrows, add recipe search and mirrored recipes; animate and flow water, improve swimming/shore exits, add oxygen; add ocean, river, and underground fish; add a larger two-seat sailboat with crouch-use chest storage; fix third-person vertical controls and interaction; allow mobs through open doors; remove tree-growth notices; add five surface mobs, birds, desert plants/features, desert and forest temple POIs with chests, a new enemy, and rare magical durable loot; add a tameable breedable banana-rabbit pet with naming and commands; add metadata-preserving creature cages; add male/female player choice with multiplayer, armor, and held-item representation; add a banana-rabbit POI; add visible game versions and save-version metadata plus title-screen fullscreen; add skeleton archery; optimize and benchmark 10-default/16-max render distance with separate 6-8 simulation distance; rework clouds and biome-sensitive weather; enrich meadow grass, flowers, butterflies, and a large butterfly POI. Do all of it thoughtfully and report only when entirely done.
 
+## Celestial Frontiers CF6 — station kit integration
+
+- Added append-only craftable station hull/bulkhead/bench/greenhouse (708–711),
+  authored held/world/icon presentation and usable seating. Sealed panels use
+  ordinary culled chunk meshes; open furnishings use bounded scene models.
+- Explicit seal policy separates open flight hardware from pressure walls.
+  Greenhouse converts finite CO2 only under real daylight/sky exposure; radiator
+  cooling uses measured room/exterior/unknown boundaries and finite imported heat.
+- Station readings aggregate only authorized physically present local rooms and
+  stores. Observatory refresh atomically spends 1 kJ into heat for filtered
+  read-only System/Orbital charts, without requiring a spacecraft.
+- Integrated station-kit-r5:84 PASS; static-r39 PASS. Earlier frozen test-fixture
+  mutation failure corrected; all failed receipts preserved. Lint/build/browser
+  and occupied endurance are pending; this is not full CF6 acceptance.
+- Fresh chart helper completed four nonoverlapping files/12 tests; one fresh
+  endurance helper owns only a new test file. Parent retains runtime, shared
+  integration, builds, Git and browser. Full remaining CF6/CFV and CF7 gate persist.
+
 ## Celestial Frontiers CF6 — placement preflight correction
 
 - Strict station cold-custody audit caught a real rejected-placement side effect:

@@ -2,6 +2,7 @@ import { locationId, parseLocationId, type LocationId, type LocationStamp } from
 import { planSpaceVehicleTravel, SURVEY_HOPPER_CAPACITY, VEHICLE_RESOURCES, type SpaceVehicleState, type VehicleResource, type VehicleResources } from "./space-vehicle";
 import type { LaunchPadCheck } from "./spaceflight-infrastructure";
 import type { StationAccess, StationAssociation, StationPosition, StationRegistrySave } from "./orbital-station";
+import type { StationTelemetry } from "./station-telemetry";
 
 export const FIRST_FLIGHT_ROUTES = ["home-orbit", "home-surface", "morrow-orbit", "morrow-surface"] as const;
 export type FirstFlightRoute = typeof FIRST_FLIGHT_ROUTES[number];
@@ -16,6 +17,7 @@ export type SpaceflightMission = {
   ship: SpaceVehicleState | null; pad: LaunchPadCheck | null; route: FirstFlightRoute;
   costs: VehicleResources | null; blockers: string[]; status: string; destination: LocationId | null;
   stations?: StationRegistrySave | null;
+  stationReadings?: Record<string, StationTelemetry | null>;
 };
 /** Station authority has its own revision and does not depend on a nearby ship. */
 export type StationManagementIntent =
@@ -25,6 +27,7 @@ export type StationManagementIntent =
   | { kind: "station-habitat" | "station-cabin"; stationId: string; registryRevision: number };
 export type SpaceflightIntent =
   | { kind: "deploy" }
+  | { kind: "observatory-read" }
   | { kind: "route"; route: FirstFlightRoute }
   | { kind: "supply"; resource: VehicleResource; vehicleRevision: number }
   | { kind: "board" | "consent" | "leave" | "abort" | "launch" | "retry-arrival"; vehicleRevision: number }

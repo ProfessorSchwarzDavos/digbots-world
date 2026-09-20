@@ -1,7 +1,8 @@
 "use client";
 import { BlockId, Item, type ItemCode } from "./data";
+import { stationStructureKind } from "./station-kit";
 
-export const hasSpaceflightIcon = (item: ItemCode) => item >= BlockId.LaunchPad && item <= Item.SurveyHopper;
+export const hasSpaceflightIcon = (item: ItemCode) => item >= BlockId.LaunchPad && item <= Item.SurveyHopper || !!stationStructureKind(item);
 
 /** Small, shape-coded counterparts of the actual brass/ceramic flight hardware. */
 export function SpaceflightIcon({ item, small = false }: { item: ItemCode; small?: boolean }) {
@@ -16,6 +17,9 @@ export function SpaceflightIcon({ item, small = false }: { item: ItemCode; small
         : item === BlockId.RecoveryCrane ? <><path d="M4 36h17M11 35V5h22v6H11" fill="none" stroke="#839597" strokeWidth="4" /><path d="M30 11v12q-8-2-5 5t8-2" fill="none" stroke="#c18a62" strokeWidth="3" /></>
         : item === BlockId.StationTruss ? <><path d="M7 4h26v32H7Z" fill="none" strokeWidth="3" /><path d="m7 4 26 32M33 4 7 36M7 20h26" fill="none" stroke="#c18a62" /></>
         : item === BlockId.StationRadiator ? <><path d="M18 3h4v34h-4ZM3 7h12v27H3Zm22 0h12v27H25Z" />{[12, 18, 24, 30].map(y => <path key={y} d={`M4 ${y}h10m12 0h10`} stroke="#c18a62" />)}</>
+        : item === BlockId.StationHull || item === BlockId.StationBulkhead ? <><rect x="4" y="4" width="32" height="32" rx="1" /><path d="M8 5v30M32 5v30M5 9h30M5 31h30" fill="none" stroke="#c18a62" />{item === BlockId.StationBulkhead && <path d="m10 11 20 18M30 11 10 29" fill="none" stroke="#839597" strokeWidth="4" />}</>
+        : item === BlockId.StationHabitation ? <><path d="M7 24v12m26-12v12M7 31h26" stroke="#839597" strokeWidth="3" /><rect x="3" y="15" width="34" height="10" rx="2" fill="#b49b77" /><path d="M14 16v8m12-8v8" /></>
+        : item === BlockId.StationGreenhouse ? <><path d="M5 25h30l-3 9H8Z" /><path d="M13 26V8m14 18V8" stroke="#78a878" strokeWidth="3" /><path d="M13 19Q3 17 6 10q8 0 7 9Zm0-6q11-2 8-9-9 1-8 9Zm14 9q-9-1-8-8 9 0 8 8Zm0-6q10-1 8-9-9 1-8 9Z" fill="#78a878" /></>
         : <><path d="M7 5h26v31H7Z" /><path d="M4 4h32v5H4Zm0 28h32v8H4Z" fill="#c18a62" /><circle cx="20" cy="19" r="8" fill="#285d64" /><path d="M20 13v12m-6-6h12" stroke="#78beca" /></>}
     </g>
   </svg>;

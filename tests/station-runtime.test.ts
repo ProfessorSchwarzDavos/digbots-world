@@ -11,6 +11,8 @@ import { planStationFoundation, planStationCabin, planStationDock, planStationDo
 import { createMachine } from "../app/game/wayworks";
 import { composeUniverseSave, splitUniverseSave } from "../app/game/universe-save";
 import { flightFixture } from "./spaceflight-fixtures";
+import { measureStation } from "../app/game/station-telemetry";
+import type { PressureRuntime } from "../app/game/pressure-runtime";
 
 const universe = universeId("station-runtime"), orbit = locationId({ ...homeLocation(universe), kind: "orbit", instanceId: "low" });
 const actor = { actorId: "local", factionIds: [], guildIds: [] };
@@ -31,6 +33,60 @@ function founded() {
   for (const block of plan.blocks) f.cells.set(`${block.x},${block.y},${block.z}`, block.type);
   return { ...f, registry: plan.registry, inventory: plan.inventory, blocks: plan.blocks };
 }
+
+test("station telemetry counts only authorized physically loaded local buffers and keeps service separate from storage", () => {
+  const f = founded(), station = structuredClone(f.registry.stations.station), machines = new Map<string, ReturnType<typeof createMachine>>();
+  const add = (key: string, kind: "field-battery" | "gas-tank", owner = "local") => {
+    const value = createMachine(kind, orbit, owner); machines.set(key, value);
+    f.cells.set(key, kind === "gas-tank" ? BlockId.GasTank : BlockId.FieldBattery); return value;
+  };
+  const battery = add("8,32,1", "field-battery"); battery.energyJ = 5000;
+  const gas = add("9,32,1", "gas-tank"); gas.workshop.chemical = { resource: "oxygen", amount: 24000 };
+  add("10,32,1", "field-battery", "private-other").energyJ = 7777;
+  add("100,32,1", "field-battery").energyJ = 8888;
+  add("8,32,2", "field-battery").energyJ = 9999; f.cells.delete("8,32,2");
+  add("8,32,3", "field-battery").locationId = "foreign";
+  const pressure: Pick<PressureRuntime, "devices" | "diagnosticsFor"> = { devices: new Map(), diagnosticsFor: () => assert.fail("No pressure device is present") };
+  const input = { station, actor, machines, pressure, blockAt: f.blockAt };
+  const before = structuredClone(machines), measured = measureStation(input)!;
+  assert.equal(measured.buffers?.energyJ, 5000); assert.equal(measured.buffers?.oxygenMl, 24000);
+  assert.equal(measured.buffers?.machines, 2); assert.deepEqual(measured.rooms, []); assert.deepEqual(machines, before);
+  const guest = { ...actor, actorId: "guest" };
+  assert.equal(measureStation({ ...input, actor: guest }), null);
+  station.access["life-support"] = "public"; battery.workshop.trusted.push("guest"); gas.workshop.trusted.push("guest");
+  assert.equal(measureStation({ ...input, actor: guest })?.buffers, null, "service must not disclose finite stores");
+  station.access.container = "public";
+  assert.equal(measureStation({ ...input, actor: guest })?.buffers?.energyJ, 5000);
+  f.cells.delete(station.corePosition.join(",")); assert.equal(measureStation(input), null, "removed core invalidates station measurements");
+});
+
+test("actual observatory request debits finite electricity into heat and exposes only filtered chart data", async () => {
+  const f = founded(), key = "8,33,0", messages: string[] = [];
+  f.cells.set(key, BlockId.StationObservatory);
+  const instrument = createMachine("station-observatory", orbit, "local"); instrument.energyJ = 2000;
+  const engine = Object.assign(Object.create(VoxelEngine.prototype), {
+    persistent: true, activeWorldId: universe, locationTransitioning: false, spaceflightBusy: false, pendingSpaceArrival: null,
+    orbitalStations: f.registry, spacefleet: { schema: 1, vehicles: {} }, activeWayworksKey: key,
+    wayworks: new Map([[key, instrument]]), position: new THREE.Vector3(8, 32.5, 2),
+    world: { locationScope: { locationId: orbit }, getBlock: f.blockAt }, universeTimeSeconds: 12345,
+    events: { onToast: (message: string) => messages.push(message) }, emitHud: () => {}, saveSoon: () => {},
+  }) as VoxelEngine;
+  const intent = { kind: "observatory-read" as const }, original = structuredClone(instrument);
+  assert.equal(await engine.spaceflightAction(intent), false, "revision required for the paid read");
+  instrument.enabled = false; assert.equal(await engine.spaceflightAction(intent, 0), false); instrument.enabled = true;
+  engine.position.x += 10; assert.equal(await engine.spaceflightAction(intent, 0), false); engine.position.x -= 10;
+  Reflect.set(engine, "multiplayer", { role: "guest" }); assert.equal(await engine.spaceflightAction(intent, 0), false); Reflect.set(engine, "multiplayer", null);
+  assert.deepEqual(engine.wayworks.get(key), original);
+  assert.equal(await engine.spaceflightAction(intent, 0), true, messages.at(-1));
+  const paid = engine.wayworks.get(key)!;
+  assert.equal(paid.energyJ, 1000); assert.equal(paid.workshop.heatJ, 1000); assert.equal(paid.revision, 1);
+  const charts = Reflect.get(engine, "observatoryCharts");
+  assert.deepEqual(charts.system.bodies.map((body: { id: string }) => body.id), ["waystar", "blockwild", "blockwild/morrow"]);
+  for (const hidden of ["talon", "hollowmere", "Cinderhymn", "catalog"]) assert.ok(!JSON.stringify(charts).includes(hidden));
+  assert.equal(await engine.spaceflightAction(intent, 0), false); assert.deepEqual(engine.wayworks.get(key), paid);
+  assert.equal(await engine.spaceflightAction(intent, 1), true); assert.equal(engine.wayworks.get(key)!.energyJ, 0);
+  assert.equal(await engine.spaceflightAction(intent, 2), false); assert.equal(engine.wayworks.get(key)!.workshop.heatJ, 2000);
+});
 
 test("finite starter deck consumes exactly the empty kit and never makes gas, energy or a new ship", () => {
   const f = fixture(), shipBefore = structuredClone(f.ship), plan = f.plan();

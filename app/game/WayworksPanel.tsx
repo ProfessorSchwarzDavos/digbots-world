@@ -12,6 +12,8 @@ import { PressurePanel } from "./PressurePanel";
 import type { PressureRuntime } from "./pressure-runtime";
 import { SpaceflightPanel } from "./SpaceflightPanel";
 import type { SpaceflightIntent, SpaceflightMission } from "./spaceflight-mission";
+import { CelestialChart } from "./CelestialChart";
+import type { CelestialChartProjection } from "./celestial-chart";
 
 export type WayworksFace = "front" | "back" | "left" | "right" | "top" | "bottom";
 export type WayworksPortMode = "disabled" | "input" | "output" | "both" | "passive" | "pull" | "service";
@@ -32,6 +34,8 @@ export type WayworksPanelProps = Readonly<{
   feedback?: string;
   workshop?: WorkshopState;
   pressureOnly?: boolean;
+  radiatorBoundary?: "room" | "exterior" | "unknown";
+  observatoryCharts?: { system: CelestialChartProjection; orbit: CelestialChartProjection } | null;
   pressure?: ReturnType<PressureRuntime["diagnosticsFor"]>;
   flight?: SpaceflightMission;
   onFlightAction?: (action: SpaceflightIntent) => void;
@@ -67,9 +71,9 @@ export function WayworksPanel(props: WayworksPanelProps) {
   const supported = supportedWorkshopUpgrades(kind as MachineKind);
   const moduleKinds = UPGRADE_KINDS.filter(upgrade => supported.includes(upgrade) || workshop.upgrades[upgrade] > 0);
   const passiveTank = kind === "fluid-tank" || kind === "gas-tank";
-  const statusLabels: Record<string, string> = { idle: "Idle", disabled: "Disabled", "no-power": "Waiting for power", "no-input": "Waiting for ingredients", "no-fuel": kind === "heat-engine" ? "Waiting for fuel or supplied heat" : "Waiting for fuel",
+  const statusLabels: Record<string, string> = { idle: "Idle", disabled: "Disabled", "no-power": "Waiting for power", "no-input": kind === "station-radiator" ? "No stored heat to reject" : "Waiting for ingredients", "no-fuel": kind === "heat-engine" ? "Waiting for fuel or supplied heat" : "Waiting for fuel",
     "output-blocked": "Output full or incompatible", "no-water": kind === "waterwheel-generator" ? "Needs flowing water beside the wheel" : "Needs a water source directly below", "no-sun": "No sunlight reaching panel", "no-wind": "No usable wind / rotor obstructed",
-    "control-off": "Stopped by control signal", "heat-limited": "Cooling before next cycle", "buffer-full": "Storage full", working: "Processing", generating: "Generating power", transferring: "Transferring power" };
+    "control-off": "Stopped by control signal", "heat-limited": kind === "station-radiator" ? "Thermal boundary unverified; heat retained" : "Cooling before next cycle", "buffer-full": "Storage full", working: kind === "station-radiator" ? "Rejecting stored heat" : "Processing", generating: "Generating power", transferring: "Transferring power" };
   const validGauge = Number.isFinite(energyJ) && Number.isFinite(capacityJ) && capacityJ > 0;
   const fill = validGauge ? Math.min(100, Math.max(0, energyJ / capacityJ * 100)) : 0;
   const direction = Number.isInteger(facing) ? directions[facing] : undefined;
@@ -113,6 +117,12 @@ export function WayworksPanel(props: WayworksPanelProps) {
         {feedback && <p className="ww-feedback" role="status" aria-live="polite">{feedback}</p>}
 
         <div className="ww-body">
+          {kind === "station-observatory" && <section aria-label="Observatory chart reader">
+            <p className="ww-help">Read the first-flight chart for Waystar, Blockwild and Morrow, plus your current body. This snapshot includes only authorized local station points. Reading consumes 1 kJ and transfers it to the instrument heat buffer; no travel or hidden-world discovery is granted.</p>
+            <button type="button" disabled={!enabled || energyJ < 1000 || !props.onFlightAction} onClick={() => props.onFlightAction?.({ kind: "observatory-read" })}>Read first-flight chart · 1 kJ</button>
+            {props.observatoryCharts && <CelestialChart charts={props.observatoryCharts} initialMode="orbit" />}
+          </section>}
+          {kind === "station-radiator" && <p className="ww-help">Thermal boundary: {props.radiatorBoundary ?? "unknown"}. Connect imported heat through a Heat Conduit. Exposed panels reject up to {8 * (1 + workshop.upgrades.thermal)} kW; indoor panels transfer up to {2 * (1 + workshop.upgrades.thermal)} kW into the measured room. No electricity or coolant is created or consumed. Unknown boundaries retain heat.</p>}
           {props.flight && props.onFlightAction && <SpaceflightPanel mission={props.flight} onAction={props.onFlightAction} />}
           <div className="ww-state-line">
             <span className="ww-switch-state">{enabled ? "Enabled" : "Disabled"}</span>

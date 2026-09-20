@@ -1,5 +1,6 @@
 import { PRESSURE_CATALOG } from "./pressure-catalog";
 import { SPACEFLIGHT_CATALOG } from "./spaceflight-catalog";
+import { STATION_STRUCTURE_CATALOG, stationStructureKind } from "./station-kit";
 
 export enum BlockId {
   Air = 0,
@@ -396,6 +397,10 @@ export enum BlockId {
   StationObservatory = 702,
   PaleRegolith = 704,
   MineralFrost = 705,
+  StationHull = 708,
+  StationBulkhead = 709,
+  StationHabitation = 710,
+  StationGreenhouse = 711,
 }
 
 export const Item = {
@@ -1193,6 +1198,8 @@ export const BLOCKS: Record<number, BlockDefinition> = {
   [BlockId.GasTank]: block(BlockId.GasTank, "Gas Tank", 40, 40, 40, 3, "#bbbe9a", "pickaxe", 1, { layer: "none", shape: "wayworks" }),
   ...Object.fromEntries(Object.values(PRESSURE_CATALOG).map(def => [def.id, block(def.id, def.name, 40, 40, 40, 3, def.color, "pickaxe", 1, { layer: "none", shape: "wayworks" })])),
   ...Object.fromEntries(Object.values(SPACEFLIGHT_CATALOG).map(def => [def.id, block(def.id, def.name, 40, 40, 40, 4, def.color, "pickaxe", 1, { layer: "none", shape: "wayworks" })])),
+  ...Object.fromEntries(Object.values(STATION_STRUCTURE_CATALOG).map(def => [def.id, block(def.id, def.name, 40, 40, 40, 3, def.color, "pickaxe", 1,
+    { layer: def.sealMask === 63 ? "opaque" : "none", shape: def.sealMask === 63 ? "cube" : "wayworks", lightDampening: def.sealMask === 63 ? 15 : 0, ...(def.sealMask === 0 ? { collisionHeight: .5 } : {}) })])),
   [BlockId.PaleRegolith]: block(BlockId.PaleRegolith, "Pale Regolith", 9, 9, 9, 1.2, "#b5bbb0", "shovel", 0),
   [BlockId.MineralFrost]: block(BlockId.MineralFrost, "Mineral Frost", 21, 21, 21, 1.5, "#a8dbd0", "pickaxe", 0),
   [BlockId.ReinforcedWindow]: block(BlockId.ReinforcedWindow, "Reinforced Window", 12, 12, 12, 3, "#b4d9d5", "pickaxe", 1, { layer: "none", shape: "wayworks" }),
@@ -1640,7 +1647,7 @@ for (const definition of Object.values(BLOCKS)) {
     id: definition.id,
     name: definition.name,
     color: definition.color,
-    maxStack: definition.shape === "wayworks" && ![BlockId.GridCable, BlockId.LiquidPipe, BlockId.Gasline, BlockId.HeatConduit, BlockId.ReinforcedWindow, BlockId.HangarFrame].includes(definition.id) ? 1 : 64,
+    maxStack: definition.shape === "wayworks" && !stationStructureKind(definition.id) && ![BlockId.GridCable, BlockId.LiquidPipe, BlockId.Gasline, BlockId.HeatConduit, BlockId.ReinforcedWindow, BlockId.HangarFrame].includes(definition.id) ? 1 : 64,
     placeBlock: definition.id,
     ...(["cross", "tall-flower", "aquatic"].includes(definition.shape ?? "") ? { worldTextureBlock: definition.id } : {}),
     ...(definition.id === BlockId.CraftingTable ? { iconKind: "crafting-table" as const } : {}),
@@ -2588,6 +2595,14 @@ const spaceflightCraftCore: Record<keyof typeof SPACEFLIGHT_CATALOG, number> = {
 };
 
 export const RECIPES: Recipe[] = [
+  { id: "station-hull", name: "Station Hull", width: 3, height: 2,
+    pattern: [Item.IronSheet, Item.PressurePolymer, Item.IronSheet, Item.IronSheet, Item.CopperSheet, Item.IronSheet], output: { item: BlockId.StationHull, count: 8 }, table: true },
+  { id: "station-bulkhead", name: "Station Bulkhead", width: 3, height: 1,
+    pattern: [BlockId.StationHull, Item.MachineAlloy, BlockId.StationHull], output: { item: BlockId.StationBulkhead, count: 2 }, table: true },
+  { id: "station-habitation", name: "Habitation Bench", width: 3, height: 2,
+    pattern: [Item.Fiber, Item.Fiber, Item.Fiber, Item.IronSheet, BlockId.StationHull, Item.IronSheet], output: { item: BlockId.StationHabitation, count: 1 }, table: true },
+  { id: "station-greenhouse", name: "Greenhouse Tray", width: 3, height: 2,
+    pattern: [BlockId.WildwoodSapling, BlockId.Dirt, BlockId.WildwoodSapling, Item.IronSheet, BlockId.StationHull, Item.IronSheet], output: { item: BlockId.StationGreenhouse, count: 1 }, table: true },
   { id: "survey-hopper", name: "Survey Hopper", width: 3, height: 3,
     pattern: [Item.MachineAlloy, BlockId.ReinforcedWindow, Item.MachineAlloy, BlockId.ShipBatteryBank, Item.GearCluster, BlockId.LifeSupportController, Item.MachineAlloy, BlockId.HeatEngine, Item.MachineAlloy],
     output: { item: Item.SurveyHopper, count: 1 }, table: true },

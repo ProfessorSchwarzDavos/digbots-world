@@ -784,10 +784,12 @@ import {
   type WorldOptions,
 } from "./world-storage";
 import { UniverseWorldStorage as WorldStorage } from "./universe-world-storage";
-import { homeLocation, locationAddress, locationId, parseLocationId, sameLocationStamp, universeId } from "./location-address";
+import { homeLocation, locationAddress, locationId, parseLocationId, sameLocationStamp, universeId, type LocationId } from "./location-address";
 import { splitUniverseSave, composeUniverseSave } from "./universe-save";
 import { validateAgentCustody, type AgentCustodySave } from "./agent-custody";
 import { resetLocationTransients, validateLocationPlayerState, validLocationVelocity, type LocationPlayerState } from "./location-manager";
+import { validateSpacefleetSave, type SpacefleetSave } from "./space-vehicle";
+import type { VehicleLocationCommit } from "./universe-storage";
 import {
   TYPESCRIPT_AGENT_ID_KEY,
   TYPESCRIPT_MULTIPLAYER_PLAYER_ID_KEY,
@@ -1565,6 +1567,8 @@ export type WorldSave = {
   wheatMills?: Record<string, WheatMillState>;
   wayworks?: Record<string, MachineState>;
   pressure?: PressureSave;
+  /** One universe-owned table; ships never live in both departing/arriving shards. */
+  spacefleet?: SpacefleetSave;
   chests: Record<string, ChestState>;
   contextualLoot?: ContextualLootWorldState;
   roadEvents?: Record<string, RoadEventState>;
@@ -4265,6 +4269,7 @@ export class VoxelEngine {
   wayworksTopology = new PowerTopologyCache();
   wayworksMaterialTopology = new MaterialTopologyCache();
   pressureRuntime: PressureRuntime | null = null;
+  spacefleet: SpacefleetSave = { schema: 1, vehicles: {} };
   guestPressure: PressurePresentation | null = null;
   guestPressureInspector: PressureInspector | null = null;
   pressureInspectorSequence = 0;
@@ -4543,6 +4548,7 @@ export class VoxelEngine {
   agentInventoryRevisions = new Map<string, number>();
   agentReturningMaterials = new Map<string, InventorySlot[]>();
   private locationTransitioning = false;
+  private pendingSpaceArrival: { destination: LocationId; save: WorldSave; input: VehicleLocationCommit; running: boolean; paused: boolean; overlay: boolean } | null = null;
   /** Additive legacy metadata is retained but never interpreted by gameplay. */
   private saveExtensions: Record<string, unknown> = {};
   agentObservationSequences = new Map<string, number>();
@@ -5384,6 +5390,8 @@ export class VoxelEngine {
     this.level = 0;
     this.selected = 0;
     this.inventory = initialInventoryForMode(mode);
+    this.spacefleet = { schema: 1, vehicles: {} };
+    this.pendingSpaceArrival = null;
     this.equipment = blankEquipment();
     this.offhand = null;
     this.offhandUseHeld = false;
@@ -6024,10 +6032,12 @@ export class VoxelEngine {
   }
 
   loadWorld(save: WorldSave, options: Partial<WorldOptions> = save.options ?? {}, worldId: string | null = this.worldStorage.activeWorldId) {
+    const spacefleet = validateSpacefleetSave(save.spacefleet);
     const agentCustody = validateAgentCustody(save.agentCustody);
     const locationPlayer = validateLocationPlayerState(save.locationPlayerState);
     const extensions = splitUniverseSave(save).extensions;
     this.resetLocationRuntime();
+    this.spacefleet = spacefleet;
     this.saveExtensions = { ...extensions };
     for (const [id, record] of Object.entries(agentCustody.agents)) {
       this.agentInventories.set(id, record.inventory.map(cloneSlot));
@@ -6326,6 +6336,7 @@ export class VoxelEngine {
       this.events.onToast(`Capture system updated: ${normalizedOrbs} orb record${normalizedOrbs === 1 ? "" : "s"} normalized, ${captureMigration["lens-orb"]} lens kit${captureMigration["lens-orb"] === 1 ? "" : "s"} refunded, and stored creatures preserved.`);
     }
     this.emitHud(true);
+    this.pendingSpaceArrival = null;
   }
 
   async loadStoredWorld(id: string) {
@@ -6595,6 +6606,45 @@ export class VoxelEngine {
     if (!loaded.ok || loaded.value.save.agentTestWorld !== true) return { ok: false as const, code: "test_world_not_found" };
     if (!await this.loadStoredWorld(worldId)) return { ok: false as const, code: "world_load_failed" };
     return { ok: true as const, world: { ...loaded.value.metadata } };
+  }
+
+  /** Host-owned final boundary. Normal flight supplies a generated destination;
+   * no origin renderer/worker/inventory is retired before the IDB commit. */
+  async commitSpaceVehicleLocation(vehicleId: string, initialDestinationSave?: WorldSave, landingPosition?: [number, number, number]) {
+    if (!this.persistent || !this.activeWorldId || this.multiplayer?.role === "guest" || this.locationTransitioning) return { ok: false as const, code: "vehicle_authority_denied" };
+    const vehicle = (this.pendingSpaceArrival?.save.spacefleet ?? this.spacefleet).vehicles[vehicleId];
+    if (!vehicle?.trip || vehicle.trip.status !== "commit-ready" || !vehicle.passengers.some(p => p.actorId === "local")) return { ok: false as const, code: "vehicle_arrival_not_ready" };
+    if (this.pendingSpaceArrival && this.pendingSpaceArrival.input.vehicleId !== vehicleId) return { ok: false as const, code: "another_arrival_pending" };
+    const previous = this.pendingSpaceArrival ?? { running: this.running, paused: this.paused, overlay: this.gameplayOverlayOpen };
+    this.locationTransitioning = true; this.running = false; this.paused = true;
+    try {
+      if (!this.pendingSpaceArrival) {
+        if (!await this.saveNow(false)) return { ok: false as const, code: "origin_checkpoint_failed" };
+        const input: VehicleLocationCommit = { transactionId: vehicle.trip.id, checkpointId: crypto.randomUUID(), vehicleId,
+          expectedVehicleRevision: vehicle.revision, landingPosition: landingPosition ?? [...vehicle.transform.position],
+          ...(initialDestinationSave ? { initialDestinationSave } : {}) };
+        this.pendingSpaceArrival = { ...previous, destination: vehicle.trip.destination, save: this.serialize(), input };
+      }
+      const attempt = this.pendingSpaceArrival;
+      const result = await this.worldStorage.transitionVehicleLocation(attempt.destination, attempt.save, attempt.input);
+      if (!result.ok) {
+        this.persistenceError = `${result.error.message} Arrival paused: retry the same arrival or reopen the committed world.`;
+        this.reportPersistence(); this.events.onToast(this.persistenceError);
+        return { ok: false as const, code: result.error.code };
+      }
+      this.loadWorld(result.value.save, result.value.options, result.value.metadata.id);
+      this.pendingSpaceArrival = null;
+      return { ok: true as const, location: this.world.locationScope };
+    } catch (error) {
+      this.persistenceError = `Arrival paused: ${error instanceof Error ? error.message : String(error)}. Retry or reopen the committed world.`;
+      this.reportPersistence(); this.events.onToast(this.persistenceError);
+      return { ok: false as const, code: "vehicle_arrival_failed" };
+    } finally {
+      this.locationTransitioning = false;
+      this.running = this.pendingSpaceArrival ? false : previous.running;
+      this.paused = this.pendingSpaceArrival ? true : previous.paused;
+      this.gameplayOverlayOpen = this.pendingSpaceArrival ? true : previous.overlay;
+    }
   }
 
   /** CF1 validation surface only. Ordinary players have no travel control. */
@@ -34598,6 +34648,7 @@ export class VoxelEngine {
       digitalItemVault: normalizeDigitalItemVault(this.digitalItemVault),
       wayworks: Object.fromEntries(this.wayworks),
       pressure: this.pressureRuntime?.snapshot(),
+      spacefleet: validateSpacefleetSave(this.spacefleet),
       digitalCreatureArchive: normalizeDigitalCreatureArchive(this.digitalCreatureArchive),
       golemForges: Object.fromEntries([...this.golemForges.entries()].map(([key, value]) => [key, normalizeGolemForgeState(value)])),
       alchemyStands: Object.fromEntries(this.alchemyStands.entries()),
@@ -34683,6 +34734,10 @@ export class VoxelEngine {
 
   async saveNow(notify = true): Promise<boolean> {
     if (!this.persistent) return true;
+    if (this.pendingSpaceArrival) {
+      this.persistenceError = "Arrival acknowledgement pending: retry arrival or reopen before saving.";
+      this.reportPersistence(); return false;
+    }
     if (this.checkpointPromise) {
       if (!await this.checkpointPromise) return false;
       if (!this.persistenceDirty) return true;

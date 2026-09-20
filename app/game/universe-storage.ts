@@ -4,6 +4,7 @@ import { catalogBody, createWaystarCatalog, validateCelestialCatalog, type Celes
 import { homeLocation, locationId, parseLocationId, universeId, type LocationId, type LocationStamp, type UniverseId } from "./location-address";
 import { assertExactKeys, canonicalJson, cloneUniverseJson, isUniverseRecord, universeSha256 } from "./universe-json";
 import { composeUniverseSave, splitUniverseSave, type SaveFields } from "./universe-save";
+import { assertVehicleCommitReady, commitVehicleArrival, remapSpacefleetUniverse, validateSpacefleetSave, validateSpacefleetUniverse } from "./space-vehicle";
 import { generationOptionsFromWorldOptions, LEGACY_WORLD_KEY, normalizeWorldOptions, WORLD_CATALOG_KEY, WORLD_DATA_PREFIX, type StoredWorld, type WorldMetadata, type WorldOptions } from "./world-storage";
 
 export const UNIVERSE_DATABASE = `${TYPESCRIPT_STORAGE_PREFIX}-universe-v1`;
@@ -45,6 +46,15 @@ export type UniverseSnapshot = Readonly<{
   players: readonly PlayerData[]; backups: readonly LegacyBackup[]; journals: readonly UniverseJournal[]; receipts: readonly MigrationReceipt[];
 }>;
 export type UniverseLoadedWorld = Readonly<{ world: StoredWorld; manifest: UniverseManifest; catalog: CelestialCatalogSnapshot; stamp: LocationStamp; lease: UniverseLease | null }>;
+export type VehicleLocationCommit = Readonly<{
+  /** Stable flight identity, distinct from a retryable storage attempt. */
+  transactionId: string;
+  checkpointId: string;
+  vehicleId: string;
+  expectedVehicleRevision: number;
+  landingPosition: [number, number, number];
+  initialDestinationSave?: WorldSave;
+}>;
 export type UniverseFaultStage = "before-prepare" | "prepare-written" | "after-prepare" | "before-records" | "records-written" | "before-commit" | "after-commit";
 export type UniverseStorageDependencies = Readonly<{
   indexedDB?: IDBFactory | null; now?: () => number; ownerId?: string;
@@ -228,6 +238,7 @@ export class UniverseStorage {
     const catalog = validateCelestialCatalog(await verify(catalogRecord, id, id));
     if (manifest.catalogDigest !== catalogRecord.sha256) throw new UniverseStorageError("corrupt", "Catalog manifest checksum mismatch.");
     const universe = await verify(only("universeRecords") as unknown as CheckedRecord<UniverseData>, id, id);
+    if (universe.fields.spacefleet !== undefined) validateSpacefleetUniverse(validateSpacefleetSave(universe.fields.spacefleet), id);
     if (universe.importHistory !== undefined) {
       if (!Array.isArray(universe.importHistory)) throw new UniverseStorageError("corrupt", "Invalid import provenance.");
       for (const history of universe.importHistory) {
@@ -364,6 +375,7 @@ export class UniverseStorage {
     const id = universeId(world.metadata.id), address = homeLocation(id), home = locationId(address);
     const catalog = createWaystarCatalog(world.options.dayLengthMinutes), parts = splitUniverseSave(world.save);
     composeUniverseSave(parts);
+    if (world.save.spacefleet !== undefined) validateSpacefleetUniverse(world.save.spacefleet, id);
     const catalogRecord = await checked(id, id, catalog);
     const backups = await Promise.all((input.backups ?? []).map(async ({ sourceKey, raw }): Promise<LegacyBackup> => {
       if (!legacyKey(sourceKey) || typeof raw !== "string") throw new UniverseStorageError("invalid", "Only explicit TypeScript legacy world source strings may be migrated.");
@@ -398,6 +410,7 @@ export class UniverseStorage {
     const location = snapshot.locations.find((entry) => entry.descriptor.id === manifest.currentLocationId)!;
     if (save.seed !== location.descriptor.generator.seed || save.generatorVersion !== location.descriptor.generator.version || (save.generatorProfile ?? "world-below-v15") !== location.descriptor.generator.profile) throw new UniverseStorageError("invalid", "A checkpoint cannot change the captured terrain generator.");
     const parts = splitUniverseSave(save); composeUniverseSave(parts);
+    if (save.spacefleet !== undefined) validateSpacefleetUniverse(save.spacefleet, id);
     const metadata = cloneUniverseJson(input.metadata ?? manifest.metadata), options = cloneUniverseJson(input.options ?? manifest.options);
     if (metadata.id !== id) throw new UniverseStorageError("invalid", "Metadata cannot change universe identity.");
     const profile = location.descriptor.generator.profile as WorldSave["generatorProfile"];
@@ -417,10 +430,24 @@ export class UniverseStorage {
   async transition(id: UniverseId, originSave: WorldSave, destination: LocationId, expectedRevision: number, lease: UniverseLease,
     input: { transactionId: string; initialSyntheticSave?: WorldSave }): Promise<UniverseLoadedWorld> {
     if (!this.allowSyntheticLocations) throw new UniverseStorageError("invalid", "Location travel is not available in this phase.");
+    return this.transitionCheckpoint(id, originSave, destination, expectedRevision, lease, input);
+  }
+
+  /** Production ship arrival uses the same journal and atomic stores as CF1.
+   * The reserved ship must already be durable; this does not authorize launch. */
+  async transitionVehicle(id: UniverseId, originSave: WorldSave, destination: LocationId, expectedRevision: number, lease: UniverseLease,
+    input: VehicleLocationCommit): Promise<UniverseLoadedWorld> {
+    return this.transitionCheckpoint(id, originSave, destination, expectedRevision, lease,
+      { transactionId: input.checkpointId, initialSyntheticSave: input.initialDestinationSave }, input);
+  }
+
+  private async transitionCheckpoint(id: UniverseId, originSave: WorldSave, destination: LocationId, expectedRevision: number, lease: UniverseLease,
+    input: { transactionId: string; initialSyntheticSave?: WorldSave }, vehicleCommit?: VehicleLocationCommit): Promise<UniverseLoadedWorld> {
     const snapshot = await this.currentSnapshot(id, input.transactionId, destination), { manifest } = snapshot, address = parseLocationId(destination);
     if (address.universeId !== id) throw new UniverseStorageError("invalid", "Cannot transfer custody to another universe.");
     catalogBody(snapshot.catalog, address);
-    const intentDigest = await universeSha256(canonicalJson({ originSave, destination, initialSyntheticSave: input.initialSyntheticSave ?? null }));
+    const intentDigest = await universeSha256(canonicalJson({ originSave, destination, initialSyntheticSave: input.initialSyntheticSave ?? null,
+      ...(vehicleCommit ? { vehicleCommit } : {}) }));
     const prior = snapshot.journals.find((journal) => journal.transactionId === input.transactionId && journal.state === "committed");
     if (prior) {
       if (prior.kind !== "transition" || prior.intentDigest !== intentDigest || prior.expectedRevision !== expectedRevision || manifest.revision !== prior.nextRevision || manifest.currentLocationId !== destination) throw new UniverseStorageError("conflict", "Transition ID was reused.");
@@ -430,25 +457,45 @@ export class UniverseStorage {
     const origin = snapshot.locations.find((entry) => entry.descriptor.id === manifest.currentLocationId)!;
     if (originSave.seed !== origin.descriptor.generator.seed || originSave.generatorVersion !== origin.descriptor.generator.version || (originSave.generatorProfile ?? "world-below-v15") !== origin.descriptor.generator.profile) throw new UniverseStorageError("invalid", "Origin generator changed.");
     const parts = splitUniverseSave(originSave); composeUniverseSave(parts);
+    if (originSave.spacefleet !== undefined) validateSpacefleetUniverse(originSave.spacefleet, id);
     let target = snapshot.locations.find((entry) => entry.descriptor.id === destination);
     if (!target) {
       if (!input.initialSyntheticSave) throw new UniverseStorageError("not-found", "Destination checkpoint does not exist.");
       const initial = input.initialSyntheticSave, initialParts = splitUniverseSave(initial); composeUniverseSave(initialParts);
-      target = { descriptor: { id: destination, universeId: id, revision: 0, generationEpoch: 1, synthetic: true,
+      target = { descriptor: { id: destination, universeId: id, revision: 0, generationEpoch: 1, ...(!vehicleCommit ? { synthetic: true as const } : {}),
         generator: { seed: initial.seed, version: initial.generatorVersion, sourceVersion: initial.generatorVersion, profile: initial.generatorProfile ?? "world-below-v15", options: cloneUniverseJson(manifest.options) } }, fields: initialParts.location };
     }
     const player = snapshot.players.find((entry) => entry.playerId === manifest.currentPlayerId)!;
     const positions = { ...player.positions, [manifest.currentLocationId]: parts.player.player };
     const remembered = positions[destination];
-    const pose = remembered ?? { ...(target.fields.spawn as object), yaw: 0, pitch: 0 };
+    let pose = remembered ?? { ...(target.fields.spawn as object), yaw: 0, pitch: 0 };
+    let universeFields = parts.universe;
+    if (vehicleCommit) {
+      const fleet = validateSpacefleetSave(parts.universe.spacefleet);
+      const durableFleet = validateSpacefleetSave(snapshot.universe.fields.spacefleet);
+      if (canonicalJson(fleet) !== canonicalJson(durableFleet)) throw new UniverseStorageError("conflict", "Checkpoint the reserved vehicle before committing arrival.");
+      const vehicle = fleet.vehicles[vehicleCommit.vehicleId], trip = vehicle?.trip;
+      if (!vehicle || !trip || vehicle.revision !== vehicleCommit.expectedVehicleRevision
+        || vehicle.locationId !== manifest.currentLocationId || trip.origin !== manifest.currentLocationId || trip.destination !== destination
+        || trip.originStamp.epoch > lease.epoch || trip.originStamp.revision > origin.descriptor.revision
+        || trip.destinationStamp.epoch !== target.descriptor.generationEpoch || trip.destinationStamp.revision !== target.descriptor.revision) {
+        throw new UniverseStorageError("conflict", "Vehicle, origin or destination changed; retain the ship and revalidate the route.");
+      }
+      assertVehicleCommitReady(vehicle, vehicleCommit.transactionId, trip.originStamp, trip.destinationStamp);
+      const arrived = commitVehicleArrival(vehicle, { transactionId: vehicleCommit.transactionId, originStamp: trip.originStamp,
+        destinationStamp: trip.destinationStamp, position: vehicleCommit.landingPosition, actionId: input.transactionId });
+      universeFields = { ...parts.universe, spacefleet: { schema: 1, vehicles: { ...fleet.vehicles, [vehicle.vehicleId]: arrived } } };
+      const [x, y, z] = vehicleCommit.landingPosition;
+      pose = { x, y, z, yaw: 0, pitch: 0 };
+    }
     const playerFields = { ...parts.player, player: pose };
-    composeUniverseSave({ universe: parts.universe, extensions: parts.extensions, location: target.fields, player: playerFields });
+    composeUniverseSave({ universe: universeFields, extensions: parts.extensions, location: target.fields, player: playerFields });
     const writes: WriteRecord[] = [
       { store: "manifests", value: { ...manifest, revision: expectedRevision + 1, currentLocationId: destination, updatedAt: originSave.savedAt } },
-      { store: "universeRecords", value: await checked(id, id, { ...snapshot.universe, fields: parts.universe, extensions: parts.extensions }) },
+      { store: "universeRecords", value: await checked(id, id, { ...snapshot.universe, fields: universeFields, extensions: parts.extensions }) },
       { store: "locations", value: { ...origin.descriptor, revision: origin.descriptor.revision + 1 } },
       { store: "locationRecords", value: await checked(origin.descriptor.id, id, parts.location) },
-      { store: "locations", value: target.descriptor },
+      { store: "locations", value: vehicleCommit ? { ...target.descriptor, revision: target.descriptor.revision + 1 } : target.descriptor },
       { store: "locationRecords", value: await checked(destination, id, target.fields) },
       { store: "players", value: await checked(recordId(id, "player", player.playerId), id, { ...player, locationId: destination, fields: playerFields, positions }) },
     ];
@@ -505,7 +552,9 @@ export class UniverseStorage {
     const manifest: UniverseManifest = { ...snapshot.manifest, id: newId, universeId: newId, revision: 1, currentLocationId: remap(snapshot.manifest.currentLocationId), metadata: { ...snapshot.manifest.metadata, id: newId, name: `${snapshot.manifest.metadata.name} (imported)`.slice(0, 64) }, updatedAt: parsed.exportedAt, deletedAt: null };
     // Historical journals are retained as provenance, never replayed as actions
     // in the new universe. Its authoritative history begins at this import.
-    const importedUniverse: UniverseData = { ...snapshot.universe, fields: { ...snapshot.universe.fields, agentWorldFingerprint: `worldfp_import_${newId.replace(/[^A-Za-z0-9_-]/g, "_")}` }, importHistory: [...snapshot.universe.importHistory ?? [], { sourceUniverseId: oldId, archiveDigest: String(sha256), journals: snapshot.journals, receipts: snapshot.receipts }] };
+    const importedUniverse: UniverseData = { ...snapshot.universe, fields: { ...snapshot.universe.fields,
+      ...(snapshot.universe.fields.spacefleet !== undefined ? { spacefleet: remapSpacefleetUniverse(validateSpacefleetSave(snapshot.universe.fields.spacefleet), oldId, newId) } : {}),
+      agentWorldFingerprint: `worldfp_import_${newId.replace(/[^A-Za-z0-9_-]/g, "_")}` }, importHistory: [...snapshot.universe.importHistory ?? [], { sourceUniverseId: oldId, archiveDigest: String(sha256), journals: snapshot.journals, receipts: snapshot.receipts }] };
     const writes: WriteRecord[] = [{ store: "manifests", value: manifest }, { store: "catalogs", value: catalogRecord }, { store: "universeRecords", value: await checked(newId, newId, importedUniverse) }];
     for (const { descriptor, fields } of snapshot.locations) {
       const id = remap(descriptor.id);

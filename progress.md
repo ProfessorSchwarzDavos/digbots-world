@@ -1,5 +1,19 @@
 Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks; add double-tap-forward sprinting; build scalable butterfly exhibit blocks with inventories, flowers, landing behavior, and capacity up to about 20 connected blocks; make recipe-book hover previews and click-to-fill crafting, fix crafting/furnace arrows, add recipe search and mirrored recipes; animate and flow water, improve swimming/shore exits, add oxygen; add ocean, river, and underground fish; add a larger two-seat sailboat with crouch-use chest storage; fix third-person vertical controls and interaction; allow mobs through open doors; remove tree-growth notices; add five surface mobs, birds, desert plants/features, desert and forest temple POIs with chests, a new enemy, and rare magical durable loot; add a tameable breedable banana-rabbit pet with naming and commands; add metadata-preserving creature cages; add male/female player choice with multiplayer, armor, and held-item representation; add a banana-rabbit POI; add visible game versions and save-version metadata plus title-screen fullscreen; add skeleton archery; optimize and benchmark 10-default/16-max render distance with separate 6-8 simulation distance; rework clouds and biome-sensitive weather; enrich meadow grass, flowers, butterflies, and a large butterfly POI. Do all of it thoughtfully and report only when entirely done.
 
+## Celestial Frontiers CF6 — revision12, first transaction checkpoint
+
+- CF5 accepted at4dda43e/runtime8e601fa; frozen evidence unchanged. CF6 full
+  spacecraft/orbit/station/Morrow/return dispatch ACKed; CF7 not authorized.
+- Added one universe-owned ship table and strict finite-resource/cargo/crew
+  contracts. Production arrival shares the CF1 IDB journal; failed or uncertain
+  commit keeps origin paused, blocks autosave and supports exact retry/reopen.
+- Initial focused33/static checks pass; real browser15 storage scenarios pass
+  with all seven journal fault stages and five phase cold-resume cases. Fixtures
+  explicitly stage ships/resources; these are not normal craft/launch claims.
+- NEXT: normal pad/supply/mission/interactive ascent and authored ship visuals,
+  then real station/asteroid/Morrow/return integration and full CF6 evidence.
+  Full peer/soak gates remain CFV. No deployment, real-save changes or deletion.
+
 ## Celestial Frontiers CF3 - 2026-09-19 (local development checkpoint)
 
 - Fifth back slot, all15 named gear/supply entries, finite oxygen/charge/scrubber and exact tank sockets integrated across inventory, character/held models, save/network/drone custody. Normal Home inventory equip/refill/socket/service browser actions passed; rig240L/60kJ/1800s checkpoint retained under CF3/browser. Service-panel clipping found and corrected; desktop visuals reviewed.

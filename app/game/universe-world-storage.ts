@@ -1,7 +1,7 @@
 import type { GameMode, WorldSave } from "./engine";
 import { universeId, type LocationId, type LocationStamp } from "./location-address";
-import { cloneUniverseJson, isUniverseRecord, universeSha256 } from "./universe-json";
-import { UniverseStorage, UniverseStorageError, type UniverseLoadedWorld, type UniverseManifest } from "./universe-storage";
+import { canonicalJson, cloneUniverseJson, isUniverseRecord, universeSha256 } from "./universe-json";
+import { UniverseStorage, UniverseStorageError, type UniverseLoadedWorld, type UniverseManifest, type VehicleLocationCommit } from "./universe-storage";
 import {
   LEGACY_WORLD_KEY, WORLD_CATALOG_KEY, WORLD_DATA_PREFIX, WORLD_OWNERSHIP_NOTICE,
   migrateLegacyWorldSave, normalizeWorldMetadata, normalizeWorldOptions,
@@ -86,6 +86,7 @@ export class UniverseWorldStorage {
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private writerConfirmed = false;
   private disposed = false;
+  private pendingVehicleCommit: { destination: LocationId; save: WorldSave; input: VehicleLocationCommit; revision: number; universeId: string } | null = null;
   private status: UniverseSaveStatus = { phase: "opening", message: "Opening browser universe storage…" };
 
   constructor(legacyStorage: Pick<Storage, "getItem"> | null = null, repository = new UniverseStorage()) {
@@ -188,7 +189,7 @@ export class UniverseWorldStorage {
     try {
       const loaded = await this.repository.load(universeId(id), lease);
       if (loaded.manifest.deletedAt !== null) throw new UniverseStorageError("not-found", "This universe was removed from the catalog.");
-      this.active = loaded; this.writerConfirmed = true; this.selectedId = id; this.startHeartbeat(); return loaded;
+      this.active = loaded; this.pendingVehicleCommit = null; this.writerConfirmed = true; this.selectedId = id; this.startHeartbeat(); return loaded;
     } catch (error) { await this.repository.release(lease); throw error; }
   }
 
@@ -228,6 +229,7 @@ export class UniverseWorldStorage {
     return this.perform("saving", "Saving a durable location checkpoint…", async () => {
       const active = this.active;
       if (!active?.lease || active.manifest.id !== id) throw new UniverseStorageError("conflict", "This session does not own that world.");
+      if (this.pendingVehicleCommit) throw new UniverseStorageError("conflict", "An arrival acknowledgement is pending. Retry arrival or reopen the committed world before saving.");
       const now = Date.now();
       const metadata: WorldMetadata = { ...active.world.metadata, mode: captured.save.mode, updatedAt: now, lastPlayedAt: captured.markPlayed === false ? active.world.metadata.lastPlayedAt : now,
         playTimeMs: Math.min(Number.MAX_SAFE_INTEGER, active.world.metadata.playTimeMs + Math.max(0, Math.trunc(captured.playTimeDeltaMs ?? 0))), lastSavedGameVersion: normalizeGameVersion(captured.save.lastSavedGameVersion) };
@@ -246,6 +248,25 @@ export class UniverseWorldStorage {
       const loaded = await this.repository.transition(active.manifest.id, captured, destination, active.manifest.revision, active.lease,
         { transactionId: crypto.randomUUID(), initialSyntheticSave: initial });
       this.acceptLoadedCheckpoint(loaded);
+      return cloneUniverseJson(loaded.world);
+    });
+  }
+
+  transitionVehicleLocation(destination: LocationId, save: WorldSave, input: VehicleLocationCommit): Promise<WorldStorageResult<StoredWorld>> {
+    const captured = cloneUniverseJson(save), intent = cloneUniverseJson(input);
+    return this.perform("saving", "Committing ship, crew and cargo at the destination…", async () => {
+      const active = this.active;
+      if (!active?.lease) throw new UniverseStorageError("conflict", "This session does not own the departing universe.");
+      const pending = this.pendingVehicleCommit;
+      if (pending && (pending.universeId !== active.manifest.id || pending.destination !== destination
+        || canonicalJson(pending.save) !== canonicalJson(captured) || canonicalJson(pending.input) !== canonicalJson(intent))) {
+        throw new UniverseStorageError("conflict", "Retry the unchanged pending arrival before starting another transition.");
+      }
+      const attempt = pending ?? { destination, save: captured, input: intent, revision: active.manifest.revision, universeId: active.manifest.id };
+      this.pendingVehicleCommit = attempt;
+      const loaded = await this.repository.transitionVehicle(active.manifest.id, attempt.save, attempt.destination, attempt.revision, active.lease, attempt.input);
+      this.acceptLoadedCheckpoint(loaded);
+      this.pendingVehicleCommit = null;
       return cloneUniverseJson(loaded.world);
     });
   }

@@ -8,6 +8,22 @@ import type { BlockFacing } from "./block-facing";
 export type StationBlock = { x: number; y: number; z: number; type: BlockId; facing?: BlockFacing };
 export type StationDockReference = { stationId: string; dockId: string; locationId: LocationId };
 
+/** Registers an already paid, normally placed collar; never creates a block or item. */
+export function planStationDockRegistration(input: { registry: StationRegistrySave; stationId: string; actor: StationActor;
+  position: StationPosition; actionId: string; dockId: string; expectedRegistryRevision: number;
+  blockAt(x: number, y: number, z: number): BlockId | undefined }) {
+  const registry = validateStationRegistrySave(input.registry), station = registry.stations[input.stationId];
+  if (!station || registry.revision !== input.expectedRegistryRevision || !stationAllows(station, input.actor, "build")) throw Error("Inspect the station again and obtain building permission.");
+  if (!Array.isArray(input.position) || input.position.length !== 3 || input.position.some(value => !Number.isSafeInteger(value))) throw Error("Choose whole block coordinates for the collar.");
+  if (stationAt(registry, input.position)?.id !== station.id || input.blockAt(...station.corePosition) !== BlockId.StationCore
+    || input.blockAt(...input.position) !== BlockId.OrbitalDock) throw Error("Register an intact collar inside this intact station's claim.");
+  if (Object.values(registry.stations).some(entry => Object.values(entry.docks).some(dock => dock.position.every((value, axis) => value === input.position[axis])))) throw Error("This physical collar is already registered.");
+  const receiptId = `${input.actionId}:placement`;
+  return applyStationAction(registry, { actor: input.actor, locationId: registry.locationId, expectedRevision: registry.revision,
+    placements: [{ receiptId, actorId: input.actor.actorId, locationId: registry.locationId, expectedRevision: registry.revision, kind: "docking-collar", position: input.position }] },
+  { type: "register-dock", actionId: input.actionId, stationId: station.id, dockId: input.dockId, placementReceiptId: receiptId }).registry;
+}
+
 /** Optional ordinary-material blueprint. The open controller socket prevents a
  * decorative shell from being mistaken for a supplied breathing habitat. */
 export function planStationCabin(input: { registry: StationRegistrySave; stationId: string; actor: StationActor;

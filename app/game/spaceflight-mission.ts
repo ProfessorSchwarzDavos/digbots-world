@@ -1,7 +1,7 @@
 import { locationId, parseLocationId, type LocationId, type LocationStamp } from "./location-address";
 import { planSpaceVehicleTravel, SURVEY_HOPPER_CAPACITY, VEHICLE_RESOURCES, type SpaceVehicleState, type VehicleResource, type VehicleResources } from "./space-vehicle";
 import type { LaunchPadCheck } from "./spaceflight-infrastructure";
-import type { StationAccess, StationAssociation, StationRegistrySave } from "./orbital-station";
+import type { StationAccess, StationAssociation, StationPosition, StationRegistrySave } from "./orbital-station";
 
 export const FIRST_FLIGHT_ROUTES = ["home-orbit", "home-surface", "morrow-orbit", "morrow-surface"] as const;
 export type FirstFlightRoute = typeof FIRST_FLIGHT_ROUTES[number];
@@ -17,6 +17,12 @@ export type SpaceflightMission = {
   costs: VehicleResources | null; blockers: string[]; status: string; destination: LocationId | null;
   stations?: StationRegistrySave | null;
 };
+/** Station authority has its own revision and does not depend on a nearby ship. */
+export type StationManagementIntent =
+  | { kind: "station-access"; stationId: string; memberIds: string[]; association: StationAssociation; access: StationAccess; registryRevision: number }
+  | { kind: "station-name"; stationId: string; name: string; icon?: string; registryRevision: number }
+  | { kind: "station-register-dock"; stationId: string; position: StationPosition; registryRevision: number }
+  | { kind: "station-habitat" | "station-cabin"; stationId: string; registryRevision: number };
 export type SpaceflightIntent =
   | { kind: "deploy" }
   | { kind: "route"; route: FirstFlightRoute }
@@ -25,9 +31,11 @@ export type SpaceflightIntent =
   | { kind: "cargo-in" | "cargo-out"; slot: number; vehicleRevision: number }
   | { kind: "station-found"; name: string; registryRevision: number; vehicleRevision: number }
   | { kind: "station-dock"; stationId: string; dockId: string; undock: boolean; registryRevision: number; vehicleRevision: number }
-  | { kind: "station-access"; stationId: string; memberIds: string[]; association: StationAssociation; access: StationAccess; registryRevision: number; vehicleRevision: number }
-  | { kind: "station-name"; stationId: string; name: string; registryRevision: number; vehicleRevision: number }
-  | { kind: "station-habitat" | "station-cabin"; stationId: string; registryRevision: number; vehicleRevision: number };
+  | StationManagementIntent;
+
+export function isStationManagementIntent(action: SpaceflightIntent): action is StationManagementIntent {
+  return action.kind === "station-access" || action.kind === "station-name" || action.kind === "station-habitat" || action.kind === "station-cabin" || action.kind === "station-register-dock";
+}
 
 export function inspectSpaceflightMission(ship: SpaceVehicleState | null, origin: LocationStamp, route: FirstFlightRoute,
   pad: LaunchPadCheck | null, weatherSafe = true): SpaceflightMission {

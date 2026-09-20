@@ -10,7 +10,7 @@ This branch is the independently maintained **TypeScript/Three.js edition** and 
 
 TypeScript worlds, profiles, cache, rendezvous, and multiplayer identifiers use the `blockwild-typescript-*` namespace. Normal startup does not import or remove generic or Rust-edition data. The explicit raw previous-data download covers allowlisted localStorage strings only; it is not a whole Rust IndexedDB backup, and no automatic cross-edition import exists.
 
-Local, unreleased Celestial Frontiers work now includes transactional location saves, an [environment/sky/gravity foundation](docs/CELESTIAL_ENVIRONMENT.md), [finite life support and EVA](docs/LIFE_SUPPORT_AND_EVA.md), and a twenty-block [Wayworks workshop](docs/WAYWORKS_WORKSHOP.md) with finite power, processing, tanks, upgrades and typed guest/agent operations. Ordinary play remains Home-only; developer fixtures and initial resources are marked synthetic. Travel, destination content, advanced machinery and the wider expansion remain unfinished, with comprehensive integration checks still pending.
+Local, unreleased Celestial Frontiers work now includes transactional location saves, an [environment/sky/gravity foundation](docs/CELESTIAL_ENVIRONMENT.md), [finite life support and EVA](docs/LIFE_SUPPORT_AND_EVA.md), a [Wayworks workshop](docs/WAYWORKS_WORKSHOP.md), first Survey Hopper routes between Home, orbit and Morrow, and [orbital station controls](docs/ORBITAL_STATIONS.md). Developer fixtures and staged initial resources are marked synthetic. The complete destination roster, station operating loop, shared travel and wider expansion remain unfinished, with comprehensive integration checks still pending.
 
 <p align="center">
   <img src="docs/assets/screenshots/2026-08-01-field-archive/2026-08-01-title-screen.png" alt="Blockwild v1.12.0 title screen over a live streamed wilderness" width="920" />
@@ -39,7 +39,7 @@ The current release is **v1.12.0 Field Archive**.
 
 This branch is developing location-scoped universe saves in the TypeScript-only `blockwild-typescript-universe-v1` IndexedDB database. Existing TypeScript localStorage saves are imported additively with exact source-string backups; generic and Rust data remain outside this path. Save & Quit waits for a committed checkpoint, and failed saves keep the session available for recovery/export.
 
-Home remains the only ordinary playable destination at this checkpoint. Developer-only synthetic locations test ownership and persistence; they are not finished expansion worlds. Multiplayer protocol4 and agent protocol2 require matching location admission scopes and are incompatible with older clients. Full migration, mobile, quota-recovery, retention and integrated release verification are still in progress. See [universe-save development notes](docs/UNIVERSE_SAVES.md); this is a local development checkpoint, not a published release.
+The first host-operated spacecraft routes now reach orbit and Morrow; normal supply progression and the full expansion remain under verification. Synthetic fixtures test finite resource custody and do not establish end-to-end crafting or sustainable habitation. Multiplayer protocol4 and agent protocol2 require matching location admission scopes and are incompatible with older clients. Full migration, mobile, quota-recovery, retention and integrated release verification are still in progress. See [universe-save development notes](docs/UNIVERSE_SAVES.md); this is a local development checkpoint, not a published release.
 
 ## Scope snapshot
 

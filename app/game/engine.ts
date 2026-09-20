@@ -17,6 +17,7 @@ import { createPressureOverlay, disposePressureOverlay } from "./pressure-overla
 import { buildPressurePresentation, acceptPressurePresentation, pressurePresentationOpenDoorAt, pressurePresentationClosedGateAt,
   pressurePresentationEnvironmentAt, type PressurePresentation } from "./pressure-presentation";
 import { PressureRuntime, type PressureSave, type PressureOccupant } from "./pressure-runtime";
+import { pressureDoorKind } from "./pressure-catalog";
 import { habitatOccupantBreathes, habitatOccupantOxygenDemand, normalizeHabitatExposure, stepHabitatOccupantExposure } from "./pressure-occupants";
 import { applyMorrowCreaturePose } from "./morrow-creature-models";
 import { isMorrowMobKind, safeLanternJar, pickMorrowSpawn, morrowBreathableZone, normalizeMorrowExposure, stepMorrowExposure, MORROW_NATURAL_POOL, MORROW_OWL_VEIL_SECONDS, type MorrowExposureState } from "./morrow-ecology";
@@ -792,9 +793,9 @@ import { splitUniverseSave, composeUniverseSave } from "./universe-save";
 import { validateAgentCustody, type AgentCustodySave } from "./agent-custody";
 import { resetLocationTransients, validateLocationPlayerState, validLocationVelocity, type LocationPlayerState } from "./location-manager";
 import { applySpaceVehicleAction, createSurveyHopper, SURVEY_HOPPER_CAPACITY, validateSpacefleetSave, type SpacefleetSave, type SpaceVehicleState, type VehicleVector } from "./space-vehicle";
-import { firstFlightDestination, inspectSpaceflightMission, type FirstFlightRoute, type SpaceflightIntent, type SpaceflightMission } from "./spaceflight-mission";
+import { firstFlightDestination, inspectSpaceflightMission, isStationManagementIntent, type FirstFlightRoute, type SpaceflightIntent, type SpaceflightMission, type StationManagementIntent } from "./spaceflight-mission";
 import { applyStationAction, createStationRegistry, stationAllows, stationAt, validateStationRegistrySave, type StationPermission, type StationRegistrySave } from "./orbital-station";
-import { planStationFoundation, planStationCabin, planStationDock, shipDock, validateStationFleetCustody } from "./station-runtime";
+import { planStationFoundation, planStationCabin, planStationDock, planStationDockRegistration, shipDock, validateStationFleetCustody } from "./station-runtime";
 import { inspectLaunchPad, supplyVehicleFromMachine, type LaunchPadCheck } from "./spaceflight-infrastructure";
 import { spaceflightMachineKind } from "./spaceflight-catalog";
 import { advanceSpaceCabin, advanceSpaceflight } from "./spaceflight-flight";
@@ -1313,7 +1314,7 @@ export type HudState = {
   activeOrbRack?: OrbRackHudState | null;
   activeHealingStation?: HealingStationHudState | null;
   activeWaygridItems?: WaygridItemHudState | null;
-  activeWayworks?: (MachineState & { name: string; capacityJ: number; rateW: number; heldItemName: string; flight?: SpaceflightMission;
+  activeWayworks?: (MachineState & { name: string; capacityJ: number; rateW: number; heldItemName: string; flight?: SpaceflightMission; pressureOnly?: boolean;
     network?: { id: string; count: number; energyJ: number; capacityJ: number; revision: number } }) | null;
   activeWaygridCreatures?: WaygridCreatureHudState | null;
   activeAquarium?: AquariumHudState | null;
@@ -4296,6 +4297,7 @@ export class VoxelEngine {
   private spaceflightBusy = false;
   guestPressure: PressurePresentation | null = null;
   guestPressureInspector: PressureInspector | null = null;
+  guestPressureOnlyFacility: { id: string; locationId: string } | null = null;
   pressureInspectorSequence = 0;
   guestPressureInspectorSequence = -1;
   pressureStructures = new Set<string>();
@@ -8050,6 +8052,7 @@ export class VoxelEngine {
       const machine = this.wayworks.get(key)!;
       if (this.multiplayer?.role === "guest") {
         if (this.guestPressureInspector?.facilityId === this.sharedFacilityId(kind, key)) copy.pressureInspector = this.guestPressureInspector;
+        if (this.guestPressureOnlyFacility?.id === this.sharedFacilityId(kind, key) && this.guestPressureOnlyFacility.locationId === machine.locationId) copy.pressureOnly = true;
       } else if (this.pressureRuntime?.devices.has(key) && machine.workshop.process?.installationId) {
         copy.pressureInspector = buildPressureInspector({ locationId: machine.locationId, generation: this.pressureRuntime.host.generation,
           facilityId: this.sharedFacilityId(kind, key), installationId: machine.workshop.process.installationId, revision: machine.revision },
@@ -8057,6 +8060,27 @@ export class VoxelEngine {
       }
     }
     return copy;
+  }
+
+  /** Resolve view authority before serialization. Pressure service is not storage access. */
+  private sharedFacilityActorState(kind: SharedFacilityKind, key: string, actor: string, initialize = false): Record<string, unknown> | null {
+    const coords = key.split(",").map(Number) as VehicleVector;
+    if (kind !== "wayworks") return this.stationActorAccess(actor, ...coords, "container") ? this.sharedFacilityState(kind, key, initialize) : null;
+    const machine = this.wayworks.get(key);
+    if (!machine) return null;
+    const inventory = this.workshopActorAccess(machine, actor);
+    const pressure = this.pressureRuntime?.devices.has(key) && this.workshopActorAccess(machine, actor, { kind: "pressure", action: { kind: "mode", mode: "off" } });
+    if (!inventory && !pressure) return null;
+    const full = this.sharedFacilityState(kind, key, initialize);
+    if (!full || inventory) return full;
+    // Allowlisted presentation, not a second durable machine. No inventory,
+    // reservoir, membership, channel or recipe data crosses this boundary.
+    const view = createMachine(machine.kind, machine.locationId, machine.ownerId, machine.facing);
+    view.revision = machine.revision; view.energyJ = machine.energyJ; view.enabled = machine.enabled; view.status = machine.status;
+    // Installed hardware ratings are operational readings, not transferable inventory.
+    view.workshop.upgrades = { ...machine.workshop.upgrades };
+    if (view.workshop.process) view.workshop.process.installationId = machine.workshop.process?.installationId ?? null;
+    return { ...view, pressureOnly: true, ...(full.pressureInspector ? { pressureInspector: full.pressureInspector } : {}) };
   }
 
   private applySharedFacilityState(kind: SharedFacilityKind, key: string, state: Record<string, unknown>) {
@@ -8077,7 +8101,11 @@ export class VoxelEngine {
           this.guestPressureInspectorSequence = next.sequence;
         }
       }
-      if (expectedKind && typeof state.ownerId === "string") this.wayworks.set(key, normalizeMachine(state, expectedKind, this.world.locationScope?.locationId ?? "home-preview", state.ownerId));
+      if (expectedKind && typeof state.ownerId === "string") {
+        this.wayworks.set(key, normalizeMachine(state, expectedKind, this.world.locationScope?.locationId ?? "home-preview", state.ownerId));
+        if (this.multiplayer?.role === "guest") this.guestPressureOnlyFacility = state.pressureOnly === true
+          ? { id: this.sharedFacilityId(kind, key), locationId: this.world.locationScope?.locationId ?? "home-preview" } : null;
+      }
     }
     else if (kind === "apiary") this.apiaries.set(key, restoreApiaryStorage({ [key]: state as ApiaryBlockState }).get(key) ?? createEmptyApiaryBlock());
     else if (kind === "morph-loom") this.morphLooms.set(key, normalizeOrbMorphLoom(state));
@@ -9029,14 +9057,8 @@ export class VoxelEngine {
         this.rejectFacilityAction(action, peer.identity.id, "That shared facility is unavailable or too far away.");
         return;
       }
-      const currentState = this.sharedFacilityState(parts.kind, parts.key, true);
-      if (!this.stationActorAccess(peer.identity.id, coords[0], coords[1], coords[2], "container")) {
-        this.rejectFacilityAction(action, peer.identity.id, "Station container access is private."); return;
-      }
-      if (!currentState) { this.rejectFacilityAction(action, peer.identity.id, "That facility has no shared inventory yet."); return; }
-      if (parts.kind === "wayworks" && !this.workshopActorAccess(this.wayworks.get(parts.key)!, peer.identity.id)) {
-        this.rejectFacilityAction(action, peer.identity.id, "The owner has not opened this machine for public service."); return;
-      }
+      const currentState = this.sharedFacilityActorState(parts.kind, parts.key, peer.identity.id, true);
+      if (!currentState) { this.rejectFacilityAction(action, peer.identity.id, "This facility requires the relevant station grant and machine access."); return; }
       const revision = this.currentFacilityRevision(parts.kind, parts.key, currentState);
       if (action.kind === "open") {
         this.multiplayerPeerActiveFacilities.set(peer.identity.id, action.facilityId);
@@ -9104,8 +9126,8 @@ export class VoxelEngine {
         const next = normalizeMultiplayerPlayerState({ ...player, revision: player.revision + 1, inventory: inventory.map(networkItemStack), equipment, offhand }, peer.identity.id, player.variant);
         commit();
         this.multiplayerPlayerStates.set(peer.identity.id, next);
-        const state = this.sharedFacilityState(parts.kind, parts.key)!;
-        session.sendFacilityAction({ ...action, state, playerState: next, expectedRevision: this.currentFacilityRevision(parts.kind, parts.key, state), expectedPlayerRevision: next.revision, status: "accepted", reason }, peer.identity.id);
+        const state = this.sharedFacilityActorState(parts.kind, parts.key, peer.identity.id);
+        session.sendFacilityAction({ ...action, state: state ?? undefined, playerState: next, expectedRevision: state ? this.currentFacilityRevision(parts.kind, parts.key, state) : revision, expectedPlayerRevision: next.revision, status: "accepted", reason }, peer.identity.id);
         this.saveSoon(); this.emitHud(true); return;
       }
       // Every workstation now has a shared host-authored view. Mutating their
@@ -9119,7 +9141,9 @@ export class VoxelEngine {
     }
     if (session.role === "guest" && (action.status === "accepted" || action.status === "rejected")) {
       const ownResponse = action.actorId === session.identity.id;
-      if (action.facilityKind === "wayworks" && (action.kind === "close" || action.status === "rejected" && !action.state)) this.guestPressureInspector = null;
+      if (action.facilityKind === "wayworks" && (action.kind === "close" || action.status === "rejected" && !action.state)) {
+        this.guestPressureInspector = null; this.guestPressureOnlyFacility = null;
+      }
       if (ownResponse) this.multiplayerPendingFacilityMutations.delete(action.facilityId);
       const parts = this.sharedFacilityParts(action.facilityId);
       if (parts && action.state) {
@@ -9177,16 +9201,15 @@ export class VoxelEngine {
         const parts = this.sharedFacilityParts(facilityId);
         if (!parts || !session.getPeer(peerId)) continue;
         const pose = this.remotePlayers.get(peerId)?.target, coords = parts.key.split(",").map(Number);
-        if (parts.kind === "wayworks" && (!pose || Math.hypot(coords[0] - pose.x, coords[1] - pose.y, coords[2] - pose.z) > 8
-          || !this.sharedFacilityExists(parts.kind, parts.key) || !this.workshopActorAccess(this.wayworks.get(parts.key)!, peerId))) {
+        const state = pose && Math.hypot(coords[0] - pose.x, coords[1] - pose.y, coords[2] - pose.z) <= 8
+          && this.sharedFacilityExists(parts.kind, parts.key) ? this.sharedFacilityActorState(parts.kind, parts.key, peerId) : null;
+        if (!state) {
           this.multiplayerPeerActiveFacilities.delete(peerId);
           this.multiplayerPeerFacilitySignatures.delete(`${peerId}|${facilityId}`);
           session.sendFacilityAction({ requestId: `facility_revoked_${Date.now().toString(36)}`, actorId: peerId, facilityId,
             facilityKind: parts.kind, kind: "close", status: "rejected", reason: "Machine access ended. Move within reach or ask the owner to reopen service." }, peerId);
           continue;
         }
-        const state = this.sharedFacilityState(parts.kind, parts.key);
-        if (!state) continue;
         const revision = this.currentFacilityRevision(parts.kind, parts.key, state);
         const signature = `${revision}:${JSON.stringify(state)}`;
         const peerKey = `${peerId}|${facilityId}`;
@@ -13109,11 +13132,59 @@ export class VoxelEngine {
       [station.corePosition, ...Object.values(station.docks).map(dock => dock.position)].some(point => point[0] === x && point[1] === y && point[2] === z));
   }
 
+  /** Called after the host/persistence gate; never resolves or mutates a vehicle. */
+  private manageOrbitalStation(action: StationManagementIntent) {
+    const registry = this.orbitalStations, station = registry?.stations[action.stationId];
+    const locationId = this.world.locationScope.locationId;
+    if (!registry || registry.locationId !== locationId || registry.revision !== action.registryRevision || !station) {
+      throw Error("The station changed. Inspect its current registry again.");
+    }
+    const servicePoint = action.kind === "station-register-dock" ? action.position : station.corePosition;
+    if (!Array.isArray(servicePoint) || servicePoint.length !== 3 || servicePoint.some(value => !Number.isSafeInteger(value))
+      || this.position.distanceTo(new THREE.Vector3(...servicePoint)) > 8
+      || this.world.getBlock(...station.corePosition) !== BlockId.StationCore) throw Error("Approach the station's intact claim core.");
+    const principal = { actorId: "local", factionIds: [], guildIds: [] };
+    if (action.kind === "station-register-dock") {
+      const machine = this.wayworks.get(blockKey(...action.position));
+      if (!machine || machine.kind !== "orbital-dock" || machine.locationId !== locationId || machine.ownerId !== "local") throw Error("Register your normally placed, intact Orbital Dock.");
+      this.orbitalStations = planStationDockRegistration({ registry, actor: principal, stationId: station.id,
+        position: action.position, actionId: crypto.randomUUID(), dockId: crypto.randomUUID(), expectedRegistryRevision: action.registryRevision,
+        blockAt: (x, y, z) => this.world.getBlock(x, y, z) });
+      this.events.onToast("Existing collar registered. No materials or spacecraft stores changed.");
+    } else if (action.kind === "station-cabin") {
+      if (this.wayworks.size + 2 > 256) throw Error("Leave capacity for the cabin door and bridge.");
+      const plan = planStationCabin({ registry, stationId: action.stationId, actor: principal, inventory: this.inventory,
+        blockAt: (x, y, z) => this.world.getBlock(x, y, z), blocked: ([x, y, z]) => y < MIN_Y || y > MAX_Y
+          || blockEditIntersectsPlayer({ x, y, z, type: BlockId.StoneBrick }, this.position, this.currentPlayerHeight())
+          || [...this.remotePlayers.values()].some(remote => blockEditIntersectsPlayer({ x, y, z, type: BlockId.StoneBrick }, remote.target, PLAYER_HEIGHT)) });
+      const door = placedWorkshopMachine("pressure-door", plan.doorSlot, locationId, "local", 1);
+      this.world.setBlocksBatch(plan.blocks, true, true);
+      for (const block of plan.blocks) if (block.facing !== undefined) this.world.setBlockFacing(block.x, block.y, block.z, block.facing, true);
+      this.wayworks.set(blockKey(...plan.door), door);
+      const bridge = plan.blocks[0]; this.wayworks.set(blockKey(bridge.x, bridge.y, bridge.z), createMachine("station-truss", locationId, "local"));
+      this.inventory = plan.inventory; this.publishBlockEdits(plan.blocks, "batch");
+      this.events.onToast(`Cabin shell built. Place a supplied Life-Support Controller at [${plan.socket.join(", ")}] facing south into the room. The shell contains no air or power.`);
+    } else {
+      const command = action.kind === "station-access" ? { type: "access" as const, memberIds: action.memberIds, association: action.association, access: action.access }
+        : action.kind === "station-name" ? { type: "rename" as const, name: action.name.trim(), icon: action.icon ?? station.icon }
+          : { type: "habitat" as const, pressureZoneIds: (this.pressureRuntime?.snapshot().zones ?? []).filter(zone => zone.cellKeys.some(key => {
+            const point = key.split(",").map(Number) as VehicleVector; return stationAt(registry, point)?.id === station.id;
+          })).map(zone => zone.zoneId), wayanchorLeases: station.wayanchorLeases };
+      this.orbitalStations = applyStationAction(registry, { actor: principal, locationId, expectedRevision: registry.revision },
+        { ...command, actionId: crypto.randomUUID(), stationId: station.id }).registry;
+    }
+    this.saveSoon(); this.emitHud(true); return true;
+  }
+
   /** Human mission requests share the pure host authority and one save owner. */
   async spaceflightAction(action: SpaceflightIntent, expectedMachineRevision?: number): Promise<boolean> {
     const fail = (message: string) => { this.events.onToast(message); this.emitHud(true); return false; };
     if (this.multiplayer?.role === "guest" || !this.persistent || !this.activeWorldId || this.locationTransitioning || this.spaceflightBusy) return fail("Only the current universe host can operate this mission.");
     if (this.pendingSpaceArrival && action.kind !== "retry-arrival") return fail("Retry the pending arrival or reopen the committed world first.");
+    if (isStationManagementIntent(action)) {
+      try { return this.manageOrbitalStation(action); }
+      catch (error) { return fail(error instanceof Error ? error.message : String(error)); }
+    }
     const key = this.activeWayworksKey, machine = key ? this.wayworks.get(key) : undefined, ship = this.nearbySpaceVehicle();
     const aboard = ship?.passengers.some(passenger => passenger.actorId === "local");
     const consoleReady = key && machine && spaceflightMachineKind(machine.kind) && machine.enabled && machine.ownerId === "local"
@@ -13122,11 +13193,7 @@ export class VoxelEngine {
       && (expectedMachineRevision === undefined || machine.revision === expectedMachineRevision);
     const boardingNearby = action.kind === "board" && ship
       && this.position.distanceTo(new THREE.Vector3(...ship.transform.position)) <= 6;
-    const operatedStation = (action.kind === "station-name" || action.kind === "station-access" || action.kind === "station-habitat" || action.kind === "station-cabin")
-      ? this.orbitalStations?.stations[action.stationId] : undefined;
-    const stationNearby = operatedStation && this.position.distanceTo(new THREE.Vector3(...operatedStation.corePosition)) <= 8
-      && this.world.getBlock(...operatedStation.corePosition) === BlockId.StationCore;
-    if (!consoleReady && !aboard && !boardingNearby && !stationNearby) return fail("Use nearby flight hardware, approach the station core, or come within six blocks to board your pilot seat.");
+    if (!consoleReady && !aboard && !boardingNearby) return fail("Use nearby flight hardware or come within six blocks to board your pilot seat.");
     try {
       if (action.kind === "route") { firstFlightDestination(this.world.locationScope.locationId, action.route); this.spaceflightRoute = action.route; this.emitHud(true); return true; }
       if (action.kind === "deploy") {
@@ -13141,7 +13208,7 @@ export class VoxelEngine {
         if (!ship || ship.revision !== action.vehicleRevision) return fail("The spacecraft changed. Inspect the current mission again.");
         const actor = { actorId: "local", locationId: this.world.locationScope.locationId, expectedVehicleRevision: ship.revision };
         const base = { vehicleId: ship.vehicleId, actionId: crypto.randomUUID() };
-        if (action.kind === "station-found" || action.kind === "station-cabin" || action.kind === "station-dock" || action.kind === "station-access" || action.kind === "station-name" || action.kind === "station-habitat") {
+        if (action.kind === "station-found" || action.kind === "station-dock") {
           const registry = this.orbitalStations ?? createStationRegistry(actor.locationId);
           if (registry.revision !== action.registryRevision || ship.trip) return fail("The station or mission changed. Inspect it again.");
           const principal = { actorId: "local", factionIds: [], guildIds: [] };
@@ -13157,21 +13224,7 @@ export class VoxelEngine {
             for (const [key, state] of machines) this.wayworks.set(key, state);
             this.publishBlockEdits(plan.blocks, "batch");
             this.events.onToast("Station deck founded. It contains no air or power; build and supply a sealed habitat before leaving EVA protection.");
-          } else if (action.kind === "station-cabin") {
-            const station = registry.stations[action.stationId];
-            if (!station || this.position.distanceTo(new THREE.Vector3(...station.corePosition)) > 8 || this.wayworks.size + 2 > 256) return fail("Approach the core and leave capacity for the cabin door and bridge.");
-            const plan = planStationCabin({ registry, stationId: action.stationId, actor: principal, inventory: this.inventory,
-              blockAt: (x, y, z) => this.world.getBlock(x, y, z), blocked: ([x, y, z]) => y < MIN_Y || y > MAX_Y
-                || blockEditIntersectsPlayer({ x, y, z, type: BlockId.StoneBrick }, this.position, this.currentPlayerHeight())
-                || [...this.remotePlayers.values()].some(remote => blockEditIntersectsPlayer({ x, y, z, type: BlockId.StoneBrick }, remote.target, PLAYER_HEIGHT)) });
-            const door = placedWorkshopMachine("pressure-door", plan.doorSlot, actor.locationId, "local", 1);
-            this.world.setBlocksBatch(plan.blocks, true, true);
-            for (const block of plan.blocks) if (block.facing !== undefined) this.world.setBlockFacing(block.x, block.y, block.z, block.facing, true);
-            this.wayworks.set(blockKey(...plan.door), door);
-            const bridge = plan.blocks[0]; this.wayworks.set(blockKey(bridge.x, bridge.y, bridge.z), createMachine("station-truss", actor.locationId, "local"));
-            this.inventory = plan.inventory; this.publishBlockEdits(plan.blocks, "batch");
-            this.events.onToast(`Cabin shell built. Place a supplied Life-Support Controller at [${plan.socket.join(", ")}] facing south into the room. The shell contains no air or power.`);
-          } else if (action.kind === "station-dock") {
+          } else {
             if (!aboard) return fail("Board the pilot seat before docking or undocking.");
             const plan = planStationDock({ registry, fleet: this.spacefleet, actor: principal, vehicleId: ship.vehicleId,
               stationId: action.stationId, dockId: action.dockId, expectedRegistryRevision: action.registryRevision,
@@ -13179,17 +13232,6 @@ export class VoxelEngine {
               blockAt: (x, y, z) => this.world.getBlock(x, y, z),
               blocked: ([x, y, z]) => [...this.remotePlayers.values()].some(remote => blockEditIntersectsPlayer({ x, y, z, type: BlockId.StationTruss }, remote.target, PLAYER_HEIGHT)) });
             this.spacefleet = plan.fleet; this.orbitalStations = plan.registry;
-          } else {
-            const station = registry.stations[action.stationId];
-            if (!station || this.position.distanceTo(new THREE.Vector3(...station.corePosition)) > 8
-              || this.world.getBlock(...station.corePosition) !== BlockId.StationCore) return fail("Approach the station's intact claim core.");
-            const context = { actor: principal, locationId: actor.locationId, expectedRevision: registry.revision };
-            const command = action.kind === "station-access" ? { type: "access" as const, memberIds: action.memberIds, association: action.association, access: action.access }
-              : action.kind === "station-name" ? { type: "rename" as const, name: action.name.trim(), icon: station.icon }
-                : { type: "habitat" as const, pressureZoneIds: (this.pressureRuntime?.snapshot().zones ?? []).filter(zone => zone.cellKeys.some(key => {
-                  const point = key.split(",").map(Number) as VehicleVector; return stationAt(registry, point)?.id === station.id;
-                })).map(zone => zone.zoneId), wayanchorLeases: station.wayanchorLeases };
-            this.orbitalStations = applyStationAction(registry, context, { ...command, actionId: base.actionId, stationId: station.id }).registry;
           }
           this.saveSoon(); this.emitHud(true); return true;
         }
@@ -13314,6 +13356,8 @@ export class VoxelEngine {
     }) || machineKindForBlock(this.world.getBlock(...this.activeWayworksKey!.split(",").map(Number) as [number, number, number])) !== state.kind)) this.guestPressureInspector = null;
     const network = this.wayworksNetworks?.find((entry) => entry.nodeKeys.includes(this.activeWayworksKey!));
     return { ...state, name: state.kind.split("-").map(word => word[0].toUpperCase() + word.slice(1)).join(" "),
+      pressureOnly: this.multiplayer?.role === "guest" && this.guestPressureOnlyFacility?.id === this.activeNetworkFacilityId
+        && this.guestPressureOnlyFacility?.locationId === state.locationId,
       ...(spaceflightMachineKind(state.kind) ? { flight: this.spaceflightMission() } : {}),
       capacityJ: machineCapacity(state.kind, state.workshop), rateW: machineRate(state.kind), heldItemName: this.selectedSlot() ? itemName(this.selectedSlot()!.item) : "Empty hand",
       pressure: this.multiplayer?.role === "guest" ? this.guestPressureInspector?.diagnostics
@@ -13326,7 +13370,7 @@ export class VoxelEngine {
   private workshopActorAccess(state: MachineState, actor: string, action?: WorkshopAction) {
     if (!state || state.locationId !== (this.world.locationScope?.locationId ?? "home-preview")) return false;
     const key = [...this.wayworks].find(([, candidate]) => candidate === state)?.[0];
-    const permission = action?.kind === "pressure" ? /door|airlock|hangar/.test(state.kind) ? "airlock" : "life-support" : "container";
+    const permission = action?.kind === "pressure" ? pressureDoorKind(state.kind) || state.kind === "airlock-controller" ? "airlock" : "life-support" : "container";
     if (key && !this.stationActorAccess(actor, ...key.split(",").map(Number) as VehicleVector, permission)) return false;
     const owner = state.ownerId === actor || state.ownerId === "local" && (actor === "local" || actor === this.multiplayer?.identity.id);
     if (owner || state.workshop.trusted.includes(actor)) return true;
@@ -33980,8 +34024,10 @@ export class VoxelEngine {
       const key = String(args.targetId ?? "").replace(/^workshop:/u, ""), target = blockPositionFromKey(key);
       const state = this.wayworks.get(key);
       if (!target || !state || Math.hypot(target.x - pose.x, target.y - pose.y, target.z - pose.z) > 5.5
-        || machineKindForBlock(this.world.getBlock(target.x, target.y, target.z)) !== state.kind || !this.workshopActorAccess(state, command.agentId)) return blocked("workshop_unavailable", "Machine is unavailable, private or out of reach.");
-      if (command.kind === "workshop_get") return completed("workshop_ready", "Host-authored machine state and revision.", { targetId: key, machine: structuredClone(state), pressure: this.pressureRuntime?.devices.has(key) ? this.pressureRuntime.diagnosticsFor(key) : undefined, inventoryRevision: this.agentInventoryRevisions.get(command.agentId) ?? 0 });
+        || machineKindForBlock(this.world.getBlock(target.x, target.y, target.z)) !== state.kind) return blocked("workshop_unavailable", "Machine is unavailable, private or out of reach.");
+      const view = this.sharedFacilityActorState("wayworks", key, command.agentId);
+      if (!view) return blocked("workshop_unavailable", "Machine is unavailable, private or out of reach.");
+      if (command.kind === "workshop_get") return completed("workshop_ready", "Host-authored machine view and revision; pressure-only access does not expose storage.", { targetId: key, machine: view, pressure: (view.pressureInspector as PressureInspector | undefined)?.diagnostics, inventoryRevision: this.agentInventoryRevisions.get(command.agentId) ?? 0 });
       const operation = parseWorkshopAction(args.operation), inventory = this.agentInventories.get(command.agentId) ?? [], index = Number(args.inventorySlot);
       if (!operation || !Number.isInteger(index) || index < 0 || index >= inventory.length
         || args.expectedInventoryRevision !== (this.agentInventoryRevisions.get(command.agentId) ?? 0) || args.expectedMachineRevision !== state.revision) return blocked("workshop_stale", "Refresh machine and inventory revisions before retrying.");
@@ -33990,7 +34036,8 @@ export class VoxelEngine {
         const result = this.pressureRuntime?.operate(key, command.agentId, inventory[index]?.item, state.revision, operation.action, performance.now());
         if (!result?.ok) return blocked("pressure_rejected", result?.reason ?? "Pressure coordinator unavailable.");
         this.saveSoon();
-        return completed("pressure_committed", result.reason, { machine: structuredClone(this.wayworks.get(key)), pressure: this.pressureRuntime?.diagnosticsFor(key), inventoryRevision: this.agentInventoryRevisions.get(command.agentId) ?? 0 });
+        const updated = this.sharedFacilityActorState("wayworks", key, command.agentId);
+        return completed("pressure_committed", result.reason, { machine: updated, pressure: (updated?.pressureInspector as PressureInspector | undefined)?.diagnostics, inventoryRevision: this.agentInventoryRevisions.get(command.agentId) ?? 0 });
       }
       if ((operation.kind === "crank" || operation.kind === "charge") && performance.now() < (this.wayworksActorReady.get(command.agentId) ?? 0)) return blocked("workshop_cooldown", "Wait for the previous effort or transfer to settle.");
       const equipment = this.agentEquipment.get(command.agentId) ?? blankEquipment();
@@ -34449,7 +34496,8 @@ export class VoxelEngine {
       if (!position || machineKindForBlock(this.world.getBlock(position.x, position.y, position.z)) !== state.kind) continue;
       const distance = distanceToSelf(position);
       if (distance > 20) continue;
-      const accessible = this.workshopActorAccess(state, agentId);
+      const accessible = this.workshopActorAccess(state, agentId) || Boolean(this.pressureRuntime?.devices.has(key)
+        && this.workshopActorAccess(state, agentId, { kind: "pressure", action: { kind: "mode", mode: "off" } }));
       nearby.push({ id: `workshop:${key}`, kind: "workstation", name: state.kind.replaceAll("-", " "), position, distance,
         state: accessible ? `${state.status}; revision:${state.revision}; use workshop_get` : "private", interactable: accessible && distance <= 5.5 });
     }

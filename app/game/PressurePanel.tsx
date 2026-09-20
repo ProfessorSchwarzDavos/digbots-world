@@ -15,6 +15,7 @@ export type PressurePanelProps = Readonly<{
   kind: MachineKind;
   workshop: WorkshopState;
   pressure?: ReturnType<PressureRuntime["diagnosticsFor"]>;
+  serviceOnly?: boolean;
   onAction: (action: WorkshopAction) => void;
 }>;
 type HoldCommand = Extract<PressureAction, { kind: "hold" }>["command"];
@@ -63,7 +64,7 @@ export function PressurePanel(props: PressurePanelProps) {
   return <PressurePanelContent key={`${props.kind}:${props.pressure?.device?.installationId ?? props.workshop.process?.installationId ?? "unbound"}:${!!props.pressure?.device?.airlock}`} {...props} />;
 }
 
-function PressurePanelContent({ kind, workshop, pressure, onAction }: PressurePanelProps) {
+function PressurePanelContent({ kind, workshop, pressure, onAction, serviceOnly }: PressurePanelProps) {
   const id = useId();
   const device = pressure?.device, zone = pressure?.zone, process = workshop.process;
   const [pressureDraft, setPressureDraft] = useState(String((device?.targetPressurePa ?? 100000) / 1000));
@@ -114,7 +115,7 @@ function PressurePanelContent({ kind, workshop, pressure, onAction }: PressurePa
       onKeyDown={event => { if (event.key === " " || event.key === "Enter") { event.preventDefault(); if (!event.repeat) startHold(command); } }}
       onKeyUp={event => { if (event.key === " " || event.key === "Enter") { event.preventDefault(); stopHold(); } }}>{label}</button>;
   }
-  const recipes = chemistryRecipes(kind);
+  const recipes = serviceOnly ? [] : chemistryRecipes(kind);
   const status = zone?.status ?? "unknown";
   const total = zone ? zone.oxygenMilliMoles + zone.inertMilliMoles + zone.co2MilliMoles : 0;
   const targetPressurePa = Number(pressureDraft) * 1000, targetTemperatureMilliC = Number(temperatureDraft) * 1000;
@@ -191,7 +192,7 @@ function PressurePanelContent({ kind, workshop, pressure, onAction }: PressurePa
       {kind === "carbon-scrubber" && <p className={styles.safety}>Filter remaining: {reading(filterRemaining, 1000)} standard L CO₂. {filterRemaining ? "Spent filters go to the byproduct slot." : "Deposit a Habitat Filter in the reagent slot."}</p>}
       <details className={styles.detail}><summary>Recipe quantities and energy</summary><ul className={styles.recipes}>{recipes.map(recipe => { const cost = chemistryCost(recipe, workshop); return <li key={recipe.id}><strong>{recipe.name}</strong><span>{[...recipe.inputs.map(quantityText), ...recipe.itemsIn?.map(entry => `${entry.count} × ${itemName(entry.item)}`) ?? [], ...(recipe.harvest ? [`Exterior atmospheric ${words(recipe.harvest)}`] : [])].join(" + ")} → {[...recipe.outputs.map(quantityText), ...recipe.itemsOut?.map(entry => `${entry.count} × ${itemName(entry.item)}`) ?? []].join(" + ") || "filter capture"}</span><small>{reading(cost.durationMs, 1000)} s · {reading(cost.costJ, 1000)} kJ {recipe.generatedJ ? `ignition from yield · ${reading(recipe.generatedJ, 1000)} kJ gross generation` : "input"}{recipe.filterMl ? ` · ${reading(recipe.filterMl, 1000)} standard L filter capacity used` : ""}{recipe.wasteHeatJ ? ` · ${reading(recipe.wasteHeatJ, 1000)} kJ waste heat` : ""}</small></li>; })}</ul></details>
     </div>}
-    {process && <details className={styles.detail}><summary>Reservoirs and transport limits</summary>
+    {process && !serviceOnly && <details className={styles.detail}><summary>Reservoirs and transport limits</summary>
       {fluidCapacity > 0 && <p className={styles.help}>Combined liquid: {reading(workshopStoredTotal(workshop, "fluid"), 1000)} / {reading(fluidCapacity, 1000)} L</p>}
       {gasCapacity > 0 && <p className={styles.help}>Combined gas: {reading(workshopStoredTotal(workshop, "chemical"), 1000)} / {reading(gasCapacity, 1000)} standard L, including recovery reserve.</p>}
       <dl className={styles.reservoirs}>{([ ["Primary liquid", workshop.fluid, false], ["Auxiliary liquid", process.fluidAux, false], ["Primary gas", workshop.chemical, true], ["Auxiliary gas", process.chemicalAux, true], ["Reagent gas", process.chemicalReagent, true] ] as const).filter(([, store, gas]) => store || (gas ? gasCapacity : fluidCapacity) > 0).map(([label, store, gas]) => <div key={label}><dt>{label}</dt><dd>{store ? `${reading(store.amount, 1000)} ${gas ? "standard L" : "L"} ${words(store.resource)}` : "Empty"}</dd></div>)}</dl>

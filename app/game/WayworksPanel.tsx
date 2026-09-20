@@ -31,6 +31,7 @@ export type WayworksPanelProps = Readonly<{
   heldItemName?: string;
   feedback?: string;
   workshop?: WorkshopState;
+  pressureOnly?: boolean;
   pressure?: ReturnType<PressureRuntime["diagnosticsFor"]>;
   flight?: SpaceflightMission;
   onFlightAction?: (action: SpaceflightIntent) => void;
@@ -131,6 +132,11 @@ export function WayworksPanel(props: WayworksPanelProps) {
           {props.network && !passiveTank && <p className="ww-help" data-network-id={props.network.id}>Grid segment: {props.network.count} blocks · {reading(props.network.energyJ, 1000)} / {reading(props.network.capacityJ, 1000)} kJ · topology {props.network.revision}</p>}
           <p className="ww-selected">Selected: {heldItemName || "Empty hand"}. Close the inspector to change hotbar slots. Simulation pauses while inspecting.</p>
 
+          {props.pressureOnly ? <>
+            <p className="ww-help">Pressure service only. Storage and machine configuration remain private.</p>
+            <PressurePanel kind={kind as MachineKind} workshop={workshop} pressure={props.pressure} onAction={onAction} serviceOnly />
+          </> : <>
+
           {slots.length > 0 && <section className="ww-materials" aria-label="Machine inventory">
             <h3>{slots.includes("fuel") ? "Fuel" : "Materials"}</h3>
             {slots.map((slot) => <div className="ww-slot" key={slot}>
@@ -221,6 +227,7 @@ export function WayworksPanel(props: WayworksPanelProps) {
             <button type="button" onClick={() => onAction({ kind: "rotate" })}>Rotate 90°</button>
             <button type="button" aria-pressed={enabled} onClick={() => onAction({ kind: "toggle" })}>{enabled ? "Disable machine" : "Enable machine"}</button>
           </footer>
+          </>}
         </div>
       </section>
     </div>

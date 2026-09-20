@@ -25,6 +25,13 @@ const base: WayworksPanelProps = {
 };
 const render = (overrides: Partial<WayworksPanelProps> = {}) => renderToStaticMarkup(createElement(WayworksPanel, { ...base, ...overrides }));
 
+test("pressure-only station service hides inventory, reservoirs and general configuration controls", () => {
+  const machine = createMachine("life-support-controller", "L", "local");
+  const html = render({ ...machine, pressureOnly: true });
+  assert.match(html, /Pressure service only/); assert.match(html, /Habitat atmosphere/);
+  for (const forbidden of ["Machine inventory", "Six-face connections", "Control, security and upgrades", "Reservoirs and transport limits", "Rotate 90", "Enable machine", "Fill selected container"]) assert.ok(!html.includes(forbidden), forbidden);
+});
+
 test("machine inspector keeps energy, capacity, and rate distinct and reports authoritative status", () => {
   const html = render();
   assert.match(html, /role="dialog" aria-modal="true"/);

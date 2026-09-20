@@ -9,6 +9,7 @@ import { SpaceflightDialog } from "../app/game/SpaceflightPanel";
 import { homeLocation, locationId, universeId } from "../app/game/location-address";
 import { createStationRegistry } from "../app/game/orbital-station";
 import { createSurveyHopper } from "../app/game/space-vehicle";
+import { planStationFoundation } from "../app/game/station-runtime";
 
 test("eleven flight inventory silhouettes route through the ordinary item renderer", () => {
   const shapes = new Set<string>();
@@ -29,7 +30,7 @@ test("mission dialog identifies its modal boundary and shows actionable failure 
     ship: null, pad: null, route: "home-orbit", costs: null, blockers: [], status: "No ship deployed", destination: null,
   }, feedback: "Arrival held: another participant occupies the origin.", onClose: () => {}, onAction: () => {} }));
   assert.ok(markup.includes('role="dialog"')); assert.ok(markup.includes('aria-modal="true"'));
-  assert.ok(markup.includes("Return to cockpit")); assert.ok(markup.includes("Arrival held:"));
+  assert.ok(markup.includes("Return to game")); assert.ok(markup.includes("Arrival held:"));
 });
 
 test("orbit mission exposes finite starter construction with a labeled name input", () => {
@@ -40,4 +41,18 @@ test("orbit mission exposes finite starter construction with a labeled name inpu
   }, onClose: () => {}, onAction: () => {} }));
   assert.ok(markup.includes("New station name")); assert.ok(markup.includes('maxLength="80"'));
   assert.ok(markup.includes("Build starter station deck")); assert.ok(markup.includes("supplies no air, gas or energy"));
+});
+
+test("station controls render independently of the spacecraft branch", () => {
+  const orbit = locationId({ ...homeLocation(universeId("station-ui-alone")), kind: "orbit", instanceId: "low" });
+  const ship = structuredClone(createSurveyHopper("ship", "local", orbit, [0, 32.51, 0])); ship.phase = "orbit";
+  const stations = planStationFoundation({ registry: createStationRegistry(orbit), actor: { actorId: "local", factionIds: [], guildIds: [] },
+    ship, name: "Independent Station", stationId: "station", actionId: "found", blockAt: () => BlockId.Air, blocked: () => false,
+    inventory: [{ item: BlockId.StationCore, count: 1 }, { item: BlockId.OrbitalDock, count: 1 }, { item: BlockId.StationTruss, count: 8 }] }).registry;
+  const markup = renderToStaticMarkup(createElement(SpaceflightDialog, { mission: {
+    ship: null, pad: null, route: "home-surface", costs: null, blockers: [], status: "orbit", destination: null, stations,
+  }, onClose: () => {}, onAction: () => {} }));
+  assert.ok(markup.includes("Independent Station")); assert.ok(markup.includes("Rename station"));
+  assert.ok(markup.includes("Station icon")); assert.ok(!markup.includes("Build starter station deck"));
+  assert.ok(!markup.includes("Return to cockpit"), "station-only dialog has a context-appropriate close action");
 });

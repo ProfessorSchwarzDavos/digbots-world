@@ -1,5 +1,32 @@
 Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks; add double-tap-forward sprinting; build scalable butterfly exhibit blocks with inventories, flowers, landing behavior, and capacity up to about 20 connected blocks; make recipe-book hover previews and click-to-fill crafting, fix crafting/furnace arrows, add recipe search and mirrored recipes; animate and flow water, improve swimming/shore exits, add oxygen; add ocean, river, and underground fish; add a larger two-seat sailboat with crouch-use chest storage; fix third-person vertical controls and interaction; allow mobs through open doors; remove tree-growth notices; add five surface mobs, birds, desert plants/features, desert and forest temple POIs with chests, a new enemy, and rare magical durable loot; add a tameable breedable banana-rabbit pet with naming and commands; add metadata-preserving creature cages; add male/female player choice with multiplayer, armor, and held-item representation; add a banana-rabbit POI; add visible game versions and save-version metadata plus title-screen fullscreen; add skeleton archery; optimize and benchmark 10-default/16-max render distance with separate 6-8 simulation distance; rework clouds and biome-sensitive weather; enrich meadow grass, flowers, butterflies, and a large butterfly POI. Do all of it thoughtfully and report only when entirely done.
 
+## Celestial Frontiers CF6 — independent station console and service grants
+
+- Station-only intents now use registry revision and intact-core reach without a
+  nearby ship. Name/icon, members/association, grants, habitat refresh and cabin
+  controls render independently. A normally placed, owned collar can be registered
+  nearby without generating or debiting a second block; stale/duplicate/remote
+  requests reject and finite machine/fleet/inventory stores remain unchanged.
+- Shared pressure admission uses the airlock or life-support grant plus machine
+  owner/trust. Pressure-only peers receive an allowlisted presentation without
+  private inventories, reservoir contents, channels or trusted IDs. Open, reject,
+  transact and sync share that projection; revocation closes access. Guest view
+  reconstruction retains its marker/installation and real hardware capacity.
+- Red grant regressions1pass/3fail retained; console28PASS, first grant/runtime34PASS,
+  combined53PASS and focused-r3 84PASS. Final human/agent batch85PASS and
+  static-r33PASS. Lint-r20PASS before final agent adapter; final lint/build/browser
+  still pending at this source checkpoint. Correct inspector .tsx tests included
+  in53/84; an earlier nonexistent .ts argument was omitted by Node, not tested.
+- Noah explicitly approved standing Wildkeeper coordination; recovery/progress
+  message sent12:30UTC. No publication/deployment/spend scope changed. FullCF6
+  remains incomplete: remote membership and typed station/travel authority,
+  Waylink, complete kit/seals/operating loop and other full-scope packages remain.
+- Browser input is a hash-bound derivative of retained co2-r1/050 with exactly
+  one empty Orbital Dock added to an empty inventory slot. No world/ship/pose/
+  pressure/equipment changes; not crafting proof. Original untouched. One failed
+  final suite receipt reflects a missing agentBuildJobs test-harness map; adding
+  the normal empty map produced85PASS without weakening the authority assertions.
+
 ## Celestial Frontiers CF6 — revision13 recovery and full continuation
 
 - Explicit97%weekly resume replaces the old50%pause; director privately owns

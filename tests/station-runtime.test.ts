@@ -7,7 +7,7 @@ import { VoxelEngine } from "../app/game/engine";
 import { homeLocation, locationId, universeId } from "../app/game/location-address";
 import { createStationRegistry, remapStationRegistry, validateStationRegistrySave } from "../app/game/orbital-station";
 import { createSurveyHopper, planSpaceVehicleTravel, remapSpacefleetUniverse } from "../app/game/space-vehicle";
-import { planStationFoundation, planStationCabin, planStationDock, shipDock, validateStationFleetCustody, type StationBlock } from "../app/game/station-runtime";
+import { planStationFoundation, planStationCabin, planStationDock, planStationDockRegistration, shipDock, validateStationFleetCustody, type StationBlock } from "../app/game/station-runtime";
 import { createMachine } from "../app/game/wayworks";
 import { composeUniverseSave, splitUniverseSave } from "../app/game/universe-save";
 import { flightFixture } from "./spaceflight-fixtures";
@@ -39,6 +39,43 @@ test("finite starter deck consumes exactly the empty kit and never makes gas, en
   assert.deepEqual(f.ship, shipBefore); assert.equal(f.inventory[2].count, 8);
   assert.equal(plan.registry.stations.station.pressureZoneIds.length, 0);
   f.inventory[2].count = 7; assert.throws(f.plan, /Carry/); assert.equal(f.registry.revision, 0);
+});
+
+test("additional collar registration binds an existing physical block without inventory or fleet changes", () => {
+  const f = founded(), position: [number, number, number] = [6, 32, 6];
+  const input = { registry: f.registry, stationId: "station", actor, position, actionId: "register", dockId: "second", expectedRegistryRevision: 1, blockAt: f.blockAt };
+  assert.throws(() => planStationDockRegistration(input), /intact collar/);
+  f.cells.set(position.join(","), BlockId.OrbitalDock);
+  const before = structuredClone({ inventory: f.inventory, ship: f.ship, cells: f.cells, registry: f.registry });
+  const registry = planStationDockRegistration(input);
+  assert.deepEqual(registry.stations.station.docks.second.position, position);
+  assert.deepEqual({ inventory: f.inventory, ship: f.ship, cells: f.cells, registry: f.registry }, before);
+  assert.deepEqual(validateStationRegistrySave(JSON.parse(JSON.stringify(registry))), registry);
+  assert.throws(() => planStationDockRegistration({ ...input, registry, expectedRegistryRevision: 2, actionId: "again", dockId: "third" }), /already registered/);
+  assert.throws(() => planStationDockRegistration({ ...input, expectedRegistryRevision: 0 }), /Inspect/);
+  assert.throws(() => planStationDockRegistration({ ...input, actor: { ...actor, actorId: "guest" } }), /permission/);
+  assert.throws(() => planStationDockRegistration({ ...input, position: [40, 32, 6] }), /claim/);
+});
+
+test("actual engine registers only owned nearby collars with current station revision and no ship", async () => {
+  const f = founded(), position: [number, number, number] = [6, 32, 12], key = position.join(","), messages: string[] = [];
+  f.cells.set(key, BlockId.OrbitalDock);
+  const collar = createMachine("orbital-dock", orbit, "local"); collar.energyJ = 500;
+  const engine = Object.assign(Object.create(VoxelEngine.prototype), {
+    persistent: true, activeWorldId: "station-runtime", orbitalStations: f.registry, multiplayer: null,
+    position: new THREE.Vector3(...position).addScalar(.5), spacefleet: { schema: 1, vehicles: {} }, wayworks: new Map([[key, collar]]),
+    world: { locationScope: { locationId: orbit }, getBlock: f.blockAt }, inventory: f.inventory,
+    events: { onToast: (message: string) => messages.push(message) }, emitHud: () => {}, saveSoon: () => {},
+  }) as VoxelEngine;
+  const intent = { kind: "station-register-dock" as const, stationId: "station", registryRevision: 1, position };
+  const stores = structuredClone({ machine: collar, inventory: engine.inventory, fleet: engine.spacefleet });
+  collar.ownerId = "other"; assert.equal(await engine.spaceflightAction(intent), false); collar.ownerId = "local";
+  engine.position.x += 20; assert.equal(await engine.spaceflightAction(intent), false); engine.position.x -= 20;
+  assert.equal(await engine.spaceflightAction(intent), true, messages.at(-1));
+  assert.equal(Object.keys(engine.orbitalStations!.stations.station.docks).length, 2);
+  assert.deepEqual({ machine: collar, inventory: engine.inventory, fleet: engine.spacefleet }, stores);
+  const registered = structuredClone(engine.orbitalStations);
+  assert.equal(await engine.spaceflightAction(intent), false); assert.deepEqual(engine.orbitalStations, registered);
 });
 
 test("foundation rejects blocked cells, foreign ships, sealed kits and intersecting claims without mutation", () => {
@@ -123,6 +160,29 @@ test("station save is location-owned, rejects foreign binding and mismatched shi
   assert.throws(() => validateStationFleetCustody(corrupt, save.spacefleet!), /custody/);
 });
 
+test("actual station core administration remains usable without a nearby spacecraft", async () => {
+  const f = founded(), messages: string[] = [];
+  const engine = Object.assign(Object.create(VoxelEngine.prototype), {
+    persistent: true, activeWorldId: "station-runtime", locationTransitioning: false, spaceflightBusy: false, pendingSpaceArrival: null,
+    multiplayer: null, remotePlayers: new Map(), spacefleet: { schema: 1, vehicles: {} }, orbitalStations: f.registry,
+    activeWayworksKey: null, wayworks: new Map(), position: new THREE.Vector3(6, 33, 0),
+    world: { locationScope: { locationId: orbit, epoch: 1, revision: 1 }, getBlock: f.blockAt },
+    events: { onToast: (message: string) => messages.push(message) }, emitHud: () => {}, saveSoon: () => {},
+  }) as VoxelEngine;
+  const rename = { kind: "station-name" as const, stationId: "station", registryRevision: 1, name: "Independent Observatory", icon: "observatory" };
+  assert.equal(await engine.spaceflightAction(rename), true, messages.at(-1));
+  assert.equal(engine.orbitalStations!.stations.station.name, rename.name);
+  assert.equal(engine.orbitalStations!.stations.station.icon, rename.icon);
+  assert.deepEqual(engine.spacefleet, { schema: 1, vehicles: {} }, "station administration cannot create or alter a ship");
+  const saved = structuredClone(engine.orbitalStations);
+  assert.equal(await engine.spaceflightAction(rename), false, "stale registry revision rejected");
+  assert.deepEqual(engine.orbitalStations, saved);
+  engine.position.x += 30;
+  assert.equal(await engine.spaceflightAction({ ...rename, registryRevision: 2 }), false, "remote administration rejected");
+  engine.position.x -= 30; f.cells.delete("6,32,0");
+  assert.equal(await engine.spaceflightAction({ ...rename, registryRevision: 2 }), false, "missing physical core rejected");
+});
+
 test("actual engine founders consume physical kit, dock, deny stale/guest edits and retain location-bound grants", async () => {
   const f = fixture(), messages: string[] = [];
   const engine = Object.assign(Object.create(VoxelEngine.prototype), {
@@ -143,24 +203,24 @@ test("actual engine founders consume physical kit, dock, deny stale/guest edits 
   const allowed = (id: string, permission: string) => Reflect.get(engine, "stationActorAccess").call(engine, id, ...station.corePosition, permission);
   assert.equal(allowed("local", "build"), true); assert.equal(allowed("guest", "build"), false);
   assert.equal(await engine.spaceflightAction({ kind: "station-access", stationId: station.id, memberIds: ["guest"], association: null,
-    access: { ...station.access, build: "trusted" }, registryRevision: 2, vehicleRevision: 1 }), true, messages.at(-1));
+    access: { ...station.access, build: "trusted" }, registryRevision: 2 }), true, messages.at(-1));
   assert.equal(allowed("guest", "build"), true); assert.equal(allowed("guest", "container"), false);
   const door = createMachine("pressure-door", orbit, "local"); door.energyJ = 12000;
   engine.inventory = [{ item: BlockId.StoneBrick, count: 37 }, { item: BlockId.ReinforcedWindow, count: 2 },
     { item: BlockId.StationTruss, count: 1 }, { item: BlockId.PressureDoor, count: 1, metadata: { wayworks: door } }];
-  assert.equal(await engine.spaceflightAction({ kind: "station-cabin", stationId: station.id, registryRevision: 3, vehicleRevision: 1 }), true, messages.at(-1));
+  assert.equal(await engine.spaceflightAction({ kind: "station-cabin", stationId: station.id, registryRevision: 3 }), true, messages.at(-1));
   assert.deepEqual(engine.inventory, [null, null, null, null]); assert.equal(engine.wayworks.size, 12);
   assert.equal([...engine.wayworks.values()].find(machine => machine.kind === "pressure-door")?.energyJ, 12000);
   assert.equal(await engine.spaceflightAction({ kind: "leave", vehicleRevision: 1 }), true);
   engine.position.set(station.corePosition[0] + 3, station.corePosition[1] + .5, station.corePosition[2]);
   const zoneId = `${orbit}:air:0123456789abcdef`, fleetBefore = structuredClone(engine.spacefleet);
   Reflect.set(engine, "pressureRuntime", { snapshot: () => ({ zones: [{ zoneId, cellKeys: [engine.position.clone().floor().toArray().join(",")] }] }) });
-  assert.equal(await engine.spaceflightAction({ kind: "station-habitat", stationId: station.id, registryRevision: 3, vehicleRevision: 2 }), true,
+  assert.equal(await engine.spaceflightAction({ kind: "station-habitat", stationId: station.id, registryRevision: 3 }), true,
     `nearby station administration does not require boarding through a sealed wall: ${messages.at(-1)}`);
   assert.deepEqual(engine.orbitalStations!.stations[station.id].pressureZoneIds, [zoneId]);
   assert.deepEqual(engine.spacefleet, fleetBefore);
   engine.position.x += 20;
-  assert.equal(await engine.spaceflightAction({ kind: "station-habitat", stationId: station.id, registryRevision: 4, vehicleRevision: 2 }), false);
+  assert.equal(await engine.spaceflightAction({ kind: "station-habitat", stationId: station.id, registryRevision: 4 }), false);
   engine.position.x -= 20; f.cells.delete(station.corePosition.join(","));
-  assert.equal(await engine.spaceflightAction({ kind: "station-habitat", stationId: station.id, registryRevision: 4, vehicleRevision: 2 }), false);
+  assert.equal(await engine.spaceflightAction({ kind: "station-habitat", stationId: station.id, registryRevision: 4 }), false);
 });

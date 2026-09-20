@@ -2,6 +2,13 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Survey3151163/build28 jMl6A6sS0jKlukMXr5-yx passed committed79/static61/lint43
+  and unchanged official28. Normal keyboard UI survey60→140 asteroids passed
+  boundary audit:1000J electricity→1000J heat, all other observed machines and
+  paused equipment/pose exact; inventory/fleet/guest states/inactive places exact.
+  Desktop/mobile reviewed; narrow keyboard focus outline crowded status text.
+  Bounded16px section spacing correction underway, followed by fresh build and
+  exact normal/cold replay. R1 evidence retained; fullCF6 remains incomplete.
 - Guest checkpoint de50da5 independently accepted by Wildkeeper. Solo ordinary
   Observatory survey now prepares one finite ring, exactly converts1000J to heat,
   commits before runtime reconstruction, and retains an exact retry receipt through

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { register } from "node:module";
+import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createMachine } from "../app/game/wayworks";
@@ -19,6 +20,9 @@ function markup(survey: { level: number; count: number; epoch: number; registryR
 test("observatory presents the finite paid survey separately from read-only chart knowledge", () => {
   const html = markup({ level: 1, count: 60, epoch: 4, registryRevision: 5, shared: false });
   assert.match(html, /aria-label="Finite asteroid field survey"/);
+  assert.match(html, /class="ww-field-survey"/);
+  assert.match(readFileSync(new URL("../app/game/wayworks.css", import.meta.url), "utf8"), /\.ww-field-survey \{ margin-bottom: 16px; \}/,
+    "keyboard focus outline has clear space before the machine status line");
   assert.match(html, /Field extent 1 \/ 3 · 60 asteroids/);
   assert.match(html, /<button type="button">Survey next ring and reload · 1 kJ<\/button>/);
   assert.match(html, /grants no ownership or ore/);

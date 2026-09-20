@@ -122,7 +122,7 @@ export function WayworksPanel(props: WayworksPanelProps) {
           {kind === "station-observatory" && <section aria-label="Observatory chart reader">
             <p className="ww-help">Read the first-flight chart for Waystar, Blockwild and Morrow, plus your current body. This snapshot includes only authorized local station points. Reading consumes 1 kJ and transfers it to the instrument heat buffer; no travel or hidden-world discovery is granted.</p>
             <button type="button" disabled={!enabled || energyJ < 1000 || !props.onFlightAction} onClick={() => props.onFlightAction?.({ kind: "observatory-read" })}>Read first-flight chart · 1 kJ</button>
-            {props.asteroidSurvey && <div aria-label="Finite asteroid field survey">
+            {props.asteroidSurvey && <div className="ww-field-survey" aria-label="Finite asteroid field survey">
               <p className="ww-help">Field extent {props.asteroidSurvey.level} / 3 · {props.asteroidSurvey.count} asteroids. A survey adds one finite ring, preserves existing claims and excavations, and reloads the local view after saving. The world stays paused until you resume. It grants no ownership or ore.</p>
               <button type="button" disabled={!enabled || energyJ < 1000 || !props.onFlightAction || props.asteroidSurvey.shared || props.asteroidSurvey.level >= 3}
                 onClick={() => props.onFlightAction?.({ kind: "asteroid-survey", epoch: props.asteroidSurvey!.epoch, registryRevision: props.asteroidSurvey!.registryRevision })}>

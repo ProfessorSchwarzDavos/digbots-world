@@ -1908,3 +1908,29 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   All helpers/builds/tests/browser jobs drained. CF5 exact-source manifest and
   criterion-level handoff are ready for director review. This is not CFV or full
   campaign completion; CF6 remains proposal-only pending acceptance/dispatch.
+
+## CF6 bounded Morrow ecology verification - 2026-09-20 10:07 UTC
+
+- Director's bounded r12 ecology packet: zero helpers, no new large integration.
+  Reused exact838d27b/buildYSfUwT4lfnHg_yMTDc5of; no runtime source changes.
+  Historical lunar return-r1/034 had mobDensity0. Preserved failed normal-r1;
+  director approved a derivative changing only authoritative manifest density0→1.
+  Structural diff/hashes prove no injected creatures, resources or terrain edits.
+- Normal-r2 observed runtime-spawned Rillehopper, Vacuum Lantern and Slatefin
+  Burrower. Lantern screenshots131/133 personally reviewed: lit chamber and limbs
+  move over real steps. Rillehopper distant model/flee behavior observed; dedicated
+  low-G hop remains open. Slatefin coordinates move .7blocks beneath regolith;
+  close model view stayed obscured. Owl not hunted; unsafe-room jar not attempted
+  because the retained expedition has no jar ingredients. No new supplies added.
+- Real defect retained: five naturally spawned Rillehoppers/Lanterns persist at
+  y=-64.5, including IDs3/4/7/12/14 in saved138. No root-cause/fix claim; requires
+  a bounded spawn/terrain-generation diagnosis. Earlier no-run-up jump approaches
+  stalled because vacuum has no air steering; normal run-up87–92 crossed ridge.
+  Screens110/112 were a failed lure attempt with Precision Gear Cluster, NOT a
+  Crystal Shard; filename shorthand is not evidence of successful luring.
+- focused-r33 27/27 PASS (ecology/model/engine custody), browser-morrow-ecology-r1
+  custody PASS/ecology PARTIAL_WITH_DEFECT. Exact fleet/inventory/terrain/armor,
+  health10; finite72713.333mLO2/111.8667sscrubber consumed, rig energy unchanged.
+  SaveQuit136/title137/storage138/close139; owned preview/browser drained and
+  ports4338/4339 absent. No rebuild needed; previous official-r10 remains exact.
+  See CF6/MORROW-ECOLOGY-CHECKPOINT.md. Full CF6/CFV incomplete and CF7 gated.

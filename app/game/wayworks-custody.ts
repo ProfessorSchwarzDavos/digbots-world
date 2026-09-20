@@ -5,6 +5,7 @@ import { machineRecipe, recipeCost } from "./wayworks-recipes";
 import { chemistryRecipe, chemistryCost } from "./pressure-chemistry";
 import { WORKSHOP_SLOTS, workshopStoredTotal } from "./wayworks-stores";
 import { PRESSURE_CATALOG } from "./pressure-catalog";
+import { SPACEFLIGHT_CATALOG } from "./spaceflight-catalog";
 
 /** Bounds apply before normalizers clone or recursively inspect untrusted metadata. */
 export const MAX_CUSTODY_SLOTS = 512;
@@ -13,6 +14,7 @@ const MAX_ITEM_NODES = 4096;
 const MAX_ITEM_JSON = 65_536;
 // Keep this leaf module independent of integration/multiplayer/engine imports.
 const MACHINE_ITEMS: Readonly<Partial<Record<number, MachineKind>>> = {
+  ...Object.fromEntries(Object.entries(SPACEFLIGHT_CATALOG).map(([kind, def]) => [def.id, kind])) as Partial<Record<number, MachineKind>>,
   ...Object.fromEntries(Object.entries(PRESSURE_CATALOG).map(([kind, def]) => [def.id, kind])) as Partial<Record<number, MachineKind>>,
   [BlockId.HandDynamo]: "hand-dynamo", [BlockId.SunplateArray]: "sunplate-array",
   [BlockId.FieldBattery]: "field-battery", [BlockId.ChargingPedestal]: "charging-pedestal", [BlockId.GridCable]: "grid-cable",

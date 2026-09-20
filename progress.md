@@ -10,6 +10,10 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
   Multiblock human/peer/drone mutations check all relevant claim cells.
 - asteroid-runtime-r3: 50 combined tests PASS; r1's three fixture/oracle failures
   retained and corrected. static46 PASS. Final static/lint/build/browser pending.
+- Broader asteroid-runtime-r4: 73PASS/1FAIL found the existing sealed spaceflight
+  machine catalog missing from custody validation. Added the same authoritative
+  spaceflight catalog used by placement; retain this red receipt and recheck.
+  Initial build19 at6dfd449 passed, but final corrected build/browser is pending.
 - Separate engine asteroid local-frame travel remains fail-closed until attached
   metadata has one owner. Runtime field expansion/full CF6/CFV remain unfinished.
   See docs/ASTEROID_CUSTODY.md and CF6/r14-asteroid-runtime/PLAN.md.

@@ -807,7 +807,7 @@ import { createSpaceflightModel, updateSpaceflightModel } from "./spaceflight-mo
 import { stationSceneStructureKind, stationStructureKind } from "./station-kit";
 import { measureStation } from "./station-telemetry";
 import { projectCelestialChart, type CelestialChartProjection } from "./celestial-chart";
-import { celestialTerrainSeed, createCelestialTerrain, morrowRegionAt } from "./celestial-terrain";
+import { celestialTerrainSeed, createCelestialTerrain, normalizeCelestialGenerationState, morrowRegionAt } from "./celestial-terrain";
 import type { VehicleLocationCommit } from "./universe-storage";
 import {
   TYPESCRIPT_AGENT_ID_KEY,
@@ -6171,7 +6171,8 @@ export class VoxelEngine {
     this.waterSurfaceBreachSeconds = 0;
     this.waterSurfaceStrokeCooldownSeconds = 0;
     this.waterSurfaceBobActive = false;
-    this.world.reset(save.seed, asteroidLocation.edits, generationOptionsFromWorldOptions(this.worldOptions, save.generatorProfile ?? "world-below-v15"), save.blockFacings, this.worldStorage.currentStamp ?? undefined);
+    this.world.reset(save.seed, asteroidLocation.edits, generationOptionsFromWorldOptions(this.worldOptions, save.generatorProfile ?? "world-below-v15"), save.blockFacings, this.worldStorage.currentStamp ?? undefined,
+      { expansionLevel: asteroidLocation.registry?.expansionLevel ?? 0 });
     this.world.restoreSurfaceRoadGraph(save.surfaceRoadGraph);
     this.world.initializeAround(save.player.x, save.player.z);
     this.position.set(save.player.x, save.player.y, save.player.z);
@@ -9574,6 +9575,7 @@ export class VoxelEngine {
       time: { tick: this.multiplayerTick, worldTime: this.worldTime, day: this.day, universeTimeSeconds: this.advanceUniverseClock(0), weather: this.weather, weatherState: { ...this.weatherState }, pressure: this.pressureForPeer(peerId) },
       worldOptions: { ...this.worldOptions, enabledFactions: [...this.worldOptions.enabledFactions] },
       celestialCatalog: this.bodyContext().catalog,
+      celestialGeneration: this.world.celestialGeneration,
       // Chests are demand-synced. A broad world snapshot must not truncate an
       // arbitrary prefix or let a guest treat generated placeholder loot as
       // authoritative. Only the recipient's actively opened chest may ride a
@@ -9641,6 +9643,9 @@ export class VoxelEngine {
       this.multiplayerState.error = "Host and guest use different world-generator versions.";
       return;
     }
+    let celestialGeneration;
+    try { celestialGeneration = normalizeCelestialGenerationState(snapshot.celestialGeneration, parseLocationId(scope.locationId)); }
+    catch (error) { this.multiplayerState.error = error instanceof Error ? error.message : String(error); return; }
     const hostPose = snapshot.players.find((pose) => pose.playerId === hostPeer.identity?.id) ?? snapshot.players[0];
     this.resetLocationRuntime();
     // The host world decides the game mode. A guest must never retain a local
@@ -9667,6 +9672,7 @@ export class VoxelEngine {
       generationOptionsFromWorldOptions(this.worldOptions, snapshotProfile),
       this.facingsFromNetwork(snapshot.blockEdits),
       scope,
+      celestialGeneration,
     );
     const guestPlayerId = this.multiplayer?.identity.id ?? "guest";
     const sessionAuthority = this.universeAuthorityId();

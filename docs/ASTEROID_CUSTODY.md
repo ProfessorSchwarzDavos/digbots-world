@@ -33,6 +33,15 @@ is admitted, so returning to a location cannot regenerate extracted material.
 Import remaps the universe identity and retires old command epochs without
 refilling voxels or changing claims.
 
+Persisted field expansion levels also control main-thread and worker terrain
+generation. Expanded chunks use distinct cache identities, while level-zero and
+Home cache keys remain compatible. Public host snapshots carry only the bounded
+generation level, never the private registry, discoveries or claims. Missing
+legacy generation context means level zero; malformed context rejects before a
+guest discards its active runtime. Generation-worker protocol 2 prevents an older
+worker from silently generating the unexpanded field. Canonical asteroid IDs
+determine their orbit band in local-coordinate reconstruction.
+
 Only the descriptor's bounded voxel region is claimed. Construction outside that
 region remains ordinary orbital construction, not an infinitely extending claim.
 Keep exports before moving between versions. Older binaries do not enforce the

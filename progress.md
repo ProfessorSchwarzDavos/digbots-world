@@ -2,6 +2,14 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Director accepted the bounded orbit runtime and peer correction at34b884e.
+  Next generation slice routes persisted expansion into ChunkWorld/cache/worker
+  and public host snapshots, infers canonical non-low asteroid bands, and rejects
+  invalid reset state before disposal. Worker protocol2 refuses old workers.
+  generation-r1 retained3expectedFAIL; r2 41PASS; r3 112PASS, including actual
+  worker byte equality and cold expanded-field depletion. static52/lint36 PASS.
+  Source-bound build24/official/browser evidence pending; ordinary expansion
+  unlocking and attached-metadata local-frame travel remain unfinished/closed.
 - Director review held asteroid acceptance for a concrete host-peer overwrite
   gap. New actual-handler red r1 reproduced build-only rock overwrite, mixed
   cells, missing material intent and rejected selection mutation (2PASS/4FAIL).

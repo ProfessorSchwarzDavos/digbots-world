@@ -1,9 +1,9 @@
 import { CHUNK_SIZE, ChunkWorld, type WorldGenerationOptions } from "./world";
-import type { TerrainGenerationRequest } from "./terrain-generation-pipeline";
+import { TERRAIN_WORKER_PROTOCOL, type TerrainGenerationRequest } from "./terrain-generation-pipeline";
 
 type Request = Readonly<{ id: number; request: TerrainGenerationRequest }>;
 
-self.postMessage({ type: "ready", protocol: 1 });
+self.postMessage({ type: "ready", protocol: TERRAIN_WORKER_PROTOCOL });
 
 self.onmessage = (event: MessageEvent<Request>) => {
   const { id, request } = event.data;
@@ -12,7 +12,7 @@ self.onmessage = (event: MessageEvent<Request>) => {
     const savedEdits = request.edits.length
       ? { [request.key]: request.edits.map(([index, type]) => [index, type] as [number, number]) }
       : undefined;
-    world.reset(request.seedText, savedEdits, request.generationOptions as Partial<WorldGenerationOptions>, undefined, request.locationScope);
+    world.reset(request.seedText, savedEdits, request.generationOptions as Partial<WorldGenerationOptions>, undefined, request.locationScope, request.celestialGeneration);
     const chunk = world.generateChunk(request.cx, request.cz);
     const structureMarkers = [...world.structureMarkers.entries()].filter(([, marker]) => (
       Math.floor(marker.position.x / CHUNK_SIZE) === chunk.cx

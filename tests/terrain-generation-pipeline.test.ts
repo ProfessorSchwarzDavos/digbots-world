@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { TerrainGenerationPipeline } from "../app/game/terrain-generation-pipeline.ts";
+import { TerrainGenerationPipeline, TERRAIN_WORKER_PROTOCOL } from "../app/game/terrain-generation-pipeline.ts";
 import { ChunkWorld } from "../app/game/world.ts";
 
 class FailingWorker {
@@ -11,7 +11,7 @@ class FailingWorker {
   constructor() { FailingWorker.instances.push(this); }
   postMessage() {}
   terminate() {}
-  ready() { this.onmessage?.({ data: { type: "ready", protocol: 1 } } as MessageEvent); }
+  ready(protocol = TERRAIN_WORKER_PROTOCOL) { this.onmessage?.({ data: { type: "ready", protocol } } as MessageEvent); }
   fail() { this.onerror?.({} as ErrorEvent); }
 }
 
@@ -49,6 +49,16 @@ test("a failed generation worker releases its job to the synchronous fallback", 
     assert.equal(failed, 1);
     assert.equal(pipeline.supported, false);
     assert.equal(pipeline.diagnostics().failed, 1);
+    pipeline.dispose();
+  });
+});
+
+test("an old worker cannot silently ignore expanded generation context", () => {
+  withFakeBrowserWorker(() => {
+    const pipeline = new TerrainGenerationPipeline(1, 0);
+    FailingWorker.instances[0].ready(1);
+    assert.equal(pipeline.supported, false);
+    assert.match(pipeline.diagnostics().lastError!.message, /incompatible/);
     pipeline.dispose();
   });
 });

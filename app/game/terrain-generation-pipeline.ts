@@ -1,10 +1,12 @@
 import type { StructureMarker } from "./structures";
 import type { LocationStamp } from "./location-address";
+import type { CelestialGenerationState } from "./celestial-terrain";
 
 export type TerrainGenerationRequest = Readonly<{
   namespace: string;
   seedText: string;
   locationScope?: LocationStamp;
+  celestialGeneration?: CelestialGenerationState;
   generationOptions: Readonly<Record<string, unknown>>;
   key: string;
   cx: number;
@@ -29,7 +31,7 @@ export type TerrainGenerationResult = Readonly<{
   structureMarkers: readonly (readonly [string, StructureMarker])[];
 }>;
 
-const TERRAIN_WORKER_PROTOCOL = 1;
+export const TERRAIN_WORKER_PROTOCOL = 2;
 type WorkerResponse = Readonly<{ type: "ready"; protocol: number }>
   | Readonly<{ type: "result"; id: number; result: TerrainGenerationResult }>
   | Readonly<{ type: "task-error"; id: number; message: string }>;

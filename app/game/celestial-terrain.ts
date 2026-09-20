@@ -7,6 +7,18 @@ export const CELESTIAL_MIN_Y = -64;
 export const CELESTIAL_MAX_Y = 127;
 export const ORBIT_BANDS = ["low", "high", "moon-transfer"] as const;
 export type OrbitBand = typeof ORBIT_BANDS[number];
+/** Public generation context only. Claims, discoveries and finite stores stay private. */
+export type CelestialGenerationState = Readonly<{ expansionLevel: number }>;
+export function validCelestialGenerationState(value: unknown): value is CelestialGenerationState {
+  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 1 || !Object.hasOwn(value, "expansionLevel") || !("expansionLevel" in value)) return false;
+  return typeof value.expansionLevel === "number" && Number.isInteger(value.expansionLevel) && value.expansionLevel >= 0 && value.expansionLevel <= 3;
+}
+export function normalizeCelestialGenerationState(value?: unknown, location?: LocationAddress): CelestialGenerationState {
+  const state = value === undefined ? { expansionLevel: 0 } : value;
+  if (!validCelestialGenerationState(state)) throw Error("Invalid celestial expansion state.");
+  if (location && !["orbit", "station", "asteroid"].includes(locationAddress(location).kind) && state.expansionLevel !== 0) throw Error("This location cannot have an orbital expansion.");
+  return Object.freeze({ expansionLevel: state.expansionLevel });
+}
 export type CelestialPoint = Readonly<{ x: number; y: number; z: number }>;
 export type CelestialBounds = Readonly<{ minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number }>;
 export const MORROW_REGIONS = [
@@ -221,7 +233,9 @@ export function createCelestialTerrain(options: CelestialTerrainOptions): Celest
   const isMorrow = location.kind === "surface" && location.bodyId === "blockwild/morrow";
   if (!isMorrow && !["orbit", "station", "asteroid"].includes(location.kind)) return null;
   const kind = isMorrow ? "morrow" : location.kind as "orbit" | "station" | "asteroid";
-  const band = options.band ?? (ORBIT_BANDS.includes(location.instanceId as OrbitBand) ? location.instanceId as OrbitBand : "low");
+  const identityBand = ORBIT_BANDS.find(value => kind === "asteroid" ? location.instanceId.startsWith(`asteroid-${value}-`) : location.instanceId === value);
+  if (options.band && identityBand && options.band !== identityBand) throw Error("Celestial band differs from canonical location identity.");
+  const band = options.band ?? identityBand ?? "low";
   const expansionLevel = options.expansionLevel ?? 0;
   if (!ORBIT_BANDS.includes(band) || !Number.isInteger(expansionLevel) || expansionLevel < 0 || expansionLevel > 3) throw new Error("Invalid celestial band/expansion.");
   const seed = celestialTerrainSeed(options.seed, location.systemId, location.bodyId);

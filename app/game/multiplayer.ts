@@ -36,6 +36,7 @@ import { TYPESCRIPT_MULTIPLAYER_PROTOCOL } from "./edition";
 import { locationStamp, sameLocationStamp, type LocationStamp } from "./location-address";
 import { canonicalJson } from "./universe-json";
 import { validateCelestialCatalog, type CelestialCatalogSnapshot } from "./celestial-catalog";
+import { validCelestialGenerationState, type CelestialGenerationState } from "./celestial-terrain";
 
 /**
  * Browser-only, host-authoritative WebRTC multiplayer transport for Blockwild.
@@ -601,6 +602,8 @@ export type WorldSnapshot = {
   worldOptions?: SessionWorldOptions;
   /** Frozen universe physics and ephemeris; never inferred from a guest save. */
   celestialCatalog?: CelestialCatalogSnapshot;
+  /** Host-authored terrain extent, never private claims or discovery records. */
+  celestialGeneration?: CelestialGenerationState;
   inventory?: InventorySnapshot;
   containers?: ContainerSnapshot[];
   /** Targeted host-owned state for the peer receiving this snapshot. */
@@ -1611,6 +1614,7 @@ export function validatePayload<K extends MultiplayerMessageType>(type: K, value
         && validateTimeWeather(value.time)
         && (value.worldOptions === undefined || validateSessionWorldOptions(value.worldOptions))
         && (value.celestialCatalog === undefined || validNetworkCelestialCatalog(value.celestialCatalog))
+        && (value.celestialGeneration === undefined || validCelestialGenerationState(value.celestialGeneration))
         && (value.inventory === undefined || validateInventorySnapshot(value.inventory))
         && (value.containers === undefined || (Array.isArray(value.containers) && value.containers.length <= 4 && value.containers.every(validateContainerSnapshot)))
         && (value.playerState === undefined || validatePlayerSessionSnapshot(value.playerState))

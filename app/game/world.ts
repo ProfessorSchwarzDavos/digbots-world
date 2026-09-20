@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { stationPanelFace } from "./station-kit";
 import { homeLocation, locationId, parseLocationId, universeId, locationStamp as validateLocationStamp, type LocationStamp } from "./location-address";
-import { celestialTerrainSeed, createCelestialTerrain, MORROW_REGIONS, type CelestialTerrain } from "./celestial-terrain";
+import { celestialTerrainSeed, createCelestialTerrain, normalizeCelestialGenerationState, MORROW_REGIONS, type CelestialTerrain, type CelestialGenerationState } from "./celestial-terrain";
 import { ChunkMemoryCache, ChunkPersistentCache, type CachedChunkData } from "./chunk-cache";
 import { TerrainBufferPipeline, type TerrainMergedGeometry, type TerrainSectionGeometry } from "./terrain-buffer-pipeline";
 import { TerrainGenerationPipeline, type TerrainGenerationResult } from "./terrain-generation-pipeline";
@@ -2929,6 +2929,7 @@ export function createBlockAtlas() {
 
 export class ChunkWorld {
   celestialTerrain: CelestialTerrain | null = null;
+  celestialGeneration: CelestialGenerationState = normalizeCelestialGenerationState();
   /** Local derived-system invalidation. Observers do not own or serialize blocks. */
   readonly blockEditObservers = new Set<(point: { x: number; y: number; z: number }) => void>();
   group = new THREE.Group();
@@ -3146,8 +3147,13 @@ export class ChunkWorld {
     generationOptions?: Partial<WorldGenerationOptions>,
     savedFacings?: Readonly<Record<string, number>>,
     scope?: LocationStamp,
+    celestialGeneration?: CelestialGenerationState,
   ) {
     const nextScope = scope ? validateLocationStamp(scope) : this.locationScope;
+    const nextSeedText = seedText || "WILDERNESS", address = parseLocationId(nextScope.locationId);
+    const nextCelestialGeneration = normalizeCelestialGenerationState(celestialGeneration, address);
+    const nextTerrain = createCelestialTerrain({ location: address, seed: celestialTerrainSeed(nextSeedText), ...nextCelestialGeneration });
+    if (!nextTerrain && !(address.bodyId === "blockwild" && address.kind === "surface")) throw Error("This destination has no supported terrain generator.");
     this.locationLoadEpoch += 1;
     // Drop old callbacks and their transferred buffers before admitting work
     // for a different owner, even when its seed and coordinates are identical.
@@ -3227,11 +3233,10 @@ export class ChunkWorld {
     this.settlementIndex.clear();
     this.hiddenChestVisuals.clear();
     this.blockFacings.clear();
-    this.seedText = seedText || "WILDERNESS";
+    this.seedText = nextSeedText;
     this.seed = seedToInt(this.seedText);
-    const address = parseLocationId(this.locationScope.locationId);
-    this.celestialTerrain = createCelestialTerrain({ location: address, seed: celestialTerrainSeed(this.seedText) });
-    if (!this.celestialTerrain && !(address.bodyId === "blockwild" && address.kind === "surface")) throw Error("This destination has no supported terrain generator.");
+    this.celestialTerrain = nextTerrain;
+    this.celestialGeneration = nextCelestialGeneration;
     this.generationOptions = normalizeWorldGenerationOptions(generationOptions);
     this.chunkMemoryCache.clear();
     this.playerChunkX = Number.NaN;
@@ -3800,7 +3805,8 @@ export class ChunkWorld {
     }).join(".");
     // Location v1 could label outgoing orbit voxels as incoming surface terrain.
     // Ignore those disposable records without deleting caches or durable saves.
-    return `terrain-location-v2|${this.locationScope.locationId}|g${GENERATOR_VERSION}|${this.seedText}|${JSON.stringify(this.generationOptions)}|${key}|${editHalo}`;
+    const expansion = this.celestialGeneration.expansionLevel ? `|celestial-expansion:${this.celestialGeneration.expansionLevel}` : "";
+    return `terrain-location-v2|${this.locationScope.locationId}|g${GENERATOR_VERSION}|${this.seedText}|${JSON.stringify(this.generationOptions)}|${key}|${editHalo}${expansion}`;
   }
 
   private generationNamespace(key: string) { return `${this.locationLoadEpoch}|${this.chunkCacheKey(key)}`; }
@@ -4070,6 +4076,7 @@ export class ChunkWorld {
         const request = {
           namespace: this.generationNamespace(key),
           locationScope: this.locationScope,
+          celestialGeneration: this.celestialGeneration,
           seedText: this.seedText,
           generationOptions: this.generationOptions as unknown as Readonly<Record<string, unknown>>,
           key,

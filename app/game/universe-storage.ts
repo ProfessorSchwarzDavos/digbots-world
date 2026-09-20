@@ -5,9 +5,11 @@ import { homeLocation, locationId, parseLocationId, universeId, type LocationId,
 import { assertExactKeys, canonicalJson, cloneUniverseJson, isUniverseRecord, universeSha256 } from "./universe-json";
 import { composeUniverseSave, splitUniverseSave, type SaveFields } from "./universe-save";
 import { assertVehicleCommitReady, commitVehicleArrival, remapSpacefleetUniverse, validateSpacefleetSave, validateSpacefleetUniverse } from "./space-vehicle";
-import { remapStationRegistry, validateStationRegistrySave } from "./orbital-station";
+import { validateStationRegistrySave } from "./orbital-station";
 import { validateStationFleetCustody } from "./station-runtime";
 import { remapAsteroidFields, validateAsteroidFields } from "./asteroid-runtime";
+import { captureAsteroidAttachmentCatalog, hydrateAsteroidAttachmentLocation, readAsteroidAttachmentCatalog, type AsteroidAttachmentCatalog } from "./asteroid-attachment-catalog";
+import { remapLocationMetadata } from "./location-metadata-import";
 import { generationOptionsFromWorldOptions, LEGACY_WORLD_KEY, normalizeWorldOptions, WORLD_CATALOG_KEY, WORLD_DATA_PREFIX, type StoredWorld, type WorldMetadata, type WorldOptions } from "./world-storage";
 
 export const UNIVERSE_DATABASE = `${TYPESCRIPT_STORAGE_PREFIX}-universe-v1`;
@@ -34,7 +36,9 @@ export type LocationDescriptor = Readonly<{
 }>;
 type CheckedRecord<T> = Readonly<{ id: string; universeId: UniverseId; data: T; sha256: string }>;
 type ImportHistory = Readonly<{ sourceUniverseId: UniverseId; archiveDigest: string; journals: readonly UniverseJournal[]; receipts: readonly MigrationReceipt[] }>;
-type UniverseData = Readonly<{ fields: SaveFields; extensions: SaveFields; importHistory?: readonly ImportHistory[] }>;
+type UniverseData = Readonly<{ fields: SaveFields; extensions: SaveFields; importHistory?: readonly ImportHistory[];
+  /** Repository-owned; never echoed through a flattened engine WorldSave. */
+  attachmentOwners?: AsteroidAttachmentCatalog }>;
 type PlayerData = Readonly<{ playerId: string; locationId: LocationId; fields: SaveFields; back: unknown | null; positions?: Readonly<Record<string, unknown>> }>;
 export type LegacyBackup = Readonly<{ id: string; universeId: UniverseId; sourceKey: string; raw: string; sha256: string }>;
 export type UniverseJournal = Readonly<{
@@ -91,6 +95,28 @@ function checkedId(value: unknown): string {
   return value;
 }
 function legacyKey(value: unknown): value is string { return typeof value === "string" && (value === LEGACY_WORLD_KEY || value === WORLD_CATALOG_KEY || value.startsWith(WORLD_DATA_PREFIX)); }
+function validateAttachmentFleet(universe: UniverseData, id: UniverseId): void {
+  if (universe.attachmentOwners === undefined) return;
+  const owners = readAsteroidAttachmentCatalog(universe.attachmentOwners, validateAsteroidFields(universe.fields.asteroidFields, id), id);
+  for (const owner of Object.values(owners.owners)) if (owner.fields.orbitalStations !== undefined)
+    validateStationFleetCustody(validateStationRegistrySave(owner.fields.orbitalStations, owner.orbitId), validateSpacefleetSave(universe.fields.spacefleet));
+}
+function hydratedLocation(universe: UniverseData, id: LocationId, fields: SaveFields): SaveFields {
+  if (universe.attachmentOwners === undefined) return fields;
+  const asteroids = validateAsteroidFields(universe.fields.asteroidFields, parseLocationId(id).universeId);
+  return hydrateAsteroidAttachmentLocation(universe.attachmentOwners, asteroids, id, fields);
+}
+function capturedLocation(universe: UniverseData, parts: ReturnType<typeof splitUniverseSave>, id: LocationId, admit = false) {
+  const updated: UniverseData = { ...universe, fields: parts.universe, extensions: parts.extensions };
+  if (universe.attachmentOwners === undefined && !admit) return { universe: updated, location: parts.location };
+  const expectedUniverse = parseLocationId(id).universeId;
+  const captured = captureAsteroidAttachmentCatalog(universe.attachmentOwners,
+    validateAsteroidFields(universe.fields.asteroidFields, expectedUniverse), validateAsteroidFields(parts.universe.asteroidFields, expectedUniverse),
+    id, parts.location, parts.extensions, admit);
+  const withOwners = { ...updated, attachmentOwners: captured.catalog };
+  validateAttachmentFleet(withOwners, expectedUniverse);
+  return { universe: withOwners, location: captured.location };
+}
 async function checked<T>(id: string, universe: UniverseId, data: T): Promise<CheckedRecord<T>> {
   const copy = cloneUniverseJson(data);
   return { id, universeId: universe, data: copy, sha256: await universeSha256(canonicalJson(copy)) };
@@ -243,6 +269,7 @@ export class UniverseStorage {
     const universe = await verify(only("universeRecords") as unknown as CheckedRecord<UniverseData>, id, id);
     if (universe.fields.spacefleet !== undefined) validateSpacefleetUniverse(validateSpacefleetSave(universe.fields.spacefleet), id);
     if (universe.fields.asteroidFields !== undefined) validateAsteroidFields(universe.fields.asteroidFields, id);
+    validateAttachmentFleet(universe, id);
     if (universe.importHistory !== undefined) {
       if (!Array.isArray(universe.importHistory)) throw new UniverseStorageError("corrupt", "Invalid import provenance.");
       for (const history of universe.importHistory) {
@@ -262,10 +289,13 @@ export class UniverseStorage {
         || !integer(descriptor.generator.sourceVersion, 1) || typeof descriptor.generator.seed !== "string" || !isUniverseRecord(descriptor.generator.options)) throw new UniverseStorageError("corrupt", "Invalid location descriptor.");
       catalogBody(catalog, address);
       const fields = await verify(dataRows.find((row) => row.id === descriptor.id), descriptor.id, id);
-      if (fields.orbitalStations !== undefined) validateStationFleetCustody(validateStationRegistrySave(fields.orbitalStations, descriptor.id), validateSpacefleetSave(universe.fields.spacefleet));
+      const hydrated = hydratedLocation(universe, descriptor.id, fields);
+      if (hydrated.orbitalStations !== undefined) validateStationFleetCustody(validateStationRegistrySave(hydrated.orbitalStations, descriptor.id), validateSpacefleetSave(universe.fields.spacefleet));
       if (fields.seed !== descriptor.generator.seed || fields.generatorVersion !== descriptor.generator.version || (fields.generatorProfile ?? "world-below-v15") !== descriptor.generator.profile) throw new UniverseStorageError("corrupt", "Location data differs from captured generator contract.");
       return { descriptor, fields };
     }));
+    if (!partial && universe.attachmentOwners && Object.keys(universe.attachmentOwners.owners).some(owner => !locations.some(entry => entry.descriptor.id === owner)))
+      throw new UniverseStorageError("corrupt", "Attachment owner references a missing orbital location.");
     const players = await Promise.all((all("players") as unknown as CheckedRecord<PlayerData>[]).map(async (row) => {
       const data = await verify(row, recordId(id, "player", checkedId(row.data?.playerId)), id);
       if (data.positions !== undefined) {
@@ -274,7 +304,7 @@ export class UniverseStorage {
       }
       const location = locations.find((entry) => entry.descriptor.id === data.locationId);
       if (!location) throw new UniverseStorageError("corrupt", "Player custody references a missing location.");
-      composeUniverseSave({ universe: universe.fields, extensions: universe.extensions, location: location.fields, player: data.fields });
+      composeUniverseSave({ universe: universe.fields, extensions: universe.extensions, location: hydratedLocation(universe, location.descriptor.id, location.fields), player: data.fields });
       return data;
     }));
     if (!players.some((player) => player.playerId === manifest.currentPlayerId && player.locationId === manifest.currentLocationId)) throw new UniverseStorageError("corrupt", "Manifest/player location disagreement.");
@@ -321,7 +351,8 @@ export class UniverseStorage {
     const snapshot = await this.currentSnapshot(id), { manifest } = snapshot;
     const location = snapshot.locations.find((entry) => entry.descriptor.id === manifest.currentLocationId)!;
     const player = snapshot.players.find((entry) => entry.playerId === manifest.currentPlayerId)!;
-    const save = composeUniverseSave({ universe: snapshot.universe.fields, extensions: snapshot.universe.extensions, location: location.fields, player: player.fields });
+    const save = composeUniverseSave({ universe: snapshot.universe.fields, extensions: snapshot.universe.extensions,
+      location: hydratedLocation(snapshot.universe, location.descriptor.id, location.fields), player: player.fields });
     return { world: { version: 1, metadata: cloneUniverseJson(manifest.metadata), options: cloneUniverseJson(manifest.options), save }, manifest, catalog: snapshot.catalog,
       stamp: { locationId: manifest.currentLocationId, epoch: lease?.epoch ?? location.descriptor.generationEpoch, revision: location.descriptor.revision }, lease };
   }
@@ -412,14 +443,24 @@ export class UniverseStorage {
     return this.load(id);
   }
 
-  async checkpoint(id: UniverseId, save: WorldSave, expectedRevision: number, lease: UniverseLease, input: { transactionId: string; metadata?: WorldMetadata; options?: WorldOptions }): Promise<UniverseLoadedWorld> {
+  async checkpoint(id: UniverseId, save: WorldSave, expectedRevision: number, lease: UniverseLease,
+    input: { transactionId: string; metadata?: WorldMetadata; options?: WorldOptions; admitOrbitAttachments?: boolean }): Promise<UniverseLoadedWorld> {
+    if (input.admitOrbitAttachments !== undefined && typeof input.admitOrbitAttachments !== "boolean")
+      throw new UniverseStorageError("invalid", "Invalid attachment admission intent.");
     const snapshot = await this.currentSnapshot(id, input.transactionId), { manifest } = snapshot;
-    // A committed retry is checked by execute; this also supports uncertain acknowledgement.
+    const intentDigest = await universeSha256(canonicalJson({ checkpoint: 1, save, metadata: input.metadata ?? null,
+      options: input.options ?? null, admitOrbitAttachments: input.admitOrbitAttachments === true }));
+    // Bind the original request, not a reconstructed view whose voxel ordering
+    // can differ. Older checkpoints stored their write digest as intentDigest.
     const old = snapshot.journals.find((journal) => journal.transactionId === input.transactionId && journal.state === "committed");
     if (old && old.kind === "checkpoint" && old.expectedRevision === expectedRevision && manifest.revision === old.nextRevision) {
       const current = await this.load(id, lease);
-      if (canonicalJson(current.world.save) !== canonicalJson(save)) throw new UniverseStorageError("conflict", "Committed action retried with different state.");
-      if (input.metadata && canonicalJson(input.metadata) !== canonicalJson(current.world.metadata) || input.options && canonicalJson(input.options) !== canonicalJson(current.world.options)) throw new UniverseStorageError("conflict", "Committed action retried with different metadata.");
+      if (old.intentDigest !== intentDigest) {
+        if (old.intentDigest !== old.digest || input.admitOrbitAttachments === true)
+          throw new UniverseStorageError("conflict", "Committed action retried with different content.");
+        if (canonicalJson(current.world.save) !== canonicalJson(save)) throw new UniverseStorageError("conflict", "Committed action retried with different state.");
+        if (input.metadata && canonicalJson(input.metadata) !== canonicalJson(current.world.metadata) || input.options && canonicalJson(input.options) !== canonicalJson(current.world.options)) throw new UniverseStorageError("conflict", "Committed action retried with different metadata.");
+      }
       return current;
     }
     if (manifest.revision !== expectedRevision) throw new UniverseStorageError("conflict", "Checkpoint revision is stale.");
@@ -429,6 +470,7 @@ export class UniverseStorage {
     if (save.spacefleet !== undefined) validateSpacefleetUniverse(save.spacefleet, id);
     if (save.asteroidFields !== undefined) validateAsteroidFields(save.asteroidFields, id);
     if (save.orbitalStations !== undefined) validateStationRegistrySave(save.orbitalStations, manifest.currentLocationId);
+    const captured = capturedLocation(snapshot.universe, parts, manifest.currentLocationId, input.admitOrbitAttachments === true);
     const metadata = cloneUniverseJson(input.metadata ?? manifest.metadata), options = cloneUniverseJson(input.options ?? manifest.options);
     if (metadata.id !== id) throw new UniverseStorageError("invalid", "Metadata cannot change universe identity.");
     const profile = location.descriptor.generator.profile as WorldSave["generatorProfile"];
@@ -436,11 +478,11 @@ export class UniverseStorage {
     const writes: WriteRecord[] = [
       { store: "manifests", value: this.validateManifest({ ...manifest, revision: expectedRevision + 1, metadata, options, updatedAt: save.savedAt }) },
       { store: "locations", value: { ...location.descriptor, revision: location.descriptor.revision + 1 } },
-      { store: "universeRecords", value: await checked(id, id, { ...snapshot.universe, fields: parts.universe, extensions: parts.extensions }) },
-      { store: "locationRecords", value: await checked(manifest.currentLocationId, id, parts.location) },
+      { store: "universeRecords", value: await checked(id, id, captured.universe) },
+      { store: "locationRecords", value: await checked(manifest.currentLocationId, id, captured.location) },
       { store: "players", value: await checked(recordId(id, "player", manifest.currentPlayerId), id, { ...snapshot.players.find((player) => player.playerId === manifest.currentPlayerId)!, fields: parts.player }) },
     ];
-    await this.execute(id, input.transactionId, "checkpoint", expectedRevision, writes, lease);
+    await this.execute(id, input.transactionId, "checkpoint", expectedRevision, writes, lease, [], intentDigest);
     return this.load(id, lease);
   }
 
@@ -478,8 +520,10 @@ export class UniverseStorage {
     if (originSave.spacefleet !== undefined) validateSpacefleetUniverse(originSave.spacefleet, id);
     if (originSave.asteroidFields !== undefined) validateAsteroidFields(originSave.asteroidFields, id);
     if (originSave.orbitalStations !== undefined) validateStationRegistrySave(originSave.orbitalStations, manifest.currentLocationId);
+    const captured = capturedLocation(snapshot.universe, parts, manifest.currentLocationId);
     let target = snapshot.locations.find((entry) => entry.descriptor.id === destination);
     if (!target) {
+      if (captured.universe.attachmentOwners?.owners[destination]) throw new UniverseStorageError("corrupt", "Attachment destination row is missing.");
       if (!input.initialSyntheticSave) throw new UniverseStorageError("not-found", "Destination checkpoint does not exist.");
       const initial = input.initialSyntheticSave, initialParts = splitUniverseSave(initial); composeUniverseSave(initialParts);
       if (initial.orbitalStations !== undefined) validateStationRegistrySave(initial.orbitalStations, destination);
@@ -510,12 +554,15 @@ export class UniverseStorage {
       pose = { x, y, z, yaw: 0, pitch: 0 };
     }
     const playerFields = { ...parts.player, player: pose };
-    composeUniverseSave({ universe: universeFields, extensions: parts.extensions, location: target.fields, player: playerFields });
+    const transitUniverse: UniverseData = { ...captured.universe, fields: universeFields };
+    validateAttachmentFleet(transitUniverse, id);
+    composeUniverseSave({ universe: universeFields, extensions: parts.extensions,
+      location: hydratedLocation(transitUniverse, destination, target.fields), player: playerFields });
     const writes: WriteRecord[] = [
       { store: "manifests", value: { ...manifest, revision: expectedRevision + 1, currentLocationId: destination, updatedAt: originSave.savedAt } },
-      { store: "universeRecords", value: await checked(id, id, { ...snapshot.universe, fields: universeFields, extensions: parts.extensions }) },
+      { store: "universeRecords", value: await checked(id, id, transitUniverse) },
       { store: "locations", value: { ...origin.descriptor, revision: origin.descriptor.revision + 1 } },
-      { store: "locationRecords", value: await checked(origin.descriptor.id, id, parts.location) },
+      { store: "locationRecords", value: await checked(origin.descriptor.id, id, captured.location) },
       { store: "locations", value: vehicleCommit ? { ...target.descriptor, revision: target.descriptor.revision + 1 } : target.descriptor },
       { store: "locationRecords", value: await checked(destination, id, target.fields) },
       { store: "players", value: await checked(recordId(id, "player", player.playerId), id, { ...player, locationId: destination, fields: playerFields, positions }) },
@@ -577,20 +624,21 @@ export class UniverseStorage {
       ...(snapshot.universe.fields.spacefleet !== undefined ? { spacefleet: remapSpacefleetUniverse(validateSpacefleetSave(snapshot.universe.fields.spacefleet), oldId, newId) } : {}),
       ...(snapshot.universe.fields.asteroidFields !== undefined ? { asteroidFields: remapAsteroidFields(snapshot.universe.fields.asteroidFields, oldId, newId) } : {}),
       agentWorldFingerprint: `worldfp_import_${newId.replace(/[^A-Za-z0-9_-]/g, "_")}` }, importHistory: [...snapshot.universe.importHistory ?? [], { sourceUniverseId: oldId, archiveDigest: String(sha256), journals: snapshot.journals, receipts: snapshot.receipts }] };
-    const writes: WriteRecord[] = [{ store: "manifests", value: manifest }, { store: "catalogs", value: catalogRecord }, { store: "universeRecords", value: await checked(newId, newId, importedUniverse) }];
+    let importedOwners: AsteroidAttachmentCatalog | undefined;
+    if (snapshot.universe.attachmentOwners !== undefined) {
+      const originalOwners = readAsteroidAttachmentCatalog(snapshot.universe.attachmentOwners, validateAsteroidFields(snapshot.universe.fields.asteroidFields, oldId), oldId);
+      importedOwners = readAsteroidAttachmentCatalog({ schema: 1, owners: Object.fromEntries(Object.values(originalOwners.owners).map(owner => {
+        if (owner.epoch === Number.MAX_SAFE_INTEGER) throw new UniverseStorageError("invalid", "Attachment owner epoch exhausted.");
+        const orbitId = remap(owner.orbitId);
+        return [orbitId, { ...owner, orbitId, epoch: owner.epoch + 1, revision: 0, fields: remapLocationMetadata(owner.fields, owner.orbitId, newId) }];
+      })) }, validateAsteroidFields(importedUniverse.fields.asteroidFields, newId), newId);
+    }
+    const universeWithOwners = { ...importedUniverse, ...(importedOwners ? { attachmentOwners: importedOwners } : {}) };
+    validateAttachmentFleet(universeWithOwners, newId);
+    const writes: WriteRecord[] = [{ store: "manifests", value: manifest }, { store: "catalogs", value: catalogRecord }, { store: "universeRecords", value: await checked(newId, newId, universeWithOwners) }];
     for (const { descriptor, fields } of snapshot.locations) {
       const id = remap(descriptor.id);
-      const imported = cloneUniverseJson(fields) as Record<string, unknown>;
-      if (fields.orbitalStations !== undefined) imported.orbitalStations = remapStationRegistry(validateStationRegistrySave(fields.orbitalStations, descriptor.id), newId);
-      // Finite vessels move with the shard rather than becoming empty on a new location identity.
-      if (isUniverseRecord(imported.wayworks)) for (const machine of Object.values(imported.wayworks)) {
-        if (!isUniverseRecord(machine) || machine.locationId !== descriptor.id) throw new UniverseStorageError("corrupt", "Machine location mismatch during import.");
-        machine.locationId = id;
-      }
-      if (isUniverseRecord(imported.pressure) && Array.isArray(imported.pressure.zones)) for (const zone of imported.pressure.zones) {
-        if (!isUniverseRecord(zone) || zone.locationId !== descriptor.id || typeof zone.zoneId !== "string" || !zone.zoneId.startsWith(`${descriptor.id}:air:`)) throw new UniverseStorageError("corrupt", "Pressure location mismatch during import.");
-        zone.locationId = id; zone.zoneId = id + zone.zoneId.slice(descriptor.id.length);
-      }
+      const imported = remapLocationMetadata(fields, descriptor.id, newId);
       writes.push({ store: "locations", value: { ...descriptor, id, universeId: newId } }, { store: "locationRecords", value: await checked(id, newId, imported) });
     }
     for (const player of snapshot.players) writes.push({ store: "players", value: await checked(recordId(newId, "player", player.playerId), newId, { ...player, locationId: remap(player.locationId), ...(player.positions ? { positions: Object.fromEntries(Object.entries(player.positions).map(([id, pose]) => [remap(id as LocationId), pose])) } : {}) }) });

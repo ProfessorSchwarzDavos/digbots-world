@@ -2,6 +2,20 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Repository integration now supports explicit canonical orbit metadata admission,
+  atomic catalog/stripped-row checkpoints, normal flat facade save/load, exact
+  original-request retry despite hydrated voxel ordering, origin capture and
+  new-universe import. Legacy orbits are not auto-migrated. Airlock zone identities
+  now import with their rooms; resources/heat/timers/portable cargo remain exact.
+  Survey captures newly covered construction without rewriting old asteroid
+  records. Combined repository-r1:134PASS; real IndexedDB storage-r3 passes all
+  seven admission AND survey fault stages, cold/two-orbit/Home/import custody,
+  unknown-extension refusal and valid-checksum orphan/duplicate archive rejection.
+  Static79PASS and lint59/60PASS (lint60 finished22:57:48UTC). Retained
+  storage-r1 wrong-band fixture and static76/78 fixture
+  typing failures; corrected fixture/types, no production validator weakening.
+  No fresh production build or normal UI/cold proof yet. Explicit admission is
+  repository-only; local-frame engine guard and full CF6/CFV gaps remain.
 - Pure per-orbit metadata-owner proposal now rejects duplicate location mirrors,
   stale revisions, omitted prior custody, unknown extensions and wrong field scope.
   All classified fields have explicit physical-vs-view-local disposition without

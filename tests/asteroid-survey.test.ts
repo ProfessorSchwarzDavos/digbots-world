@@ -5,11 +5,13 @@ import { VoxelEngine, type WorldSave } from "../app/game/engine";
 import { BlockId } from "../app/game/data";
 import { prepareAsteroidSurvey, type AsteroidSurveyIntent } from "../app/game/asteroid-survey";
 import { createAsteroidRegistry, expandAsteroidRegistry } from "../app/game/asteroid-custody";
+import { projectAsteroidEdits } from "../app/game/asteroid-runtime";
 import { celestialTerrainSeed } from "../app/game/celestial-terrain";
 import { homeLocation, locationId, universeId } from "../app/game/location-address";
 import { createMachine } from "../app/game/wayworks";
 import { workshopHeatCapacity } from "../app/game/wayworks-stores";
 import { flightFixture } from "./spaceflight-fixtures";
+import type { ChunkEditSave } from "../app/game/world";
 
 function fixture() {
   const f = flightFixture("survey-fixture"), address = { ...homeLocation(universeId(f.world.metadata.id)), kind: "orbit" as const, instanceId: "low" };
@@ -50,6 +52,33 @@ test("survey rejects stale identity/revisions, insufficient energy/heat, wrong h
   assert.throws(() => run({ ...f.save, asteroidFields: { schema: 1, fields: { [f.location]: max } } }, 0,
     { ...f.intent, epoch: max.epoch, registryRevision: max.revision }), /within 0\.\.3/);
   assert.deepEqual(f.save, original);
+});
+
+function voxelEdit(point: { x: number; y: number; z: number }, block: BlockId): ChunkEditSave {
+  const { x, y, z } = point, cx = Math.floor(x / 16), cz = Math.floor(z / 16);
+  return { [`${cx},${cz}`]: [[(y + 64) * 256 + (z - cz * 16) * 16 + x - cx * 16, block]] };
+}
+
+test("survey captures existing construction newly covered by the ring without charging twice or rewriting old asteroids", () => {
+  const f = fixture(), expanded = expandAsteroidRegistry(f.registry, 1,
+    { orbit: f.registry.orbit, seed: f.registry.seed, epoch: f.registry.epoch, expectedRevision: f.registry.revision });
+  const added = expanded.asteroids.find(entry => !f.registry.asteroids.some(old => old.descriptor.id === entry.descriptor.id))!;
+  f.save.edits = { ...f.save.edits, ...voxelEdit(added.descriptor.center, BlockId.ReinforcedWindow) };
+  const before = structuredClone(f.save), result = prepareAsteroidSurvey(f.save, f.location, f.key, 0, f.intent);
+  const field = result.asteroidFields!.fields[f.location];
+  assert.deepEqual(projectAsteroidEdits(field, field.orbit, f.save.edits), f.save.edits);
+  assert.ok(field.asteroids.find(entry => entry.descriptor.id === added.descriptor.id)!.pages.length > 0);
+  for (const old of f.registry.asteroids) assert.deepEqual(field.asteroids.find(entry => entry.descriptor.id === old.descriptor.id), old);
+  assert.equal(result.wayworks![f.key].energyJ, 3000); assert.equal(result.wayworks![f.key].workshop.heatJ, 1137);
+  assert.deepEqual(result.inventory, before.inventory); assert.deepEqual(f.save, before);
+  assert.deepEqual(prepareAsteroidSurvey(f.save, f.location, f.key, 0, f.intent), result, "same candidate is deterministic");
+});
+
+test("survey refuses uncheckpointed old asteroid edits before any instrument debit", () => {
+  const f = fixture(); f.save.edits = { ...f.save.edits, ...voxelEdit(f.registry.asteroids[0].descriptor.center, BlockId.Air) };
+  const before = structuredClone(f.save);
+  assert.throws(() => prepareAsteroidSurvey(f.save, f.location, f.key, 0, f.intent), /Checkpoint existing asteroid/);
+  assert.deepEqual(f.save, before);
 });
 
 function engineFixture() {

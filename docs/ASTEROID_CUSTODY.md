@@ -54,6 +54,9 @@ up to extent 3. Each survey converts 1 kJ of stored electricity into 1 kJ of
 instrument heat and requires current machine/field revisions and container access.
 Existing asteroid records, claims and excavation pages remain unchanged; new rock
 is unclaimed and is not automatically discovered or credited to inventory.
+Existing construction newly covered by a survey is captured into the new finite
+pages before its old edit mirror can be retired. Uncheckpointed changes to old
+asteroids reject the survey before any instrument debit.
 
 The survey checkpoints the current world, commits the expanded field and paid
 instrument together, then rebuilds the local view while paused. Resume explicitly
@@ -102,12 +105,27 @@ action journal. Rename, access and habitat proposals return to the canonical
 permission/replay authority. Whole claims, collars, approach volumes and linked
 rooms/anchors must fit; physical placement/docking and fleet-view integration
 remain separate unfinished adapters. Voxel prerequisites translate chunk/index
-edits and remove finite-page mirrors only after exact canonical readback. No
-normal checkpoint uses these new mirror-removal helpers yet.
+edits and remove finite-page mirrors only after exact canonical readback.
 The pure per-orbit owner record separates physical fields from view-local state,
 rejects duplicate/missing custody and stale revisions, and explicitly reconciles
-new finite regions during a one-ring survey. It is not yet stored by the universe
-repository. Its structural ownership checks are not a complete spatial selector
-or a substitute for each subsystem's semantic and authorization checks.
-The remaining single-owner catalog, complete physical/component selector, atomic
-storage integration and ordinary travel evidence are required before entry opens.
+new finite regions during a one-ring survey. The repository now supports explicit
+admission into an internal `UniverseData.attachmentOwners` catalog. It is not a
+new `WorldSave` field: ordinary engine saves remain flat, while admitted physical
+fields exist only in the canonical owner and are hydrated on load. Inactive orbit
+owners remain unchanged. Legacy orbits are not automatically admitted, and unknown
+extensions block admission without changing their existing save behavior.
+
+Admission, later checkpoints, survey and origin capture use the existing atomic
+universe journal and lease/revision checks. A checkpoint retry binds the original
+request digest, not a reconstructed voxel array whose order may differ. Legacy
+receipts retain their prior exact-save retry rule; they cannot authorize admission.
+Import creates a new owner epoch and explicitly remaps known machine, station,
+pressure-zone and airlock-zone identities, preserving finite quantities and opaque
+portable metadata. Orphan owners and physical fields duplicated in a location row
+reject even when archive checksums are valid.
+
+This repository adapter is not activated by normal gameplay yet. Its structural
+ownership checks are not a complete spatial selector or a substitute for each
+subsystem's semantic and authorization checks. Complete physical/component and
+entity/fleet/agent adapters plus ordinary local-frame travel evidence are still
+required before entry opens. Synthetic storage tests are not gameplay acceptance.

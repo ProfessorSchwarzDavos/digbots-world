@@ -8,7 +8,7 @@ import type { SaveFields } from "./universe-save";
 import type { ChunkEditSave } from "./world";
 
 /** Canonical ORBIT-coordinate metadata, not a local projection or a travel grant.
- * This pure record is not yet part of WorldSave or the persistence adapter.
+ * Repository storage owns this record; flattened WorldSave never carries it.
  * Finite asteroid pages stay in their pre-existing universe-owned registry. */
 export type AsteroidAttachmentOwner = Readonly<{
   schema: 1; orbitId: LocationId; fieldSeed: number; fieldExtent: number; epoch: number; revision: number; fields: SaveFields;

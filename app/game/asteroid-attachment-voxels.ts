@@ -63,7 +63,7 @@ export function captureAsteroidVoxelEdits(frame: AsteroidAttachmentFrame, canoni
 /** Removes ONLY redundant finite-page mirrors after exact canonical readback.
  * A missing/stale capture rejects the entire operation. Non-asteroid construction
  * and original inputs remain exact; there is no write or extraction credit here.
- * This prerequisite is not yet used by normal storage or runtime checkpoints. */
+ * Admitted orbit checkpoints use this before retiring their physical mirrors. */
 export function stripCapturedAsteroidEditMirrors(raw: AsteroidRegistry, location: LocationAddress, edits: ChunkEditSave): ChunkEditSave {
   const registry = parseAsteroidRegistry(raw), orbit = asteroidOrbitFor(location);
   if (!orbit || locationId(orbit) !== locationId(registry.orbit)

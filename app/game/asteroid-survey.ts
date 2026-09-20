@@ -1,6 +1,7 @@
 import type { WorldSave } from "./engine";
 import { expandAsteroidRegistry } from "./asteroid-custody";
-import { validateAsteroidFields, withAsteroidField } from "./asteroid-runtime";
+import { captureAsteroidEdits, validateAsteroidFields, withAsteroidField } from "./asteroid-runtime";
+import { canonicalJson } from "./universe-json";
 import { parseLocationId, type LocationId } from "./location-address";
 import { workshopHeatCapacity, workshopRunning } from "./wayworks-stores";
 
@@ -20,7 +21,13 @@ export function prepareAsteroidSurvey(save: WorldSave, location: LocationId, mac
   if (machine.energyJ < ASTEROID_SURVEY_ENERGY_J || workshopHeatCapacity(machine.workshop) - machine.workshop.heatJ < ASTEROID_SURVEY_ENERGY_J) throw Error("The survey needs 1 kJ and space for 1 kJ of instrument heat.");
   const expanded = expandAsteroidRegistry(registry, registry.expansionLevel + 1, { orbit: address, seed: registry.seed,
     epoch: intent.epoch, expectedRevision: intent.registryRevision });
-  return { ...save, asteroidFields: withAsteroidField(fields, expanded), wayworks: { ...save.wayworks,
+  // A newly surveyed region may already contain ordinary construction. Capture
+  // it in the finite pages before an attachment owner can retire its edit mirror.
+  const captured = captureAsteroidEdits(withAsteroidField(fields, expanded), address, save.edits);
+  const nextRecords = new Map(captured.fields[location].asteroids.map(entry => [entry.descriptor.id, entry]));
+  if (registry.asteroids.some(entry => canonicalJson(entry) !== canonicalJson(nextRecords.get(entry.descriptor.id))))
+    throw Error("Checkpoint existing asteroid edits before surveying another ring.");
+  return { ...save, asteroidFields: captured, wayworks: { ...save.wayworks,
     [machineKey]: { ...machine, energyJ: machine.energyJ - ASTEROID_SURVEY_ENERGY_J, revision: machine.revision + 1,
       workshop: { ...machine.workshop, heatJ: machine.workshop.heatJ + ASTEROID_SURVEY_ENERGY_J } } } };
 }

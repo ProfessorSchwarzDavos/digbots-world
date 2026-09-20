@@ -99,12 +99,16 @@ test("guest and paused model rendering cannot advance authoritative resource sto
   const engine = Object.assign(Object.create(VoxelEngine.prototype), { multiplayer: { role: "guest" },
     wayworks: new Map([["0,0,0", state]]), wayworksModels: new Map(), pressureStructures: new Set(), settings: { simulationDistance: 3 },
     position: new THREE.Vector3(0, 0, 2), inventory: [{ item: Item.FieldWrench, count: 1 }], selected: 0,
-    world: { getBlock: () => BlockId.PoweredCrusher }, scene: new THREE.Scene(), paused: true, wayworksOverlayResource: "fluid" }) as VoxelEngine;
+    world: { locationScope: { locationId: "L", epoch: 1, revision: 1 }, getBlock: () => BlockId.PoweredCrusher }, scene: new THREE.Scene(), paused: true, wayworksOverlayResource: "fluid" }) as VoxelEngine;
   const before = JSON.stringify(state);
   engine.updateWayworks(1000);
   assert.equal(JSON.stringify(engine.wayworks.get("0,0,0")), before);
   assert.equal(engine.wayworksModels.size, 1);
   assert.equal(engine.wayworksModels.get("0,0,0")!.userData.wayworksOverlay.resource, "fluid");
+  Reflect.set(engine.world, "locationScope", { locationId: "elsewhere", epoch: 1, revision: 1 });
+  engine.updateWayworks(1000);
+  assert.equal(engine.wayworksModels.size, 0, "a foreign-location machine is not presented here");
+  assert.equal(JSON.stringify(engine.wayworks.get("0,0,0")), before, "presentation never mutates its retained stores");
 });
 
 test("normal equipped charging updates the back item, not the selected wrench", () => {

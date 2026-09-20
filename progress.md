@@ -2,6 +2,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Bucket-corrected00d9787 passed committed111/static56/lint38/build26 and official26.
+  Real two-browser r2 connected protocol5 and accepted five semantic operations;
+  withdrawal exposed same-frame Shift/stale guest shelf cache. Red12PASS1FAIL
+  retained, correction now uses immediate modifier and public block count while
+  host retains actual tome authority. Expanded r6:122PASS1FAIL (new shelf test
+  PASS; old Wayworks presentation fixture omitted its machine location scope).
+  Matching-scope fixture plus explicit foreign-scope rejection now gives123PASS
+  (r7), static58 and runtime lint39 PASS; final fixture lint40/build27/fresh replay
+  pending. Both browser attempts, saved partial state and failures
+  retained; preview/browser drained. No full compatibility/CF6 acceptance.
 - Typed guest runtime5020c6f's committed97PASS was followed by actual-handler
   guest-liquid-red-r1 10PASS/1FAIL: a credited bucket fill left its tracked source.
   Build25 intentionally stopped before acceptance; output/failure retained. Shared

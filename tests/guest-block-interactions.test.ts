@@ -131,3 +131,37 @@ test("guest sends semantic intent without touching its inventory or terrain", ()
   assert.equal(Reflect.get(f.engine, "requestGuestBlockInteraction").call(f.engine, "till", { ...point, type: BlockId.Farmland }), true);
   assert.deepEqual(f.image(), before); assert.deepEqual((sent[0] as unknown[])[4], { kind: "till", ...point });
 });
+
+test("ordinary guest shelf use follows visible count and immediate Shift, not stale cached tomes", () => {
+  for (const shift of ["ShiftLeft", "ShiftRight"]) {
+    const sent: unknown[][] = [];
+    const engine = Object.assign(Object.create(VoxelEngine.prototype), {
+      inventory: [null], selected: 0, placeCooldown: 0, crouching: false,
+      keys: new Set([shift]), leadAnchors: new Map(),
+      target: { ...point, type: archiveShelfBlockForBookCount(1) },
+      archiveShelves: new Map([[key, { schema: 1, tomes: [] }]]),
+      multiplayer: { role: "guest" }, applyHarvest: () => false,
+      publishBlockEdits: (...args: unknown[]) => sent.push(args),
+      events: { onToast: () => {} },
+    }) as VoxelEngine;
+    engine.useSelected();
+    assert.equal(sent.length, 1, "same-frame Shift must request withdrawal despite stale empty shelf cache");
+    assert.deepEqual(sent[0][4], { kind: "shelf-remove", ...point });
+    assert.deepEqual(sent[0][0], [{ ...point, type: BlockId.ArchiveShelf }]);
+    assert.deepEqual(engine.inventory, [null]); assert.equal(engine.crouching, false);
+    assert.deepEqual(engine.archiveShelves.get(key)!.tomes, []);
+  }
+  const sent: unknown[][] = [], tome = SPELL_TOME_ITEMS[0];
+  const engine = Object.assign(Object.create(VoxelEngine.prototype), {
+    inventory: [{ item: tome, count: 1 }], selected: 0, placeCooldown: 0,
+    crouching: false, keys: new Set(), leadAnchors: new Map(),
+    target: { ...point, type: archiveShelfBlockForBookCount(2) },
+    archiveShelves: new Map([[key, { schema: 1, tomes: [] }]]),
+    multiplayer: { role: "guest" }, applyHarvest: () => false,
+    publishBlockEdits: (...args: unknown[]) => sent.push(args), events: { onToast: () => {} },
+  }) as VoxelEngine;
+  engine.useSelected();
+  assert.equal(sent.length, 1); assert.deepEqual(sent[0][4], { kind: "shelf-insert", ...point });
+  assert.deepEqual(sent[0][0], [{ ...point, type: archiveShelfBlockForBookCount(3) }]);
+  assert.deepEqual(engine.inventory, [{ item: tome, count: 1 }]);
+});

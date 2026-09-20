@@ -20271,7 +20271,11 @@ export class VoxelEngine {
       }
       if (ARCHIVE_SHELF_BLOCK_SET.has(this.target.type)) {
         const fallbackCount = archiveShelfBookCount(this.target.type) ?? 0;
-        const current = this.archiveShelves.get(key) ?? normalizeArchiveShelf({ tomes: Array.from({ length: fallbackCount }, () => Item.BoundBook) });
+        // Guests only need the public block count to propose the next shape.
+        // Cached private contents can lag accepted edits; the host transfers
+        // the actual stored tome after validating the semantic request.
+        const publicContents = () => normalizeArchiveShelf({ tomes: Array.from({ length: fallbackCount }, () => Item.BoundBook) });
+        const current = this.multiplayer?.role === "guest" ? publicContents() : this.archiveShelves.get(key) ?? publicContents();
         if (heldSlot && isSpellTomeItem(heldSlot.item)) {
           const inserted = insertArchiveTome(current, heldSlot.item);
           if (!inserted.inserted) {
@@ -20291,7 +20295,7 @@ export class VoxelEngine {
           this.emitHud(true);
           return;
         }
-        if (this.crouching) {
+        if (placementModifier) {
           const removed = removeArchiveTome(current);
           if (!removed.removed || removed.item === null) {
             this.events.onToast("The archive shelf is empty.");

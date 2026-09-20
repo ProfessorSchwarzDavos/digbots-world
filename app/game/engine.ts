@@ -10113,6 +10113,66 @@ export class VoxelEngine {
     this.audio.play("break", logs[0].type);
   }
 
+  /** Pure preflight: no world, inventory, liquid or shelf state changes here. */
+  private prepareBlockInteraction(action: BlockAction, player: PlayerSessionSnapshot) {
+    const intent = action.interaction, edit = action.edits[0];
+    if (!intent || action.edits.length !== 1 || action.kind === "batch" || action.effect || action.consumedItem !== undefined
+      || edit.facing !== undefined || ![intent.x, intent.y, intent.z].every(Number.isSafeInteger)) return null;
+    const read = (x: number, y: number, z: number) => this.world.getBlock(x, y, z);
+    const before = read(intent.x, intent.y, intent.z), existing = read(edit.x, edit.y, edit.z);
+    if (before === undefined || existing === undefined) return null;
+    let state = normalizeMultiplayerPlayerState(player, player.playerId, player.variant);
+    const slots = state.inventory.map(inventorySlotFromNetwork), held = slots[state.selected], survival = this.mode === "survival";
+    let expected: BlockAction["edits"][number] | null = null, shelf: ArchiveShelfState | undefined;
+    const consume = () => { if (survival && held && --held.count <= 0) slots[state.selected] = null; };
+    let grant: ItemCode | undefined;
+    switch (intent.kind) {
+      case "till": {
+        if (!held || ITEMS[held.item]?.useKind !== "hoe" || !canTill(before, read(intent.x, intent.y + 1, intent.z))) return null;
+        expected = { x: intent.x, y: intent.y, z: intent.z, type: farmlandState(read, intent) };
+        const max = ITEMS[held.item]?.maxDurability;
+        if (survival && max && !isInfiniteDurabilityItem(held.item)) {
+          held.durability = (held.durability ?? max) - 1;
+          if (held.durability <= 0) slots[state.selected] = null;
+        }
+        break;
+      }
+      case "plant": {
+        const planted = held && plantingResult(held.item, before, read(intent.x, intent.y + 1, intent.z));
+        if (!planted) return null;
+        expected = { x: intent.x, y: intent.y + 1, z: intent.z, type: planted.block }; consume(); break;
+      }
+      case "bucket-fill": case "bucket-pour": {
+        if (!held || ITEMS[held.item]?.useKind !== "bucket") return null;
+        const distance = Math.abs(edit.x - intent.x) + Math.abs(edit.y - intent.y) + Math.abs(edit.z - intent.z);
+        if (intent.kind === "bucket-fill" ? distance !== 0 : distance !== 1) return null;
+        const bucket = resolveBucketAction(held.item, before, existing, this.liquidCells.get(blockKey(intent.x, intent.y, intent.z))?.source ?? true);
+        if (!bucket || `bucket-${bucket.kind}` !== intent.kind) return null;
+        expected = { x: edit.x, y: edit.y, z: edit.z, type: bucket.kind === "fill" ? BlockId.Air : bucket.place! };
+        if (survival) { consume(); grant = bucket.resultItem; } break;
+      }
+      case "shelf-insert": case "shelf-remove": {
+        if (!ARCHIVE_SHELF_BLOCK_SET.has(before)) return null;
+        const key = blockKey(intent.x, intent.y, intent.z);
+        const current = this.archiveShelves.get(key) ?? normalizeArchiveShelf({ tomes: Array.from({ length: archiveShelfBookCount(before) ?? 0 }, () => Item.BoundBook) });
+        if (intent.kind === "shelf-insert") {
+          // This shelf schema stores book identities, not arbitrary portable metadata.
+          if (!held || !isSpellTomeItem(held.item) || held.metadata && Object.keys(held.metadata).length) return null;
+          const next = insertArchiveTome(current, held.item); if (!next.inserted || next.block === undefined) return null;
+          shelf = next.state; expected = { x: intent.x, y: intent.y, z: intent.z, type: next.block }; consume();
+        } else {
+          const next = removeArchiveTome(current); if (!next.removed || next.item === null) return null;
+          shelf = next.state; expected = { x: intent.x, y: intent.y, z: intent.z, type: next.block }; grant = next.item;
+        }
+        break;
+      }
+    }
+    if (!expected || expected.x !== edit.x || expected.y !== edit.y || expected.z !== edit.z || expected.type !== edit.type) return null;
+    state = normalizeMultiplayerPlayerState({ ...state, inventory: slots.map(networkItemStack), revision: state.revision + 1 }, state.playerId, state.variant);
+    if (grant !== undefined) { const added = addItemToMultiplayerState(state, grant, 1); if (added.added !== 1) return null; state = added.state; }
+    return { state, shelf, key: blockKey(intent.x, intent.y, intent.z) };
+  }
+
   private handleRemoteBlockAction(action: BlockAction, peer: PeerInfo) {
     if (!this.multiplayer) return;
     if (this.multiplayer.role === "host" && action.status !== "accepted") {
@@ -10126,6 +10186,7 @@ export class VoxelEngine {
       const placement = playerState && this.mode === "survival"
         ? consumeMultiplayerPlacementItem(playerState, action.consumedItem, action.edits)
         : { valid: action.consumedItem === undefined || this.mode === "builder", consumed: false, state: playerState };
+      const interaction = playerState && action.interaction ? this.prepareBlockInteraction(action, playerState) : null;
       const playerPoses = [this.localNetworkPose(), ...[...this.remotePlayers.values()].map((player) => player.target)]
         .filter((pose): pose is PlayerPose => Boolean(pose));
       const toggle = action.consumedItem === undefined && !action.effect && validMultiplayerBlockToggle(action.edits, (x, y, z) => this.world.getBlock(x, y, z));
@@ -10134,7 +10195,7 @@ export class VoxelEngine {
         && action.edits[0].facing !== undefined && isDirectionallyPlacedBlock(action.edits[0].type as BlockId)
         && this.world.getBlock(action.edits[0].x, action.edits[0].y, action.edits[0].z) === action.edits[0].type;
       const uniqueCells = new Set(action.edits.map(edit => blockKey(edit.x, edit.y, edit.z))).size === action.edits.length;
-      const valid = Boolean(remote) && action.actorId === peer.identity?.id && uniqueCells && placement.valid
+      const valid = Boolean(remote) && action.actorId === peer.identity?.id && uniqueCells && placement.valid && (!action.interaction || !!interaction)
         && (!action.effect || action.edits.every(edit => edit.type === BlockId.Air))
         && validPressureDoorEdits(action.edits, point => this.world.getBlock(point.x, point.y, point.z)) && action.edits.length > 0 && action.edits.length <= 2_048 && action.edits.every((edit) => {
         if (!peer.identity || !this.stationActorAccess(peer.identity.id, edit.x, edit.y, edit.z, edit.type === BlockId.Air ? "extract" : "build") || this.stationStructurePinned(edit.x, edit.y, edit.z)) return false;
@@ -10142,7 +10203,9 @@ export class VoxelEngine {
         // Placement is not a mining/overwrite command. All cells are preflighted
         // before any terrain observer, inventory debit, drop or metadata teardown.
         if (existing === undefined) return false;
-        if (edit.type !== BlockId.Air && !toggle && !rotation) {
+        if (interaction && existing !== BlockId.Air && !this.stationActorAccess(peer.identity.id, edit.x, edit.y, edit.z, "extract")) return false;
+        if (interaction?.shelf && !this.stationActorAccess(peer.identity.id, edit.x, edit.y, edit.z, "container")) return false;
+        if (edit.type !== BlockId.Air && !toggle && !rotation && !interaction) {
           if (existing !== BlockId.Air && !BLOCKS[existing]?.replaceable) return false;
           if (existing !== BlockId.Air && !this.stationActorAccess(peer.identity.id, edit.x, edit.y, edit.z, "extract")) return false;
           if (this.mode === "survival" && !placement.consumed) return false;
@@ -10182,7 +10245,7 @@ export class VoxelEngine {
           reason: "The host rejected an out-of-range, occupied, or invalid block edit.",
         };
       if (valid) {
-        if (playerState && !placement.consumed) this.multiplayerPlayerStates.set(playerState.playerId, playerState);
+        if (playerState && !placement.consumed && !interaction) this.multiplayerPlayerStates.set(playerState.playerId, playerState);
         if (action.effect?.kind === "tree-fell") this.animateNetworkTreeFell(action, this.mode === "survival");
         const held = playerState ? inventorySlotFromNetwork(playerState.inventory[playerState.selected]) : null;
         const brokenBlocks = action.edits.flatMap((edit) => {
@@ -10205,6 +10268,14 @@ export class VoxelEngine {
           action.effect?.kind === "tree-fell",
         );
         this.applyBlockEditFacings(action.edits, true);
+        if (interaction && peer.identity) {
+          this.multiplayerPlayerStates.set(peer.identity.id, interaction.state);
+          if (interaction.shelf) this.archiveShelves.set(interaction.key, interaction.shelf);
+          const edit = action.edits[0];
+          if (action.interaction?.kind === "plant") this.schedulePlantGrowth(edit.x, edit.y, edit.z, edit.type as BlockId);
+          if (action.interaction?.kind.startsWith("bucket-")) this.notifyLiquidChanged(edit.x, edit.y, edit.z);
+          this.sendAuthoritativePlayerState(peer.identity.id, action.requestId);
+        }
         for (const edit of action.edits) {
           const kind = machineKindForBlock(edit.type);
           if (kind && held && peer.identity) this.wayworks.set(blockKey(edit.x, edit.y, edit.z), placedWorkshopMachine(kind,
@@ -10582,6 +10653,7 @@ export class VoxelEngine {
     kind?: BlockAction["kind"],
     effect?: BlockAction["effect"],
     consumedItem?: ItemCode,
+    interaction?: BlockAction["interaction"],
   ) {
     if (edits.length) this.enclosureCache?.clear();
     if (!this.multiplayer || !edits.length) return;
@@ -10594,11 +10666,12 @@ export class VoxelEngine {
       edits,
       selectedSlot: this.selected,
       ...(consumedItem !== undefined ? { consumedItem } : {}),
+      ...(interaction ? { interaction } : {}),
       ...(effect ? { effect } : {}),
       status: this.multiplayer.role === "host" ? "accepted" : "request",
     };
     if (this.multiplayer.role === "guest") {
-      if (consumedItem !== undefined) this.pendingGuestPlacementRequests.set(action.requestId, Date.now() + 4_000);
+      if (consumedItem !== undefined || interaction) this.pendingGuestPlacementRequests.set(action.requestId, Date.now() + 4_000);
       this.queueCriticalReliableRequest(`block:${action.requestId}`, () => this.multiplayer?.sendBlockAction(action) ?? 0, 6_000);
       return;
     }
@@ -10609,6 +10682,15 @@ export class VoxelEngine {
         .map((edit) => ({ kind: "block" as const, cause: "broken" as const, block: { x: edit.x, y: edit.y, z: edit.z } })));
     }
     catch (error) { this.multiplayerState.error = error instanceof Error ? error.message : String(error); }
+  }
+
+  private requestGuestBlockInteraction(kind: NonNullable<BlockAction["interaction"]>["kind"], edit: BlockAction["edits"][number]) {
+    if (this.multiplayer?.role !== "guest" || !this.target) return false;
+    this.publishBlockEdits([edit], edit.type === BlockId.Air ? "break" : "place", undefined, undefined,
+      { kind, x: this.target.x, y: this.target.y, z: this.target.z });
+    this.placeCooldown = .26; this.heldUse = 1;
+    // No predicted inventory, liquid or shelf mutation: the host owns the outcome.
+    return true;
   }
 
   updateMultiplayer(dt: number) {
@@ -20110,6 +20192,7 @@ export class VoxelEngine {
         const above = this.world.getBlock(this.target.x, this.target.y + 1, this.target.z);
         if (canTill(this.target.type, above)) {
           const tilled = farmlandState((x, y, z) => this.world.getBlock(x, y, z), this.target);
+          if (this.requestGuestBlockInteraction("till", { x: this.target.x, y: this.target.y, z: this.target.z, type: tilled })) return;
           this.world.setBlock(this.target.x, this.target.y, this.target.z, tilled, true, true);
           this.publishBlockEdits([{ x: this.target.x, y: this.target.y, z: this.target.z, type: tilled }], "place");
           this.damageSelectedTool();
@@ -20126,6 +20209,7 @@ export class VoxelEngine {
         const above = this.world.getBlock(this.target.x, plantY, this.target.z);
         const planted = plantingResult(heldSlot.item, this.target.type, above);
         if (planted) {
+          if (this.requestGuestBlockInteraction("plant", { x: this.target.x, y: plantY, z: this.target.z, type: planted.block })) return;
           this.world.setBlock(this.target.x, plantY, this.target.z, planted.block, true, true);
           this.publishBlockEdits([{ x: this.target.x, y: plantY, z: this.target.z, type: planted.block }], "place");
           this.consumeSelectedUnit();
@@ -20161,6 +20245,7 @@ export class VoxelEngine {
           const edit = bucket.kind === "fill"
             ? { x: this.target.x, y: this.target.y, z: this.target.z, type: BlockId.Air }
             : { x: this.target.placeX, y: this.target.placeY, z: this.target.placeZ, type: bucket.place! };
+          if (this.requestGuestBlockInteraction(bucket.kind === "fill" ? "bucket-fill" : "bucket-pour", edit)) return;
           this.world.setBlock(edit.x, edit.y, edit.z, edit.type, true, true);
           this.publishBlockEdits([edit], bucket.kind === "fill" ? "break" : "place");
           this.notifyLiquidChanged(edit.x, edit.y, edit.z);
@@ -20183,8 +20268,9 @@ export class VoxelEngine {
             this.events.onToast("This archive shelf already displays six books.");
             return;
           }
-          this.archiveShelves.set(key, inserted.state);
           const nextBlock = inserted.block ?? this.target.type;
+          if (this.requestGuestBlockInteraction("shelf-insert", { x: this.target.x, y: this.target.y, z: this.target.z, type: nextBlock })) return;
+          this.archiveShelves.set(key, inserted.state);
           this.world.setBlock(this.target.x, this.target.y, this.target.z, nextBlock, true, true);
           this.publishBlockEdits([{ x: this.target.x, y: this.target.y, z: this.target.z, type: nextBlock }], "place");
           this.consumeSelectedUnit();
@@ -20201,6 +20287,7 @@ export class VoxelEngine {
             this.events.onToast("The archive shelf is empty.");
             return;
           }
+          if (this.requestGuestBlockInteraction("shelf-remove", { x: this.target.x, y: this.target.y, z: this.target.z, type: removed.block })) return;
           this.archiveShelves.set(key, removed.state);
           this.world.setBlock(this.target.x, this.target.y, this.target.z, removed.block, true, true);
           this.publishBlockEdits([{ x: this.target.x, y: this.target.y, z: this.target.z, type: removed.block }], "place");

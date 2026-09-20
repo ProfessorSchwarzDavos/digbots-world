@@ -2,6 +2,14 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Generation checkpointc7793d accepted by Wildkeeper; frozen manifest1dc33745.
+  Required guest-compatibility continuation now adds host-derived till/plant,
+  bucket fill-pour and shelf insert-remove transactions; guest inputs no longer
+  optimistically mutate those resources. Protocol5/lanes reject older clients.
+  guest-interactions-r1 87PASS/r2 97PASS with actual host resource/rejection and
+  transport replay tests. static54 test-only enum/liquid annotation errors retained;
+  static55/lint37 PASS. Final committed build25/browser checks pending. No new
+  helpers, local-frame unlock or fullCF6 claim.
 - Generation routing3303e56, build24 rqxUHoGs1fb9ld9453Vha: committed112PASS,
   static52/lint36/build24/unchanged official24 PASS. Expanded synthetic field
   browser normal ice mining/save/fresh cold passed exact canonical page/claim,

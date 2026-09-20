@@ -18,9 +18,13 @@ extraction access for replaced foliage/other replaceable contents. One paid item
 authorizes one ordinary block or one exact bed/door pair, not an arbitrary batch.
 Omitted payment, duplicate cells, spoofed actors and partially occupied pairs reject
 atomically. Existing gate/door toggles and wrench-facing rotation are resource-neutral.
-Other non-consuming guest after-images (soil, seed, bucket or bookshelf changes)
-require typed host transactions and fail closed in this generic block channel;
-their complete guest adapters remain part of the unfinished integration matrix.
+Guest tilling, planting, bucket fill/pour and bookshelf insert/remove use semantic
+host transactions. The host derives the exact block change, inventory debit or
+return, growth schedule and shelf contents. Full-pack vessel/book returns reject
+without dropping or losing resources; metadata-bearing tomes cannot enter a shelf
+schema that stores only book identities. Arbitrary unfunded after-images still
+fail closed. Multiplayer protocol5 rejects earlier clients before admission so
+expanded generation context cannot be silently ignored. All peers need this build.
 
 ## Persistence
 

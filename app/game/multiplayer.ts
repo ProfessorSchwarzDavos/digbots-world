@@ -52,10 +52,10 @@ import { validCelestialGenerationState, type CelestialGenerationState } from "./
  * events, validates actions as host, and publishes authoritative snapshots.
  */
 
-export const MULTIPLAYER_PROTOCOL_VERSION = 4 as const;
+export const MULTIPLAYER_PROTOCOL_VERSION = 5 as const;
 export const MULTIPLAYER_PROTOCOL_NAME = TYPESCRIPT_MULTIPLAYER_PROTOCOL;
-export const RELIABLE_CHANNEL_LABEL = "blockwild.gameplay.v4" as const;
-export const MOVEMENT_CHANNEL_LABEL = "blockwild.movement.v4" as const;
+export const RELIABLE_CHANNEL_LABEL = "blockwild.gameplay.v5" as const;
+export const MOVEMENT_CHANNEL_LABEL = "blockwild.movement.v5" as const;
 export const VOICE_CHANNEL_LABEL = "blockwild.voice.v2" as const;
 
 export const MAX_RELIABLE_MESSAGE_BYTES = 256 * 1024;
@@ -143,6 +143,10 @@ export type PlayerPose = {
 
 export type BlockEdit = { x: number; y: number; z: number; type: number; facing?: 0 | 1 | 2 | 3 };
 export type ActionStatus = "request" | "accepted" | "rejected";
+export type BlockInteraction = Readonly<{
+  kind: "till" | "plant" | "bucket-fill" | "bucket-pour" | "shelf-insert" | "shelf-remove";
+  x: number; y: number; z: number;
+}>;
 
 export type BlockAction = {
   requestId: string;
@@ -158,6 +162,8 @@ export type BlockAction = {
   selectedSlot?: number;
   /** Item optimistically consumed by a guest for a player-initiated placement. */
   consumedItem?: number;
+  /** Semantic intent. Host derives the exact after-image and resource debit. */
+  interaction?: BlockInteraction;
   /** Presentation hint; voxel edits remain the authoritative state. */
   effect?: {
     kind: "tree-fell";
@@ -1404,6 +1410,12 @@ export function validatePayload<K extends MultiplayerMessageType>(type: K, value
         && value.edits.every(validateBlockEdit)
         && (value.selectedSlot === undefined || isInteger(value.selectedSlot, 0, 8))
         && (value.consumedItem === undefined || isInteger(value.consumedItem, 0, 65_535))
+        && (value.interaction === undefined || (isRecord(value.interaction)
+          && Object.keys(value.interaction).length === 4
+          && ["till", "plant", "bucket-fill", "bucket-pour", "shelf-insert", "shelf-remove"].includes(String(value.interaction.kind))
+          && [value.interaction.x, value.interaction.z].every(n => isInteger(n, -COORDINATE_LIMIT, COORDINATE_LIMIT))
+          && isInteger(value.interaction.y, -4096, 4096) && value.edits.length === 1 && value.kind !== "batch"
+          && value.consumedItem === undefined && value.effect === undefined))
         && (value.effect === undefined || (isRecord(value.effect)
           && value.effect.kind === "tree-fell"
           && isInteger(value.effect.rootX, -COORDINATE_LIMIT, COORDINATE_LIMIT)

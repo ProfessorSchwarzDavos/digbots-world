@@ -302,7 +302,7 @@ test("feature detection reports missing browser WebRTC without throwing", () => 
   assert.ok(support.reasons.some((reason) => reason.includes("RTCPeerConnection")));
 });
 
-test("protocol4 rejects unscoped, old and foreign signaling before payload access", async () => {
+test("protocol5 rejects unscoped, old and foreign signaling before payload access", async () => {
   const network = new FakeRtcNetwork();
   const host = makeSession(HOST, network, () => 100, []);
   const guest = new MultiplayerSession({ identity: GUEST_A, peerConnectionFactory: network.factory, autoMaintenance: false });
@@ -315,11 +315,27 @@ test("protocol4 rejects unscoped, old and foreign signaling before payload acces
   await assert.rejects(host.acceptGuestAnswer(encodeInviteCode(bad)), /different location/u);
   await host.acceptGuestAnswer(answer.answerCode); await flushMessages();
   assert.equal(host.state, "connected");
-  assert.equal(decoded.version, 4);
+  assert.equal(decoded.version, 5);
   let touched = false;
-  const unscoped = { version: 4, get payload() { touched = true; throw Error("must not inspect payload"); } };
+  const unscoped = { version: MULTIPLAYER_PROTOCOL_VERSION, get payload() { touched = true; throw Error("must not inspect payload"); } };
   assert.equal(validateEnvelope(unscoped), false); assert.equal(touched, false);
   assert.equal(validateEnvelope({ version: 3, get payload() { throw Error("old protocol payload accessed"); } }), false);
+  assert.equal(validateEnvelope({ version: 4, get payload() { throw Error("pre-generation-context payload accessed"); } }), false);
+  guest.dispose(); host.dispose();
+});
+
+test("semantic block retries cannot replay a debit or change their operation", async () => {
+  const network = new FakeRtcNetwork(), events: MultiplayerEvent[] = [];
+  const host = makeSession(HOST, network, () => 100, events), guest = makeSession(GUEST_A, network, () => 100, []);
+  await connect(host, guest);
+  const action: BlockAction = { requestId: "semantic-retry", actorId: GUEST_A.id, tick: 1, kind: "place", status: "request",
+    edits: [{ x: 0, y: 20, z: 0, type: 1 }], interaction: { kind: "shelf-insert", x: 0, y: 20, z: 0 } };
+  guest.sendBlockAction(action); await flushMessages();
+  host.sendBlockAction({ ...action, status: "accepted" });
+  guest.sendBlockAction(action); await flushMessages();
+  guest.sendBlockAction({ ...action, interaction: { ...action.interaction!, kind: "shelf-remove" } }); await flushMessages();
+  assert.equal(events.filter(e => e.type === "message" && e.envelope.type === "block-action").length, 1);
+  assert(events.some(e => e.type === "error" && /different intent/.test(e.error.message)));
   guest.dispose(); host.dispose();
 });
 
@@ -335,7 +351,7 @@ test("scope mismatch and changed-intent replay never reach gameplay handlers", a
     await connect(host, guest);
     const channel = [...network.connections.values()][1].channels.find(entry => entry.label === RELIABLE_CHANNEL_LABEL)!;
     const payload: InventoryAction = { requestId: "scope_pickup_001", actorId: GUEST_A.id, kind: "collect", dropId: 71, status: "request" };
-    channel.send(JSON.stringify({ version: 4, scope, sessionId: host.sessionId, sequence: 100, sentAt: 100, from: GUEST_A.id, type: "inventory-action", payload }));
+    channel.send(JSON.stringify({ version: MULTIPLAYER_PROTOCOL_VERSION, scope, sessionId: host.sessionId, sequence: 100, sentAt: 100, from: GUEST_A.id, type: "inventory-action", payload }));
     await flushMessages();
     assert.equal(events.filter(event => event.type === "message").length, 0);
     assert.ok(events.some(event => event.type === "error" && /location|epoch|revision/u.test(event.error.message)));

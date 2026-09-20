@@ -18,7 +18,7 @@ The old TypeScript source strings remain available for rollback to the old reade
 
 ## Wire identity
 
-Multiplayer protocol4 envelopes and manual signaling require a location admission stamp. Its revision is fixed for that connection; autosave advances durable checkpoint revisions independently. Live action revisions remain separate authority checks. Agent protocol2 observations, commands and results carry the same location scope. Scope or protocol mismatch is rejected before gameplay dispatch. Request response/intent retention is bounded, currently20seconds; it is not a permanent transaction history.
+Multiplayer protocol5 envelopes and manual signaling require a location admission stamp. Its revision is fixed for that connection; autosave advances durable checkpoint revisions independently. Live action revisions remain separate authority checks. Protocol5 explicitly rejects older peers that cannot apply expanded-field generation and typed, host-derived resource interactions. Agent protocol2 observations, commands and results carry the same location scope. Scope or protocol mismatch is rejected before gameplay dispatch. Request response/intent retention is bounded, currently20seconds; it is not a permanent transaction history.
 
 ## Verification status
 

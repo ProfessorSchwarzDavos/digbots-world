@@ -2,6 +2,15 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Typed guest checkpoint0f028e7/build27 FbED-5hbZ7V6B5ess6EDS locally verified:
+  committed123PASS/static58/lint39+40/build27/unchanged official27PASS. Fresh native
+  two-browser protocol5 accepts six ordinary till/plant/fill/pour/insert/remove
+  actions exactly once. Normal savedr3/058 and freshcold/008 pass exact onehoe/seed
+  debit, returnedvessel/tome, hostinventory/fleet/inactiveplaces/claims and23625voxel
+  checks. Final six images personally reviewed, no captured browser errors;
+  jobs/ports drained. Early cooldown-suppressed seedclick/observer timeout retained,
+  no duplicate request/debit. Synthetic stagedboard/finiteguestkit, NOT progression,
+  cargo or comprehensivepeer/performance acceptance. FullCF6 continues.
 - Bucket-corrected00d9787 passed committed111/static56/lint38/build26 and official26.
   Real two-browser r2 connected protocol5 and accepted five semantic operations;
   withdrawal exposed same-frame Shift/stale guest shelf cache. Red12PASS1FAIL

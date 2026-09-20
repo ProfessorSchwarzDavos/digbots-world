@@ -2,6 +2,15 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — revision12, first transaction checkpoint
 
+- Exact6d91ce6 build-r4/official-r4 PASS, indoor release screenshot confirms
+  floor32.5 rather than roof36.5. Strict storage comparison exposed changed
+  progression/genetic seeds; source now preserves those through real spawn,
+  serialize and restore. Normal equipped EVA reboarding exposed an erroneous
+  console prerequisite; nearby boarding now retains host/location/access/stale
+  gates without needing a console. Full return remains unproven. Shared Lantern
+  relationship policy now explicitly names jar-only relocation, not Orb bonding.
+  Retained failed focused-r15/r16 and browser attempts; fresh checks pending.
+
 - Exact249e093 build-r3/official-r3 PASS. Ordinary synthetic lab jar craft,
   capture and cold custody passed; release exposed a real roof-teleport bug.
   Bounded local Morrow release grounding now rejects blocked/unknown footprints;

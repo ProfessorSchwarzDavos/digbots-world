@@ -68,6 +68,13 @@ const connectSessionsForTemperament = (temperament: MobTemperament) => {
 export function creatureRelationshipPolicy(kind: MobKind): CreatureRelationshipPolicy {
   const definition = MOB_DEFS[kind];
   const family = definition.family ?? "surface";
+  if (kind === "vacuum-lantern") {
+    return Object.freeze({
+      mode: "relocation-only", orbEligible: false, companionEligible: false,
+      title: "Sealed Specimen Jar",
+      explanation: "A sealed jar relocates this specimen only while keeper and Lantern share a safely pressurized enclosure; Capture Orbs cannot contain it.",
+    });
+  }
   if (definition.sentient || family === "sentient") {
     return Object.freeze({
       mode: "recruitment", orbEligible: false, companionEligible: true,
@@ -399,7 +406,8 @@ export function validateCreatureRelationshipPolicies(): readonly string[] {
     if (policy.mode === "care-bond" && (!policy.orbEligible || !policy.companionEligible)) {
       issues.push(`${kind}: care-bond policy must support both capture and companionship`);
     }
-    if (policy.mode === "relocation-only" && (!policy.orbEligible || policy.companionEligible)) {
+    const sealedJar = kind === "vacuum-lantern" && definition.captureItem === Item.SpecimenJar;
+    if (policy.mode === "relocation-only" && ((!policy.orbEligible && !sealedJar) || policy.companionEligible)) {
       issues.push(`${kind}: relocation-only policy must capture without companionship`);
     }
     if (policy.mode === "recruitment" && policy.orbEligible) issues.push(`${kind}: sentient recruitment cannot use an orb`);

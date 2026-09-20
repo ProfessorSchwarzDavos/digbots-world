@@ -49,6 +49,7 @@ export type CreatureProgressionV2 = Readonly<{
 
 export type LegacyCreatureProgression = Readonly<Partial<{
   schemaVersion: number;
+  progressionSeed: number;
   level: number;
   experience: number;
   xp: number;
@@ -188,7 +189,9 @@ export type ProgressionMigrationInput = Readonly<{
 
 export function migrateCreatureProgression(input: ProgressionMigrationInput): CreatureProgressionV2 {
   const legacy = input.legacy ?? {};
-  const progressionSeed = stableCreatureSeed(input.kind, input.entityId, input.geneticSeed ?? 0, input.age ?? 0);
+  // A saved specimen's identity cannot depend on its new runtime ID or age.
+  const progressionSeed = Number.isInteger(legacy.progressionSeed) && legacy.progressionSeed! >= 0 && legacy.progressionSeed! <= UINT32_MAX
+    ? legacy.progressionSeed! : stableCreatureSeed(input.kind, input.entityId, input.geneticSeed ?? 0, input.age ?? 0);
   const experience = Math.max(0, Math.floor(legacy.experience ?? legacy.xp ?? 0));
   const savedLevel = Number.isFinite(legacy.level) ? Math.floor(legacy.level ?? 1) : levelForExperience(experience, input.maximumLevel);
   const level = Math.max(1, Math.min(input.maximumLevel, savedLevel));

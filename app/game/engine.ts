@@ -1415,6 +1415,7 @@ export type SavedCreature = {
   celestialVelocity?: [number, number, number];
   /** Stable across capture, release, growth replacement, sleep, and reconnect. */
   specimenId?: string;
+  geneticSeed?: number;
   kind: MobKind;
   name?: string;
   x: number;
@@ -1738,6 +1739,7 @@ type VoxelHit = {
 
 type MobEntity = {
   id: number;
+  geneticSeed?: number;
   habitatExposureSeconds?: number;
   morrowExposure?: MorrowExposureState;
   morrowRoost?: { x: number; y: number; z: number };
@@ -1914,6 +1916,7 @@ type MorphLoomFurnitureVisual = { group: THREE.Group; signature: string };
 type SpawnMobOptions = {
   id?: number;
   specimenId?: string | null;
+  geneticSeed?: number;
   health?: number;
   age?: number;
   naturalSpawned?: boolean;
@@ -13087,7 +13090,9 @@ export class VoxelEngine {
       && machine.locationId === this.world.locationScope.locationId && machineKindForBlock(this.world.getBlock(...key.split(",").map(Number) as VehicleVector)) === machine.kind
       && this.position.distanceTo(new THREE.Vector3(...key.split(",").map(Number))) <= 6
       && (expectedMachineRevision === undefined || machine.revision === expectedMachineRevision);
-    if (!consoleReady && !aboard) return fail("Use nearby flight hardware, or board your pilot seat.");
+    const boardingNearby = action.kind === "board" && ship
+      && this.position.distanceTo(new THREE.Vector3(...ship.transform.position)) <= 6;
+    if (!consoleReady && !aboard && !boardingNearby) return fail("Use nearby flight hardware, or approach within six blocks to board your pilot seat.");
     try {
       if (action.kind === "route") { firstFlightDestination(this.world.locationScope.locationId, action.route); this.spaceflightRoute = action.route; this.emitHud(true); return true; }
       if (action.kind === "deploy") {
@@ -16668,7 +16673,7 @@ export class VoxelEngine {
       tamed: Boolean(mob.creatureTamed || mob.dragonState?.tamed || mob.petState?.tamed || mob.shadeState?.tamed || mob.reedstriderBond?.tamed || mob.courserBond?.tamed || mob.leviathanGrowth?.tamed || mob.apiaryBee?.tamed || mob.hiredByPlayerId),
       ownerId: mob.creatureOwnerId ?? mob.dragonState?.ownerId ?? mob.petState?.ownerId ?? mob.shadeState?.ownerId ?? mob.reedstriderBond?.ownerId ?? mob.courserBond?.ownerId ?? mob.leviathanGrowth?.ownerId ?? mob.apiaryBee?.ownerId ?? mob.hiredByPlayerId ?? null,
       name: mob.petState?.name ?? (mob.name !== mob.definition.name ? mob.name : null),
-      geneticSeed: mob.petState?.geneticSeed ?? mob.apiaryBee?.geneticSeed ?? ((mob.id * 2654435761) >>> 0),
+      geneticSeed: mob.geneticSeed ?? mob.petState?.geneticSeed ?? mob.apiaryBee?.geneticSeed ?? ((mob.id * 2654435761) >>> 0),
       command: mob.petState?.command ?? null,
       factionId: mob.factionId,
       settlementId: mob.settlementId,
@@ -17460,6 +17465,7 @@ export class VoxelEngine {
     const mob = this.spawnMob(metadata.kind, resolvedPosition, {
       health: metadata.health,
       specimenId: metadata.entityId,
+      geneticSeed: metadata.geneticSeed,
       age: metadata.ageTicks / 20,
       petState: metadata.kind === "peelop" && metadata.custom.petState ? metadata.custom.petState as unknown as PeelopState : null,
       careState: metadata.custom.careState ? metadata.custom.careState as unknown as CreatureHusbandryState : null,
@@ -26478,6 +26484,7 @@ export class VoxelEngine {
     const replacement = this.spawnMob(growth.kind, position, {
       id: mob.id,
       specimenId: mob.specimenId,
+      geneticSeed: mob.geneticSeed,
       age: mob.age,
       naturalSpawned: mob.naturalSpawned,
       everLed: mob.everLed,
@@ -27391,6 +27398,8 @@ export class VoxelEngine {
     const shadeHealthScale = shadeState ? shadecrawlerScale(shadeState) : 1;
     const ordinaryMaximumHealth = creatureMaximumHealth(definition, profile.stats, progression.level) * shadeHealthScale;
     const mob: MobEntity = {
+      geneticSeed: Number.isInteger(options.geneticSeed) && options.geneticSeed! >= 0 && options.geneticSeed! <= 0xffff_ffff
+        ? options.geneticSeed! : petState?.geneticSeed ?? apiaryBee?.geneticSeed ?? ((id * 2654435761) >>> 0),
       id, specimenId, kind, name: options.name?.trim() || primeProfile?.name || dragonState?.customName || petState?.name || definition.name, hostile: definition.hostile && !shadeState?.tamed && !dragonState?.tamed && (dragonState?.stage ?? 2) > 1, definition, group, presentationRoot, visual,
       sentientLod, sentientTier: "full", sentientSimulationAccumulator: 0,
       simulationTier: "full", simulationAccumulator: 0, renderLodActive: false, renderTier: "hero", parts,
@@ -27494,6 +27503,7 @@ export class VoxelEngine {
       ...(this.celestialCreatureVelocity?.has(mob.id) ? { celestialVelocity: this.celestialCreatureVelocity.get(mob.id)!.toArray() as [number, number, number] } : {}),
       specimenId: mob.specimenId,
       kind: mob.kind,
+      ...(mob.geneticSeed !== undefined ? { geneticSeed: mob.geneticSeed } : {}),
       ...(mob.name !== mob.definition.name ? { name: mob.name } : {}),
       x: mob.group.position.x,
       y: mob.group.position.y,
@@ -27592,6 +27602,7 @@ export class VoxelEngine {
     const restored = this.spawnMob(migrated.kind, position, {
       id: migrated.id,
       specimenId: migrated.specimenId ?? null,
+      geneticSeed: migrated.geneticSeed,
       health: Math.max(0.1, Number(migrated.health) || MOB_DEFS[migrated.kind].health),
       age: Math.max(0, Number(migrated.age) || 0),
       naturalSpawned: legacyNatural,

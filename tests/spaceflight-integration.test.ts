@@ -73,6 +73,29 @@ test("gantry quote atomically caps each finite store and rejects stale or unperm
   machine.ownerId = "stranger"; assert.throws(() => take("oxygenMl"), /not permitted/);
 });
 
+test("EVA crew can reboard nearby without a console, while host, location, distance and access gates remain", async () => {
+  const ship = structuredClone(createSurveyHopper("return-ship", "local", origin.locationId, [1, 32.51, 1]));
+  const messages: string[] = [];
+  const engine = Object.assign(Object.create(VoxelEngine.prototype), {
+    persistent: true, activeWorldId: "return-host", locationTransitioning: false, spaceflightBusy: false, pendingSpaceArrival: null,
+    multiplayer: null, spacefleet: { schema: 1, vehicles: { [ship.vehicleId]: ship } }, activeWayworksKey: null, wayworks: new Map(),
+    position: new THREE.Vector3(3.5, 32.5, 1), world: { locationScope: origin },
+    events: { onToast: (message: string) => messages.push(message) }, emitHud: () => {}, saveSoon: () => {},
+  }) as VoxelEngine;
+  const board = () => engine.spaceflightAction({ kind: "board", vehicleRevision: 0 });
+  engine.position.x = 8; assert.equal(await board(), false, "six-block boarding reach");
+  engine.position.x = 3.5;
+  Reflect.set(engine, "multiplayer", { role: "guest" }); assert.equal(await board(), false);
+  Reflect.set(engine, "multiplayer", null);
+  ship.ownerId = "other"; assert.equal(await board(), false, "nearby is not permission"); ship.ownerId = "local";
+  ship.locationId = locationId({ ...home, kind: "orbit", instanceId: "low" }); assert.equal(await board(), false);
+  ship.locationId = origin.locationId;
+  assert.equal(await engine.spaceflightAction({ kind: "cargo-out", vehicleRevision: 0, slot: 0 }), false, "boarding exception is not general console authority");
+  assert.equal(await engine.spaceflightAction({ kind: "board", vehicleRevision: 99 }), false, "stale request");
+  assert.equal(await board(), true, messages.at(-1));
+  assert.equal(engine.spacefleet.vehicles[ship.vehicleId].passengers[0].actorId, "local");
+});
+
 test("actual chunk generation produces orbital void and Morrow voxels without Home features, retaining edits", () => {
   const world = new ChunkWorld();
   try {

@@ -14,6 +14,7 @@ import { captureLanternJar, readLanternJar } from "../app/game/lantern-jar";
 import { createAirZoneState, discoverAirZone } from "../app/game/airzone";
 import { type CreatureMetadata } from "../app/game/creature-cage";
 import { migrateCreatureProgression } from "../app/game/creature-progression";
+import { creatureRelationshipPolicy, validateCreatureRelationshipPolicies } from "../app/game/creature-relationships";
 
 const specimen: CreatureMetadata = { schema: 1, entityId: "lantern-original", kind: "vacuum-lantern", health: 7, maxHealth: 12,
   ageTicks: 12345, baby: false, temperament: "Gentle", hostile: false, tamed: false, ownerId: null,
@@ -37,6 +38,9 @@ test("all four production registries dispatch authored bounded models and explic
 });
 
 test("normal jar recipe and exact metadata custody never create stacked or malformed specimens", () => {
+  assert.equal(creatureRelationshipPolicy("vacuum-lantern").orbEligible, false);
+  assert.equal(creatureRelationshipPolicy("vacuum-lantern").companionEligible, false);
+  assert.deepEqual(validateCreatureRelationshipPolicies(), []);
   assert.ok(RECIPES.some(recipe => recipe.output.item === Item.SpecimenJar));
   const empty = { item: Item.SpecimenJar, count: 1 }, filled = captureLanternJar(empty, specimen, "jar-1", 123)!;
   assert.deepEqual(readLanternJar(filled), specimen); assert.equal(empty.item, Item.SpecimenJar);
@@ -96,6 +100,42 @@ test("indoor jar release stays below the ceiling and rejects blocked or unloaded
   blocked = false; missing = true;
   assert.equal(engine.creatureReleasePosition(specimen, new THREE.Vector3(8, 33, 0)), null);
   assert.equal(engine.creatureReleasePosition(specimen, new THREE.Vector3(NaN, 33, 0)), null);
+});
+
+test("actual released Lantern retains genetic and progression identity through save and cold restoration", () => {
+  const engine = Object.assign(Object.create(VoxelEngine.prototype), {
+    nextMobId: 5, day: 1, mobs: [], sleepingCreatures: [], creatureGroup: new THREE.Group(),
+    primeEncounters: new Map(), chests: new Map(), createMobVisual,
+    world: { seedText: "jar-custody", getBlock: (_x: number, y: number) => y === 32 || y === 36 ? BlockId.StoneBrick : BlockId.Air,
+      isWalkThrough: (block: BlockId) => block === BlockId.Air },
+    bodyContext: () => ({ environment: { gravityG: .19 } }), worldSimulationSeconds: () => 0,
+    applyMobScale: () => {}, syncWoolhornCoat: () => {}, syncCreatureWorkVisual: () => {}, refreshMobSpatialEntry: () => {},
+  }) as VoxelEngine;
+  const progression = migrateCreatureProgression({ kind: specimen.kind, entityId: specimen.entityId,
+    geneticSeed: specimen.geneticSeed, age: 60, maximumLevel: 50, defaultMoveIds: ["vacuum-lantern--shell-nudge"] });
+  const original = { ...specimen, custom: { ...specimen.custom, progression } } as unknown as CreatureMetadata;
+  const released = engine.spawnCreatureMetadata(original, new THREE.Vector3(8, 33, 0))!;
+  assert.ok(released); assert.notEqual(released.id, 1);
+  const after = engine.creatureMetadataForMob(released);
+  assert.equal(after.entityId, original.entityId); assert.equal(after.geneticSeed, original.geneticSeed);
+  assert.deepEqual(after.custom.progression, progression); assert.equal(after.health, original.health);
+  released.age += 100;
+  const saved = JSON.parse(JSON.stringify(engine.serializeCreature(released)));
+  assert.equal(saved.geneticSeed, original.geneticSeed);
+  const cold = engine.restoreCreature(saved)!;
+  assert.equal(cold.geneticSeed, original.geneticSeed); assert.deepEqual(cold.progression, progression);
+  assert.equal(engine.creatureMetadataForMob(cold).geneticSeed, original.geneticSeed);
+});
+
+test("saved progression seeds are stable uint32 values, including zero; malformed seeds migrate deterministically", () => {
+  const input = { kind: "vacuum-lantern" as const, entityId: "stable", maximumLevel: 50 as const, defaultMoveIds: [] };
+  for (const progressionSeed of [0, 3953055104, 0xffff_ffff]) {
+    assert.equal(migrateCreatureProgression({ ...input, age: 999, legacy: { progressionSeed } }).progressionSeed, progressionSeed);
+  }
+  const fallback = migrateCreatureProgression(input).progressionSeed;
+  for (const progressionSeed of [NaN, Infinity, -1, 1.5, 0x1_0000_0000]) {
+    assert.equal(migrateCreatureProgression({ ...input, legacy: { progressionSeed } }).progressionSeed, fallback);
+  }
 });
 
 test("actual Owl controller makes bounded crossings and rests on its real dream refuge", () => {

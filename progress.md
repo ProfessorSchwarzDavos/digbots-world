@@ -2,6 +2,20 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Final correctionbe0d4b4 passes committed combined247/static80/lint61 and
+  build31z2xopHBtFbwOnGLyxeQ7r. Unchanged official31 and normal browser r2 pass;
+  keyboard survey60-to140 retains old60, exact1000J electrical debit/heat gain,
+  all other observed machines/equipment/pose exact at the paused boundary.
+  Ordinary pointer SaveQuit and fresh cold reload retain the sole canonical
+  metadata owner, finite field, inventory/fleet/guests/station history and inactive
+  places. Cold rapid Escape now freezes clock/EVA/machines across2500ms, then
+  native center mouse SaveQuit succeeds. Custody-r3 PASS; seven final screenshots
+  personally reviewed. All browser/preview jobs drained, Windows+WSL4338/4339
+  absent23:37UTC. Source fixture is explicit synthetic prior admission, not
+  ordinary acquisition/admission/EVA/local-frame travel or performance proof.
+  Earlier build30 pointer failures and red tests remain retained. Repository
+  checkpoint ready for director review; complete selectors/local travel/fullCF6
+  remain unfinished. No CF7, publication or provider action.
 - Committed metadata sourcec386a74/build30 passed134 focused checks, official30,
   normal paid60-to140 survey and final cold custody-r2 with one canonical owner.
   Cold rapid Escape exposed a separate delayed pointer-lock grant that resumed

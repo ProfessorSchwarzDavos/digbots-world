@@ -129,3 +129,11 @@ ownership checks are not a complete spatial selector or a substitute for each
 subsystem's semantic and authorization checks. Complete physical/component and
 entity/fleet/agent adapters plus ordinary local-frame travel evidence are still
 required before entry opens. Synthetic storage tests are not gameplay acceptance.
+
+The repository checkpoint also has a production-browser regression using an
+explicitly admitted synthetic fixture: ordinary Continue, paid survey, Save &
+Quit and fresh cold reload retain the canonical owner and finite stores. This
+does not demonstrate ordinary admission or local-frame travel. Rapidly closing
+an inspector and pausing must leave solo simulation frozen even if the browser
+delivers an earlier pointer-lock request late; only an explicit resume may
+reacquire input. Shared sessions still keep their authoritative simulation live.

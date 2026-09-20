@@ -113,7 +113,7 @@ test("agent sealed placement and pickup preserve stores, reject stale inventory 
     agentPose: () => ({ x: 0, y: 0, z: 0 }), publishAgentResult: (result: AgentCommandResult) => result,
     markPersistenceDirty: () => {}, clearWayworksModels: () => {}, publishBlockEdits: () => {}, currentPlayerHeight: () => 1.8,
     position: new THREE.Vector3(20, 0, 20), remotePlayers: new Map(),
-    world: { getBlock: () => block, setBlock: (_x: number, _y: number, _z: number, value: BlockId) => { block = value; }, setBlockFacing: () => {}, mutationRevision: 1, locationScope: { locationId: "L" } } });
+    world: { getBlock: () => block, setBlock: (_x: number, _y: number, _z: number, value: BlockId) => { block = value; }, setBlocksBatch: (edits: { type: BlockId }[]) => { block = edits[0].type; }, setBlockFacing: () => {}, mutationRevision: 1, locationScope: { locationId: "L" } } });
   const api = h.engine as unknown as { executeAgentCommand(command: AgentCommandEnvelope): AgentCommandResult };
   const run = (kind: AgentCommandEnvelope["kind"], args: Record<string, unknown>) => api.executeAgentCommand({ schema: 1, scope: { locationId: locationId(homeLocation(universeId("cf4-test"))), epoch: 1, revision: 1 },
     commandId: "cmd_cf4", agentId: id, kind, expectedWorldRevision: 1, issuedAt: Date.now(), expiresAt: Date.now() + 10000, arguments: args } as AgentCommandEnvelope);

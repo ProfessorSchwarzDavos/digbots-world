@@ -1,0 +1,398 @@
+import { BLOCKS, BlockId, Item } from "./data";
+import { blockFacingFront, normalizeBlockFacing } from "./block-facing";
+import { airCellKey, airZoneDiagnostics, equalizeAirZones, stepAirZone, totalAirGas, type AirConsumer, type AirPoint, type AirZoneState } from "./airzone";
+import type { AirZoneWorkerResponse } from "./airzone-worker-protocol";
+import { pressureDoorKind, pressureMachineKind } from "./pressure-catalog";
+import { createPressureDevice, normalizePressureDevice, parsePressureAction, pressureDoorLower, pressurePoint,
+  PRESSURE_LINK_RANGE, type PressureAction, type PressureDevice } from "./pressure-devices";
+import { commandAirlock, createAirlockState, stepAirlock, validateHangarGate, type AirlockObservation, type AirlockResult } from "./pressure-airlock";
+import { admitAmbientAir, drawHabitatCarbon, recoverHabitat, regulateHabitat, supplyHabitat } from "./pressure-habitat";
+import { PressureTopology } from "./pressure-topology";
+import { workshopAuthorized, workshopGasCapacity, workshopRunning, workshopStoredTotal } from "./wayworks-stores";
+import type { MachineState } from "./wayworks";
+import type { BodyEnvironment } from "./celestial-environment";
+
+type BoundaryFlux = { oxygenMilliMoles: number; inertMilliMoles: number; co2MilliMoles: number; thermalEnergyMilliJ: number };
+export type PressureSave = { schema: 1; nextInstallation: number; zones: AirZoneState[]; devices: Record<string, PressureDevice>;
+  boundary?: { admitted: BoundaryFlux; released: BoundaryFlux; topologyLost: BoundaryFlux } };
+export type PressureOccupant = AirConsumer & { point: AirPoint };
+export type PressureHost = {
+  locationId: string; generation: number; minY: number; maxY: number;
+  blockAt(point: AirPoint): BlockId | undefined;
+  skyTopAt(x: number, z: number): number | undefined;
+  loadedColumns(): string[];
+  machines: Map<string, MachineState>;
+  environment(): BodyEnvironment;
+  daylight(): number;
+  occupants(): readonly PressureOccupant[];
+  obstructed(point: AirPoint): boolean;
+  actorStillHolding(actorId: string, key: string): boolean;
+  changed(): void; alarm(message: string): void;
+};
+type Hold = { key: string; command: Extract<PressureAction, { kind: "hold" }>["command"]; start: number; renewed: number };
+
+/** Location-owned coordinator. The graph is ephemeral; only machine vessels and
+ * saved AirZone memberships own gas. Guests never construct this authority. */
+export class PressureRuntime {
+  readonly topology: PressureTopology;
+  readonly devices = new Map<string, PressureDevice>();
+  readonly gates = new Map<string, readonly AirPoint[]>();
+  readonly gateErrors = new Map<string, string>();
+  readonly consumers = new Map<string, number>();
+  private worker: Worker | null = null;
+  private nextInstallation = 1;
+  private roof = new Map<string, number>();
+  private holds = new Map<string, Hold>();
+  private alarms = new Map<string, string>();
+  private staticConsumers = new Map<string, { revision: number; fire: number; plants: number }>();
+  private elapsed = 0;
+  private now = 0;
+  private gateSignature = "";
+  readonly boundary = { admitted: { oxygenMilliMoles: 0, inertMilliMoles: 0, co2MilliMoles: 0, thermalEnergyMilliJ: 0 },
+    released: { oxygenMilliMoles: 0, inertMilliMoles: 0, co2MilliMoles: 0, thermalEnergyMilliJ: 0 } };
+
+  constructor(readonly host: PressureHost, saved?: PressureSave) {
+    if (saved?.schema === 1) {
+      if (Number.isSafeInteger(saved.nextInstallation) && saved.nextInstallation > 0) this.nextInstallation = saved.nextInstallation;
+      for (const [key, raw] of Object.entries(saved.devices ?? {}).slice(0, 256)) {
+        const value = normalizePressureDevice(raw); if (pressurePoint(key) && value) this.devices.set(key, value);
+      }
+    }
+    this.topology = new PressureTopology({ flagsAt: point => this.flagsAt(point),
+      sectionLoaded: point => this.host.blockAt({ x: point.x, y: Math.max(host.minY, Math.min(host.maxY, point.y)), z: point.z }) !== undefined,
+      annotations: () => [...this.devices].flatMap(([key, device]) => {
+        if (!device.open) return [];
+        return this.doorCells(key).map(point => ({ ...point, passable: true, sealMask: 0,
+          openFaceCauses: { "+x": `open-door:${key}`, "-x": `open-door:${key}`, "+y": `open-door:${key}`, "-y": `open-door:${key}`, "+z": `open-door:${key}`, "-z": `open-door:${key}` } }));
+      }) }, host.locationId, host.generation, message => this.worker?.postMessage(message), saved?.schema === 1 ? saved.zones : []);
+    if (typeof Worker !== "undefined") {
+      this.worker = new Worker(new URL("./airzone-worker.ts", import.meta.url), { type: "module" });
+      this.worker.onmessage = (event: MessageEvent<AirZoneWorkerResponse>) => { if (this.topology.receive(event.data)) host.changed(); };
+      this.worker.onerror = () => { this.topology.lastError = "discovery-worker-failed"; host.alarm("Habitat check failed. Keep your helmet sealed."); };
+    } else this.topology.lastError = "discovery-worker-unavailable";
+    this.syncMachines();
+    if (saved?.boundary) for (const kind of ["admitted", "released", "topologyLost"] as const) {
+      const flux = saved.boundary[kind];
+      if (flux && ["oxygenMilliMoles", "inertMilliMoles", "co2MilliMoles", "thermalEnergyMilliJ"].every(key => Number.isSafeInteger(flux[key as keyof BoundaryFlux]) && flux[key as keyof BoundaryFlux] >= 0))
+        Object.assign(kind === "topologyLost" ? this.topology.lost : this.boundary[kind], flux);
+    }
+  }
+  private recordBoundary(kind: "admitted" | "released", flux: BoundaryFlux) {
+    for (const key of Object.keys(this.boundary[kind]) as (keyof BoundaryFlux)[]) this.boundary[kind][key] += flux[key];
+    if (totalAirGas(flux)) this.host.changed();
+  }
+  private front(key: string, reverse = false): AirPoint {
+    const point = pressurePoint(key)!, machine = this.host.machines.get(key);
+    const face = blockFacingFront(normalizeBlockFacing(machine?.facing ?? 0)), sign = reverse ? -1 : 1;
+    return { x: point.x + face.x * sign, y: point.y, z: point.z + face.z * sign };
+  }
+  roomPoint(key: string): AirPoint { return pressurePoint(this.devices.get(key)?.links.room ?? "") ?? this.front(key); }
+  zoneAt(point: AirPoint) { return this.topology.zoneAt(point); }
+  private solid(point: AirPoint): boolean {
+    if (this.closedGateAt(point)) return true;
+    if (this.openDoorAt(point)) return false;
+    const type = this.host.blockAt(point); return type === undefined || (BLOCKS[type]?.solid ?? false);
+  }
+  private flagsAt(point: AirPoint): number | undefined {
+    const type = this.host.blockAt(point); if (type === undefined) return undefined;
+    if (this.solid(point)) return 0;
+    const column = `${point.x},${point.z}`; let top = this.roof.get(column);
+    if (top === undefined) {
+      const opaque = this.host.skyTopAt(point.x, point.z); if (opaque === undefined) return undefined;
+      top = opaque;
+      for (let y = this.host.maxY; y > opaque; y--) if (this.solid({ x: point.x, y, z: point.z })) { top = y; break; }
+      this.roof.set(column, top);
+    }
+    return 1 | (point.y > top ? 128 : 0);
+  }
+  exteriorAt(point: AirPoint) { const flags = this.flagsAt(point); return flags !== undefined && (flags & 129) === 129; }
+  radiateMachineHeat(key: string, joules: number): number {
+    if (!Number.isSafeInteger(joules) || joules <= 0) return 0;
+    const zone = this.zoneAt(this.roomPoint(key));
+    if (!zone || !["sealed", "depressurized", "leaking"].includes(zone.status)) return 0;
+    const result = stepAirZone(zone, { heatMilliJ: joules * 1000 });
+    this.topology.replace(result.state); if (result.heatAppliedMilliJ) this.host.changed();
+    return result.heatAppliedMilliJ;
+  }
+  onEdit(point: AirPoint) {
+    this.roof.delete(`${point.x},${point.z}`); this.gateSignature = "";
+    this.topology.invalidate(point);
+  }
+  private syncMachines() {
+    const usedIds = new Set<string>();
+    for (const [key, raw] of this.host.machines) {
+      if (!pressureMachineKind(raw.kind) || !raw.workshop.process) continue;
+      let machine = raw, id = raw.workshop.process.installationId;
+      if (!id || usedIds.has(id)) {
+        while ([...this.devices.values()].some(device => device.installationId === `p-${this.nextInstallation}`)) this.nextInstallation++;
+        id = `p-${this.nextInstallation++}`;
+        machine = { ...raw, revision: raw.revision + 1, workshop: { ...raw.workshop, process: { ...raw.workshop.process, installationId: id } } };
+        this.host.machines.set(key, machine); this.host.changed();
+      }
+      usedIds.add(id);
+      if (this.devices.get(key)?.installationId !== id) this.devices.set(key, createPressureDevice(id));
+    }
+    for (const key of this.devices.keys()) if (!this.host.machines.get(key)?.workshop.process) { this.devices.delete(key); this.gates.delete(key); }
+    this.refreshGates();
+  }
+  private refreshGates() {
+    const signature = [...this.devices].filter(([key]) => this.host.machines.get(key)?.kind === "hangar-pressure-gate")
+      .map(([key, d]) => `${key}:${d.gateWidth}:${d.gateHeight}:${this.host.machines.get(key)!.facing}`).join(";");
+    if (this.gateSignature === signature) return; this.gateSignature = signature;
+    this.gates.clear(); this.gateErrors.clear();
+    for (const [key, device] of this.devices) {
+      const machine = this.host.machines.get(key); if (machine?.kind !== "hangar-pressure-gate") continue;
+      const center = pressurePoint(key)!, axis = machine.facing % 2 ? "z" : "x";
+      const anchor = { ...center, [axis]: center[axis] - Math.floor(device.gateWidth / 2) };
+      const result = validateHangarGate({ anchor, axis, width: device.gateWidth, height: device.gateHeight }, point => {
+        const type = this.host.blockAt(point);
+        return type === undefined ? { kind: "unloaded" } : type === BlockId.HangarFrame || airCellKey(point) === key ? { kind: "frame" }
+          : !BLOCKS[type]?.solid ? { kind: "clear" } : { kind: "obstructed" };
+      });
+      if (result.valid) this.gates.set(key, result.interior); else { this.gateErrors.set(key, result.reason); device.open = false; device.locked = true; }
+    }
+  }
+  doorCells(key: string): readonly AirPoint[] {
+    const point = pressurePoint(key); if (!point) return [];
+    const kind = this.host.machines.get(key)?.kind;
+    return kind === "hangar-pressure-gate" ? this.gates.get(key) ?? [] : kind && pressureDoorKind(kind) ? [point, { ...point, y: point.y + 1 }] : [];
+  }
+  private doorAt(point: AirPoint): string | undefined {
+    const key = airCellKey(point), direct = this.host.machines.get(key);
+    if (direct && pressureDoorKind(direct.kind)) return key;
+    const type = this.host.blockAt(point);
+    if (type !== undefined && pressureDoorLower(type)) return airCellKey({ ...point, y: point.y - 1 });
+    for (const [gate, cells] of this.gates) if (cells.some(cell => cell.x === point.x && cell.y === point.y && cell.z === point.z)) return gate;
+    return undefined;
+  }
+  openDoorAt(point: AirPoint) { const key = this.doorAt(point); return !!key && !!this.devices.get(key)?.open; }
+  closedGateAt(point: AirPoint) {
+    for (const [key, cells] of this.gates) if (!this.devices.get(key)?.open && cells.some(cell => cell.x === point.x && cell.y === point.y && cell.z === point.z)) return true;
+    return false;
+  }
+  private setDoor(key: string, open: boolean, locked?: boolean): boolean {
+    const device = this.devices.get(key), machine = this.host.machines.get(key);
+    if (!device || !machine || !pressureDoorKind(machine.kind) || (machine.kind === "hangar-pressure-gate" && !this.gates.has(key))) return false;
+    if (!open && this.doorCells(key).some(point => this.host.obstructed(point))) return false;
+    const changed = device.open !== open, lockChanged = locked !== undefined && device.locked !== locked; device.open = open;
+    if (locked !== undefined) device.locked = locked;
+    if (changed) for (const point of this.doorCells(key)) this.onEdit(point);
+    if (changed || lockChanged) { this.host.machines.set(key, { ...machine, revision: machine.revision + 1 }); this.host.changed(); }
+    return true;
+  }
+  private resolve(reference: string | undefined) { const point = reference ? pressurePoint(reference) : null; return point ? this.zoneAt(point) : undefined; }
+  private observation(key: string, heldMs = 0): AirlockObservation {
+    const device = this.devices.get(key)!, links = device.airlock?.links, machine = this.host.machines.get(key)!;
+    const chamber = this.resolve(links?.chamberZoneId), interior = this.resolve(links?.interiorZoneId), exterior = this.resolve(links?.exteriorZoneId);
+    const outsidePa = links?.exteriorZoneId === "exterior" ? Math.round(this.host.environment().pressureKPa * 1000) : exterior?.pressureMilliKPa ?? 0;
+    const reserve = links ? this.host.machines.get(links.reserveKey) : undefined;
+    const bound = Object.entries(device.bindings).every(([point, id]) => this.host.machines.get(point)?.workshop.process?.installationId === id);
+    const good = (zone: AirZoneState | undefined) => !!zone && ["sealed", "depressurized", "leaking"].includes(zone.status);
+    return { linksIntact: !!links && bound && !!this.devices.get(links.innerDoorKey) && !!this.devices.get(links.outerDoorKey)
+      && this.host.machines.get(links.recoveryPumpKey)?.kind === "recovery-pump" && !!reserve?.workshop.process,
+      topologyCurrent: good(chamber) && good(interior) && (links?.exteriorZoneId === "exterior" || good(exterior)), powerAvailableJ: machine.energyJ,
+      chamberPressurePa: chamber?.pressureMilliKPa ?? 0, interiorPressurePa: interior?.pressureMilliKPa ?? 0, exteriorPressurePa: outsidePa,
+      innerDoorOpen: !!this.devices.get(links?.innerDoorKey ?? "")?.open, outerDoorOpen: !!this.devices.get(links?.outerDoorKey ?? "")?.open,
+      innerDoorObstructed: !!links && this.doorCells(links.innerDoorKey).some(point => this.host.obstructed(point)),
+      outerDoorObstructed: !!links && this.doorCells(links.outerDoorKey).some(point => this.host.obstructed(point)),
+      occupants: chamber ? this.consumers.get(chamber.zoneId) ?? 0 : 0,
+      recoveryRequiredMmol: chamber && chamber.pressureMilliKPa > outsidePa ? Math.ceil(totalAirGas(chamber) * (1 - outsidePa / chamber.pressureMilliKPa)) : 0,
+      reserveRoomMmol: reserve ? Math.floor((workshopGasCapacity(reserve.kind, reserve.workshop) - workshopStoredTotal(reserve.workshop, "chemical")) / 24) : 0,
+      hostValidatedHeldMs: Math.max(0, Math.floor(heldMs)) };
+  }
+  private applyAirlock(key: string, result: AirlockResult) {
+    const device = this.devices.get(key), machine = this.host.machines.get(key);
+    if (!result.accepted || !device?.airlock || !machine || device.airlock.sequence !== result.expectedSequence || machine.energyJ < result.energyCostJ) return false;
+    // Resource commands first, then passage changes invalidate derived topology.
+    for (const effect of result.commands) {
+      if (effect.kind === "recover") {
+        const zone = this.resolve(effect.chamberZoneId), reserve = this.host.machines.get(effect.reserveKey), pump = this.host.machines.get(effect.pumpKey);
+        if (!zone || !reserve || !pump?.enabled || !workshopRunning(pump.workshop)) continue;
+        const moved = recoverHabitat(reserve, zone, Math.min(effect.maxMmol, Math.floor(pump.energyJ * 10)), "capture");
+        if (moved.movedMmol) { this.host.machines.set(effect.reserveKey, moved.machine); this.topology.replace(moved.zone);
+          this.host.machines.set(effect.pumpKey, { ...pump, energyJ: pump.energyJ - Math.ceil(moved.movedMmol / 10), revision: pump.revision + 1 }); }
+      } else if (effect.kind === "equalize" || effect.kind === "decompress") {
+        let chamber = this.resolve(effect.chamberZoneId);
+        const target = this.resolve(effect.targetZoneId); if (!chamber) continue;
+        const maximum = effect.kind === "decompress" ? totalAirGas(chamber) : effect.maxMmol;
+        if (effect.kind === "equalize" && device.airlock.phase === "equalize-to-interior-target" && device.airlock.links && target) {
+          const reserveKey = device.airlock.links.reserveKey, reserve = this.host.machines.get(reserveKey);
+          if (reserve) {
+            const released = recoverHabitat(reserve, chamber, maximum, "release", target.pressureMilliKPa);
+            if (released.movedMmol) { this.host.machines.set(reserveKey, released.machine); this.topology.replace(released.zone); chamber = released.zone; }
+          }
+        }
+        if (target && target.zoneId !== chamber.zoneId) {
+          const moved = equalizeAirZones(chamber, target, maximum); this.topology.replace(moved.a); this.topology.replace(moved.b);
+        } else if (effect.targetZoneId === "exterior") {
+          const stepped = stepAirZone({ ...chamber, boundaryLeakArea: Math.max(1, chamber.boundaryLeakArea) },
+            { leakMilliMolesPerFace: Math.min(1_000_000, maximum), exteriorPressureMilliKPa: Math.round(this.host.environment().pressureKPa * 1000) });
+          const admitted = admitAmbientAir({ ...stepped.state, boundaryLeakArea: chamber.boundaryLeakArea }, this.host.environment(), Math.min(1_000_000, effect.kind === "decompress" ? 1_000_000 : maximum));
+          this.topology.replace(admitted.zone); this.recordBoundary("admitted", admitted.admitted); this.recordBoundary("released", stepped.leaked);
+        }
+      }
+    }
+    for (const effect of result.commands) if ("doorKey" in effect && effect.kind !== "decompress") {
+      const current = this.devices.get(effect.doorKey);
+      const bound = device.bindings[effect.doorKey];
+      if (current && bound && current.installationId === bound && this.host.machines.get(effect.doorKey)?.workshop.process?.installationId === bound) this.setDoor(effect.doorKey, effect.kind === "open-door" ? true : effect.kind === "close-door" ? false : current.open,
+        effect.kind === "lock-door" ? true : effect.kind === "unlock-door" ? false : undefined);
+    }
+    device.airlock = result.state;
+    const current = this.host.machines.get(key)!;
+    this.host.machines.set(key, { ...current, energyJ: current.energyJ - result.energyCostJ, revision: current.revision + 1 }); this.host.changed();
+    return true;
+  }
+  operate(key: string, actorId: string, heldItem: number | undefined, expectedRevision: number, raw: PressureAction, now: number) {
+    const action = parsePressureAction(raw), machine = this.host.machines.get(key), device = this.devices.get(key);
+    const fail = (reason: string) => ({ ok: false, reason });
+    if (!action || !machine || !device || expectedRevision !== machine.revision) return fail("Machine changed; inspect it again.");
+    if (heldItem !== Item.FieldWrench || !workshopAuthorized(machine.workshop, machine.ownerId, actorId)) return fail("An authorized Field Wrench operator is required.");
+    if ((action.kind === "link" || action.kind === "unlink") && device.airlock && (!["idle-inner-safe", "fault"].includes(device.airlock.phase) ||
+      device.airlock.links && (this.devices.get(device.airlock.links.innerDoorKey)?.open || this.devices.get(device.airlock.links.outerDoorKey)?.open))) return fail("Stop the cycle and close both doors before changing its links.");
+    if (action.kind === "link") {
+      const origin = pressurePoint(key)!, target = pressurePoint(action.target);
+      if (action.target !== "exterior" && (!target || Math.hypot(target.x - origin.x, target.y - origin.y, target.z - origin.z) > PRESSURE_LINK_RANGE || this.host.blockAt(target) === undefined)) return fail("Links require loaded targets within sixteen blocks.");
+      const linked = this.host.machines.get(action.target);
+      if (["inner", "outer", "pump", "reserve", "shutter"].includes(action.role)) {
+        if (!linked?.workshop.process?.installationId || linked.ownerId !== machine.ownerId) return fail("Link compatible hardware owned by this workshop.");
+        if (["inner", "outer", "shutter"].includes(action.role) && !pressureDoorKind(linked.kind) || action.role === "pump" && linked.kind !== "recovery-pump"
+          || action.role === "reserve" && workshopGasCapacity(linked.kind, linked.workshop) <= 0) return fail("The target has the wrong hardware role.");
+        device.bindings[action.target] = linked.workshop.process.installationId;
+      }
+      device.links[action.role] = action.target;
+    } else if (action.kind === "unlink") delete device.links[action.role];
+    else if (action.kind === "mode") device.mode = action.mode;
+    else if (action.kind === "target") { device.targetPressurePa = action.pressurePa; device.targetTemperatureMilliC = action.temperatureMilliC; }
+    else if (action.kind === "gate") {
+      if (machine.kind !== "hangar-pressure-gate" || device.open) return fail("Close a hangar controller before resizing its formed frame.");
+      device.gateWidth = action.width; device.gateHeight = action.height; this.gateSignature = ""; this.refreshGates(); this.onEdit(pressurePoint(key)!);
+    } else if (action.kind === "door") {
+      if (!pressureDoorKind(machine.kind)) return fail("Use this action on a pressure door.");
+      if (device.locked || [...this.devices.values()].some(other => other.airlock?.links && [other.airlock.links.innerDoorKey, other.airlock.links.outerDoorKey].includes(key))) return fail("This door is interlocked. Use its airlock controller.");
+      const a = this.zoneAt(this.front(key)), b = this.zoneAt(this.front(key, true));
+      const outside = Math.round(this.host.environment().pressureKPa * 1000);
+      const unresolved = (zone: AirZoneState | undefined, reverse: boolean) => zone ? !["sealed", "depressurized", "leaking"].includes(zone.status) : !this.exteriorAt(this.front(key, reverse));
+      if (action.open && (unresolved(a, false) || unresolved(b, true) || Math.abs((a?.pressureMilliKPa ?? outside) - (b?.pressureMilliKPa ?? outside)) > 5000)) return fail("Unsafe or unchecked differential. Link an airlock for held override.");
+      if (machine.energyJ < 100) return fail("The powered door needs 100 J. A linked controller supports a safe manual crank.");
+      if (!this.setDoor(key, action.open)) return fail("Door is obstructed or its frame is incomplete.");
+      const after = this.host.machines.get(key)!; this.host.machines.set(key, { ...after, energyJ: after.energyJ - 100 });
+    } else if (action.kind === "cycle") {
+      if (!device.airlock) return fail("Link inner/outer doors, chamber/interior/exterior, recovery pump and reserve first.");
+      const result = commandAirlock(device.airlock, { kind: action.command, expectedSequence: device.airlock.sequence }, this.observation(key));
+      if (!this.applyAirlock(key, result)) return fail(result.reason ?? result.state.error ?? "Airlock cannot start.");
+    } else if (action.kind === "hold") {
+      if (!device.airlock) return fail("A configured airlock is required for manual control.");
+      const hold = this.holds.get(actorId);
+      if (!action.active) this.holds.delete(actorId);
+      else this.holds.set(actorId, { key, command: action.command, start: hold?.key === key && hold.command === action.command ? hold.start : now, renewed: now });
+    }
+    if (action.kind === "link" || action.kind === "unlink") {
+      const activeTargets = new Set(Object.values(device.links));
+      for (const target of Object.keys(device.bindings)) if (!activeTargets.has(target)) delete device.bindings[target];
+      const l = device.links;
+      if (machine.kind === "airlock-controller" && l.inner && l.outer && l.chamber && l.interior && l.exterior && l.pump && l.reserve) device.airlock = createAirlockState({ controllerKey: key,
+        innerDoorKey: l.inner, outerDoorKey: l.outer, chamberZoneId: l.chamber, interiorZoneId: l.interior, exteriorZoneId: l.exterior, recoveryPumpKey: l.pump, reserveKey: l.reserve });
+      else device.airlock = null;
+      this.onEdit(pressurePoint(key)!);
+    }
+    const current = this.host.machines.get(key)!; this.host.machines.set(key, { ...current, revision: current.revision + 1 }); this.host.changed();
+    return { ok: true, reason: "Pressure control updated." };
+  }
+  update(dt: number, nowMs: number) {
+    this.now = nowMs; this.syncMachines();
+    const controllers = new Map<string, AirPoint>(), vents = new Map<string, AirPoint>();
+    for (const [key, machine] of this.host.machines) {
+      if (machine.kind === "life-support-controller" || machine.kind === "airlock-controller") controllers.set(key, this.roomPoint(key));
+      if (["atmosphere-vent", "equalization-vent", "recovery-pump", "carbon-scrubber", "thermal-regulator", "pressure-sensor"].includes(machine.kind)) vents.set(key, this.roomPoint(key));
+    }
+    this.topology.setSources(controllers, vents, this.host.loadedColumns().sort().join(";"));
+    this.topology.pump(nowMs);
+    this.updateHolds();
+    this.elapsed = Math.min(1, this.elapsed + Math.max(0, dt));
+    while (this.elapsed >= .2) { this.elapsed -= .2; this.tick(); }
+  }
+  private tick() {
+    this.consumers.clear();
+    const occupants = this.host.occupants();
+    for (const [id, original] of this.topology.zones) {
+      if (!["sealed", "depressurized", "leaking"].includes(original.status)) continue;
+      const present = occupants.filter(occupant => this.zoneAt(occupant.point)?.zoneId === id).slice(0, 240);
+      this.consumers.set(id, present.length);
+      let staticEffects = this.staticConsumers.get(id);
+      if (!staticEffects || staticEffects.revision !== original.topologyRevision) {
+        let fire = 0, plants = 0;
+        for (const cell of original.cellKeys) {
+          const point = pressurePoint(cell)!, block = this.host.blockAt(point), name = block === undefined ? "" : BLOCKS[block]?.name ?? "";
+          if (/fire|torch/i.test(name)) fire++;
+          if (/crop|sapling|flower/i.test(name) && (this.host.skyTopAt(point.x, point.z) ?? Infinity) <= point.y + 6) plants++;
+        }
+        staticEffects = { revision: original.topologyRevision, fire, plants }; this.staticConsumers.set(id, staticEffects);
+      }
+      const consumers: AirConsumer[] = [...present.map(({ id, kind, oxygenMilliMoles, co2MilliMoles }) => ({ id, kind, oxygenMilliMoles, co2MilliMoles })),
+        ...(staticEffects.fire ? [{ id: `fire:${id}`, kind: "fire" as const, oxygenMilliMoles: Math.min(1000, staticEffects.fire * 2), co2MilliMoles: Math.min(1000, staticEffects.fire * 2) }] : [])];
+      const stepped = stepAirZone(original, { consumers, plantConversionMilliMoles: this.host.daylight() >= .2 ? Math.min(1000, staticEffects.plants) : 0,
+        leakMilliMolesPerFace: original.status === "leaking" ? 2000 : 0, exteriorPressureMilliKPa: Math.round(this.host.environment().pressureKPa * 1000) });
+      const admitted = original.status === "leaking" ? admitAmbientAir(stepped.state, this.host.environment(), Math.min(1_000_000, original.boundaryLeakArea * 2000)) : null;
+      this.topology.replace(admitted?.zone ?? stepped.state); this.recordBoundary("released", stepped.leaked);
+      if (admitted) this.recordBoundary("admitted", admitted.admitted);
+      if (stepped.consumedOxygenMilliMoles || stepped.plantConvertedMilliMoles || totalAirGas(stepped.leaked)) this.host.changed();
+    }
+    for (const [key, device] of this.devices) {
+      let machine = this.host.machines.get(key)!;
+      const interlocked = [...this.devices.values()].some(other => other.airlock?.links && [other.airlock.links.innerDoorKey, other.airlock.links.outerDoorKey].includes(key));
+      if (pressureDoorKind(machine.kind) && !interlocked && device.open && (!machine.enabled || machine.energyJ === 0 || !workshopRunning(machine.workshop))) this.setDoor(key, false);
+      const zone = this.zoneAt(this.roomPoint(key));
+      if (zone && machine.enabled && workshopRunning(machine.workshop) && device.mode !== "off") {
+        const flow = Math.floor(2000 * (machine.workshop.process?.flowPermille ?? 1000) / 1000);
+        const result = ["life-support-controller", "atmosphere-vent"].includes(machine.kind) ? supplyHabitat(machine, zone, flow, device.targetPressurePa)
+          : machine.kind === "carbon-scrubber" ? drawHabitatCarbon(machine, zone, flow)
+            : machine.kind === "thermal-regulator" ? regulateHabitat(machine, zone, device.targetTemperatureMilliC)
+              : machine.kind === "recovery-pump" && (device.mode === "capture" || device.mode === "release") ? recoverHabitat(machine, zone, flow, device.mode, device.targetPressurePa) : null;
+        if (result && result.machine !== machine) { machine = result.machine; this.host.machines.set(key, machine); this.topology.replace(result.zone); this.host.changed(); }
+        if (machine.kind === "equalization-vent" && machine.energyJ >= 100) {
+          const other = this.zoneAt(this.front(key, true));
+          if (other && other.zoneId !== zone.zoneId && ["sealed", "depressurized", "leaking"].includes(other.status)) {
+            const moved = equalizeAirZones(zone, other, flow);
+            if (moved.transferredMilliMoles) { this.topology.replace(moved.a); this.topology.replace(moved.b); this.host.machines.set(key, { ...machine, energyJ: machine.energyJ - 100, revision: machine.revision + 1 }); }
+          }
+        }
+      }
+      if (device.airlock) this.applyAirlock(key, stepAirlock(device.airlock, this.observation(key), 200));
+      const currentZone = this.zoneAt(this.roomPoint(key));
+      if (["life-support-controller", "pressure-sensor", "airlock-controller"].includes(machine.kind)) {
+        const danger = currentZone ? airZoneDiagnostics(currentZone).reasons.join(", ") : "room unknown";
+        const shutter = device.links.shutter, bound = shutter ? device.bindings[shutter] : undefined;
+        const validShutter = !!shutter && !!bound && this.devices.get(shutter)?.installationId === bound && this.host.machines.get(shutter)?.workshop.process?.installationId === bound;
+        const message = shutter && !validShutter ? "broken-shutter-link" : device.airlock?.error ?? danger;
+        if (this.alarms.get(key) !== message) { this.alarms.set(key, message); if (message) this.host.alarm(`Habitat ${key}: ${message}.`); }
+        if (shutter && validShutter) this.setDoor(shutter, false, !!message);
+      }
+    }
+  }
+  private updateHolds() {
+    for (const [actor, hold] of this.holds) {
+      if (this.now - hold.renewed > 600 || !this.host.actorStillHolding(actor, hold.key)) { this.holds.delete(actor); continue; }
+      const device = this.devices.get(hold.key); if (!device?.airlock) continue;
+      const result = commandAirlock(device.airlock, { kind: hold.command, expectedSequence: device.airlock.sequence }, this.observation(hold.key, this.now - hold.start));
+      if (result.accepted) { this.applyAirlock(hold.key, result); this.holds.delete(actor); }
+    }
+  }
+  environmentAt(point: AirPoint): BodyEnvironment {
+    const outside = this.host.environment(), zone = this.zoneAt(point); if (!zone) return outside;
+    const total = totalAirGas(zone), diagnostics = airZoneDiagnostics(zone);
+    return { ...outside, pressureKPa: zone.pressureMilliKPa / 1000, oxygenFraction: total ? zone.oxygenMilliMoles / total : 0,
+      inertFraction: total ? zone.inertMilliMoles / total : 0, co2Fraction: total ? zone.co2MilliMoles / total : 0,
+      breathable: diagnostics.breathable, requiresPressureSuit: zone.status !== "sealed" || zone.pressureMilliKPa < 35000 || zone.pressureMilliKPa > 160000,
+      temperatureC: [zone.temperatureMilliC / 1000, zone.temperatureMilliC / 1000], corrosive: false };
+  }
+  diagnosticsFor(key: string) {
+    const point = this.roomPoint(key), zone = this.zoneAt(point), device = this.devices.get(key), topology = (zone ? this.topology.topologies.get(zone.zoneId) : undefined) ?? this.topology.diagnostics.get(airCellKey(point));
+    return { device, zone, ...(zone ? airZoneDiagnostics(zone, (this.consumers.get(zone.zoneId) ?? 0) * 4) : {}),
+      occupants: zone ? this.consumers.get(zone.zoneId) ?? 0 : 0, capacity: topology?.capacity ?? 0, bounds: topology?.bounds ?? null,
+      leak: topology?.leaks[0] ?? topology?.unknownBoundaries[0] ?? null, checkAgeMs: zone ? this.now - (this.topology.checkedAt.get(zone.zoneId) ?? this.now) : 0,
+      topologyRevision: this.topology.revision, error: this.gateErrors.get(key) ?? this.topology.lastError };
+  }
+  snapshot(): PressureSave { return { schema: 1, nextInstallation: this.nextInstallation, zones: this.topology.snapshot(), boundary: { ...structuredClone(this.boundary), topologyLost: { ...this.topology.lost } }, devices: Object.fromEntries([...this.devices].map(([key, value]) => [key, structuredClone(value)])) }; }
+  dispose() { this.holds.clear(); this.topology.dispose(); this.worker?.terminate(); this.worker = null; }
+}

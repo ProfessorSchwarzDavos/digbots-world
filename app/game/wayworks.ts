@@ -1,15 +1,17 @@
 import { PowerTopologyCache } from "./wayworks-network";
 import { createWorkshop, normalizeWorkshop, workshopRunning, type WorkshopState } from "./wayworks-stores";
+import { PRESSURE_CATALOG, type PressureMachineKind } from "./pressure-catalog";
 
 /** Pure, versioned workshop power runtime. All energy is integer joules. */
 export type MachineKind = "hand-dynamo" | "sunplate-array" | "field-battery" | "charging-pedestal" | "grid-cable"
   | "heat-engine" | "wind-rotor" | "waterwheel-generator" | "biofuel-engine" | "grid-battery" | "ship-battery-bank"
   | "powered-crusher" | "enrichment-mill" | "electric-smelter" | "alloy-infuser" | "plate-press" | "precision-sawmill"
-  | "fluid-pump" | "fluid-tank" | "gas-tank";
+  | "fluid-pump" | "fluid-tank" | "gas-tank" | PressureMachineKind;
 export type LocalFace = "front" | "back" | "left" | "right" | "top" | "bottom";
 export type PortMode = "disabled" | "input" | "output" | "both" | "passive" | "pull" | "service";
 export type MachineStatus = "idle" | "disabled" | "generating" | "no-sun" | "buffer-full" | "transferring" | "disconnected" | "invalid-state"
-  | "working" | "no-power" | "no-input" | "no-fuel" | "output-blocked" | "no-water" | "no-wind" | "control-off" | "heat-limited";
+  | "working" | "no-power" | "no-input" | "no-fuel" | "output-blocked" | "no-water" | "no-wind" | "control-off" | "heat-limited"
+  | "no-atmospheric-feed" | "filter-exhausted" | "invalid-recipe";
 export type MachineState = {
   schema: 1;
   kind: MachineKind;
@@ -45,6 +47,7 @@ const CAPACITY: Record<MachineKind, number> = {
   "grid-battery": 1200000, "ship-battery-bank": 12000000,
   "powered-crusher": 32000, "enrichment-mill": 24000, "electric-smelter": 48000, "alloy-infuser": 60000,
   "plate-press": 24000, "precision-sawmill": 24000, "fluid-pump": 16000, "fluid-tank": 0, "gas-tank": 0,
+  ...Object.fromEntries(Object.entries(PRESSURE_CATALOG).map(([kind, def]) => [kind, def.joules])) as Record<PressureMachineKind, number>,
 };
 const RATE: Record<MachineKind, number> = {
   "hand-dynamo": 2000, "sunplate-array": 600, "field-battery": 4000,
@@ -53,14 +56,16 @@ const RATE: Record<MachineKind, number> = {
   "grid-battery": 12000, "ship-battery-bank": 24000,
   "powered-crusher": 4000, "enrichment-mill": 4000, "electric-smelter": 6000, "alloy-infuser": 8000,
   "plate-press": 4000, "precision-sawmill": 4000, "fluid-pump": 2000, "fluid-tank": 0, "gas-tank": 0,
+  ...Object.fromEntries(Object.entries(PRESSURE_CATALOG).map(([kind, def]) => [kind, def.watts])) as Record<PressureMachineKind, number>,
 };
 const STATUSES: readonly MachineStatus[] = ["idle", "disabled", "generating", "no-sun", "buffer-full", "transferring", "disconnected", "invalid-state",
-  "working", "no-power", "no-input", "no-fuel", "output-blocked", "no-water", "no-wind", "control-off", "heat-limited"];
+  "working", "no-power", "no-input", "no-fuel", "output-blocked", "no-water", "no-wind", "control-off", "heat-limited",
+  "no-atmospheric-feed", "filter-exhausted", "invalid-recipe"];
 
 export function machineCapacity(kind: MachineKind, workshop?: WorkshopState): number { return CAPACITY[kind] * (1 + (workshop?.upgrades.capacity ?? 0)); }
 /** Nominal generation (solar), export (dynamo), or shared transport throughput in joules/second. */
 export function machineRate(kind: MachineKind): number { return RATE[kind]; }
-export function machineGenerator(kind: MachineKind) { return ["hand-dynamo", "sunplate-array", "heat-engine", "wind-rotor", "waterwheel-generator", "biofuel-engine"].includes(kind); }
+export function machineGenerator(kind: MachineKind) { return ["hand-dynamo", "sunplate-array", "heat-engine", "wind-rotor", "waterwheel-generator", "biofuel-engine", "hydrogen-turbine", "gas-engine"].includes(kind); }
 export function machineBattery(kind: MachineKind) { return ["field-battery", "grid-battery", "ship-battery-bank"].includes(kind); }
 function integer(value: unknown, maximum: number): number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
@@ -81,7 +86,7 @@ export function createMachine(kind: MachineKind, locationId: string, ownerId: st
   return {
     schema: 1, kind, locationId, ownerId, revision: 0, facing: facingValue(facing), energyJ: 0,
     ports: Object.fromEntries(MACHINE_FACES.map((face) => [face, mode])) as Record<LocalFace, PortMode>,
-    enabled: true, generationRemainder: 0, transferRemainder: 0, status: "idle", workshop: createWorkshop(),
+    enabled: true, generationRemainder: 0, transferRemainder: 0, status: "idle", workshop: createWorkshop(kind),
   };
 }
 

@@ -1,13 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+import { register } from "node:module";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { WayworksPanel, type WayworksPanelProps } from "../app/game/WayworksPanel";
+import type { WayworksPanelProps } from "../app/game/WayworksPanel";
 import { BlockId, Item } from "../app/game/data";
 import { wayworksMetadataSummary } from "../app/game/wayworks-ui";
 import { createMachine } from "../app/game/wayworks";
 import { WaygridItemPanel, WaygridCreaturePanel } from "../app/game/WaygridPanels";
+
+register(`data:text/javascript,${encodeURIComponent(`export async function load(url, context, nextLoad) {
+  if (url.endsWith('.module.css')) return { format: 'module', shortCircuit: true, source: 'export default new Proxy({}, { get: (_, key) => String(key) });' };
+  return nextLoad(url, context);
+}`)}`, import.meta.url);
+const { WayworksPanel } = await import("../app/game/WayworksPanel");
 
 const base: WayworksPanelProps = {
   name: "Workshop Battery", kind: "battery", energyJ: 12_345, capacityJ: 100_000,

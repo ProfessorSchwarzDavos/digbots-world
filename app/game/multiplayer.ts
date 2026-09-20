@@ -1,4 +1,5 @@
 import type { DragonState } from "./dragons";
+import { parsePressurePresentation, type PressurePresentation } from "./pressure-presentation";
 import { machineKindForBlock, parseWorkshopAction, type WorkshopAction } from "./wayworks-integration";
 import { validCustodyItem } from "./wayworks-custody";
 import { validWaygridOperation, type WaygridOperation } from "./wayworks-waygrid";
@@ -303,6 +304,7 @@ export type TimeWeatherSnapshot = {
   weather: "clear" | "rain";
   weatherState?: NetworkWeatherState;
   boats?: SailboatSnapshotEntry[];
+  pressure?: PressurePresentation;
 };
 export type SleepTarget = "morning" | "night";
 export type SleepVote = { actorId: string; tick: number; target: SleepTarget; active: boolean };
@@ -1108,6 +1110,7 @@ function validateTimeWeather(value: unknown): value is TimeWeatherSnapshot {
     && isFiniteNumber(value.worldTime, 0, 1)
     && isInteger(value.day, 1, 1_000_000)
     && (value.universeTimeSeconds === undefined || isFiniteNumber(value.universeTimeSeconds, 0, 1e12))
+    && (value.pressure === undefined || !!parsePressurePresentation(value.pressure))
     && (value.weather === "clear" || value.weather === "rain")
     && (value.weatherState === undefined || (isRecord(value.weatherState)
       && ["clear", "overcast", "drizzle", "rain", "thunder", "snow", "sandstorm", "mist", "ashfall"].includes(value.weatherState.kind as string)

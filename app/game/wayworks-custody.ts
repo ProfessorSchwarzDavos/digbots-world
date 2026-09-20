@@ -2,7 +2,9 @@ import { BlockId, Item, ITEMS, maxStack, type InventorySlot } from "./data";
 import { lifeSupportStore, validLifeSupportItem } from "./life-support";
 import { normalizeMachine, type MachineKind, type MachineState } from "./wayworks";
 import { machineRecipe, recipeCost } from "./wayworks-recipes";
-import { WORKSHOP_SLOTS } from "./wayworks-stores";
+import { chemistryRecipe, chemistryCost } from "./pressure-chemistry";
+import { WORKSHOP_SLOTS, workshopStoredTotal } from "./wayworks-stores";
+import { PRESSURE_CATALOG } from "./pressure-catalog";
 
 /** Bounds apply before normalizers clone or recursively inspect untrusted metadata. */
 export const MAX_CUSTODY_SLOTS = 512;
@@ -11,6 +13,7 @@ const MAX_ITEM_NODES = 4096;
 const MAX_ITEM_JSON = 65_536;
 // Keep this leaf module independent of integration/multiplayer/engine imports.
 const MACHINE_ITEMS: Readonly<Partial<Record<number, MachineKind>>> = {
+  ...Object.fromEntries(Object.entries(PRESSURE_CATALOG).map(([kind, def]) => [def.id, kind])) as Partial<Record<number, MachineKind>>,
   [BlockId.HandDynamo]: "hand-dynamo", [BlockId.SunplateArray]: "sunplate-array",
   [BlockId.FieldBattery]: "field-battery", [BlockId.ChargingPedestal]: "charging-pedestal", [BlockId.GridCable]: "grid-cable",
   [BlockId.HeatEngine]: "heat-engine", [BlockId.WindRotor]: "wind-rotor", [BlockId.WaterwheelGenerator]: "waterwheel-generator",
@@ -89,6 +92,13 @@ function validItem(slot: unknown, depth: number): slot is InventorySlot {
     if (!kind || !record(raw) || typeof raw.locationId !== "string" || !raw.locationId || raw.locationId.length > 256
       || typeof raw.ownerId !== "string" || !raw.ownerId || raw.ownerId.length > 128) return false;
     const normalized = normalizeMachine(raw, kind, raw.locationId, raw.ownerId);
+    const workshop = normalized.workshop;
+    // Empty configured cables remain splittable; finite contents and installed
+    // hardware identity are one physical vessel, never a stack of copied stores.
+    if (item.count > 1 && (normalized.energyJ || workshop.heatJ || workshop.burnJ || workshop.cycle
+      || workshopStoredTotal(workshop, "fluid") || workshopStoredTotal(workshop, "chemical")
+      || WORKSHOP_SLOTS.some(name => workshop.slots[name]) || Object.values(workshop.upgrades).some(Boolean)
+      || workshop.process?.filterUsedMl || workshop.process?.installationId)) return false;
     // Missing workshop is the supported historical migration. Present malformed data
     // must not pass merely because normalization discarded/clamped its contents.
     const migrated = raw.workshop === undefined ? { ...raw, workshop: normalized.workshop } : raw;
@@ -100,9 +110,9 @@ function validItem(slot: unknown, depth: number): slot is InventorySlot {
     if (normalized.workshop.burnJ > (kind === "heat-engine" ? 80_000 : kind === "biofuel-engine" ? 24_000 : 0)) return false;
     const cycle = normalized.workshop.cycle;
     if (cycle) {
-      const recipe = machineRecipe(cycle.recipeId);
-      if (!recipe || recipe.machine !== kind) return false;
-      const cost = recipeCost(recipe, normalized.workshop);
+      const recipe = machineRecipe(cycle.recipeId), chemical = chemistryRecipe(cycle.recipeId);
+      if ((!recipe || recipe.machine !== kind) && (!chemical || chemical.machine !== kind)) return false;
+      const cost = recipe ? recipeCost(recipe, normalized.workshop) : chemistryCost(chemical!, normalized.workshop);
       if (cycle.durationMs !== cost.durationMs || cycle.costJ !== cost.costJ) return false;
     }
   }

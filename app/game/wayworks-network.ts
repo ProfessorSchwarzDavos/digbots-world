@@ -1,4 +1,5 @@
 /** Derived, ephemeral topology only. Machine buffers remain authoritative in the caller. */
+import { PRESSURE_CATALOG, type PressureMachineKind } from "./pressure-catalog";
 export type PowerTopologyFace = "front" | "back" | "left" | "right" | "top" | "bottom";
 export type PowerTopologyPort = "disabled" | "input" | "output" | "both" | "passive" | "pull" | "service";
 const MACHINE_KINDS = [
@@ -12,7 +13,7 @@ export type PowerTopologyNode = Readonly<{
   x: number;
   y: number;
   z: number;
-  kind: (typeof MACHINE_KINDS)[number];
+  kind: (typeof MACHINE_KINDS)[number] | PressureMachineKind;
   locationId: string;
   ownerId: string;
   facing: number;
@@ -37,7 +38,7 @@ export type PowerTopologyResult = Readonly<{
 
 export const MAX_POWER_TOPOLOGY_NODES = 256;
 const FACES: readonly PowerTopologyFace[] = ["front", "back", "left", "right", "top", "bottom"];
-const KINDS = new Set<string>(MACHINE_KINDS);
+const KINDS = new Set<string>([...MACHINE_KINDS, ...Object.keys(PRESSURE_CATALOG)]);
 const MODES = new Set(["disabled", "input", "output", "both", "passive", "pull", "service"]);
 const DIRECTIONS = [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0], [0, 1, 0], [0, -1, 0]] as const;
 const compare = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;

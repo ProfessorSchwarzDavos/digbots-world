@@ -36,8 +36,8 @@ test("machine carry/reload retains charge and partitions location authority", ()
   assert.equal(restoreWorkshop(saved, "L2", "O", () => BlockId.Air).size, 0);
   assert.equal(WORLD_SAVE_OWNERS.wayworks, "location");
 });
-test("all twenty workshop blocks and wrench have real recipes and creative entries", () => {
-  assert.equal(Object.keys(WAYWORKS_BLOCKS).length, 20);
+test("all forty-four workshop blocks and wrench have real recipes and creative entries", () => {
+  assert.equal(Object.keys(WAYWORKS_BLOCKS).length, 44);
   for (const item of [...Object.keys(WAYWORKS_BLOCKS).map(Number), Item.FieldWrench]) {
     assert.ok(ITEMS[item]); assert.ok(CREATIVE_ITEMS.includes(item)); assert.ok(RECIPES.some(recipe => recipe.output.item === item));
   }
@@ -47,7 +47,7 @@ test("all twenty workshop blocks and wrench have real recipes and creative entri
 test("guest and paused model rendering cannot advance authoritative resource stores", () => {
   const state = createMachine("powered-crusher", "L", "local"); state.energyJ = 8000;
   const engine = Object.assign(Object.create(VoxelEngine.prototype), { multiplayer: { role: "guest" },
-    wayworks: new Map([["0,0,0", state]]), wayworksModels: new Map(), settings: { simulationDistance: 3 },
+    wayworks: new Map([["0,0,0", state]]), wayworksModels: new Map(), pressureStructures: new Set(), settings: { simulationDistance: 3 },
     position: new THREE.Vector3(0, 0, 2), inventory: [{ item: Item.FieldWrench, count: 1 }], selected: 0,
     world: { getBlock: () => BlockId.PoweredCrusher }, scene: new THREE.Scene(), paused: true, wayworksOverlayResource: "fluid" }) as VoxelEngine;
   const before = JSON.stringify(state);

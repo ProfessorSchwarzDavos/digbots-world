@@ -1,5 +1,7 @@
 import * as THREE from "three";
-import { createWayworksModel } from "./wayworks-models";
+import { createWorkshopModel as createWayworksModel } from "./workshop-models";
+import { createPressureModel } from "./pressure-models";
+import { createPressurePartModel, isPressurePart } from "./pressure-item-models";
 import { createFieldWrenchModel } from "./wayworks-wrench-model";
 import { createWayworksItemModel, isWayworksItem } from "./wayworks-item-models";
 import { machineKindForBlock } from "./wayworks-integration";
@@ -30,7 +32,12 @@ export const DRAGON_EQUIPMENT_PALETTES: Readonly<Record<DragonEquipmentElement, 
 /** Shared first/third-person, remote-player, dropped-item, and paper-doll model. */
 export function createAvatarHeldItemModel(item: ItemCode, options: { filledCaptureOrb?: boolean; atlas?: THREE.Texture } = {}) {
   if (item === Item.FieldWrench) return createFieldWrenchModel();
+  if (isPressurePart(item)) return createPressurePartModel(item);
   if (isWayworksItem(item)) return createWayworksItemModel(item);
+  if (item === BlockId.ReinforcedWindow || item === BlockId.HangarFrame) {
+    const model = createPressureModel(item === BlockId.ReinforcedWindow ? "reinforced-window" : "hangar-frame");
+    model.position.y = -.3; model.scale.setScalar(.55); return model;
+  }
   const machineKind = machineKindForBlock(item);
   if (machineKind) { const model = createWayworksModel(machineKind); model.position.y = -.3; model.scale.setScalar(.55); return model; }
   const definition = ITEMS[item];

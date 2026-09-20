@@ -8,6 +8,8 @@ import { createWorkshop, MATERIAL_PORT_MODES, UPGRADE_KINDS, supportedWorkshopUp
   type MaterialKind, type MaterialPortMode, type WorkshopState } from "./wayworks-stores";
 import type { MachineKind } from "./wayworks";
 import type { WorkshopAction } from "./wayworks-integration";
+import { PressurePanel } from "./PressurePanel";
+import type { PressureRuntime } from "./pressure-runtime";
 
 export type WayworksFace = "front" | "back" | "left" | "right" | "top" | "bottom";
 export type WayworksPortMode = "disabled" | "input" | "output" | "both" | "passive" | "pull" | "service";
@@ -27,6 +29,7 @@ export type WayworksPanelProps = Readonly<{
   heldItemName?: string;
   feedback?: string;
   workshop?: WorkshopState;
+  pressure?: ReturnType<PressureRuntime["diagnosticsFor"]>;
   network?: { id: string; count: number; energyJ: number; capacityJ: number; revision: number };
   onAction: (action: WayworksPanelAction) => void;
   onClose: () => void;
@@ -135,13 +138,14 @@ export function WayworksPanel(props: WayworksPanelProps) {
             {slots.includes("fuel") && <p className="ww-help">{kind === "biofuel-engine" ? "Uses pressed Biofuel Pellets." : "Uses coal, charcoal or supplied heat. Four joules of heat produce one joule of electricity; the rest dissipates."} Unconverted fuel: {reading(workshop.burnJ, 1000)} kJ.</p>}
           </section>}
 
+          {workshop.process && <PressurePanel kind={kind as MachineKind} workshop={workshop} pressure={props.pressure} onAction={onAction} />}
           {(fluidCapacity > 0 || gasCapacity > 0) && <section className="ww-materials" aria-label="Measured resource storage">
             <h3>{gasCapacity ? "Gas storage" : "Fluid storage"}</h3>
-            <p className="ww-resource-reading">{reading((gasCapacity ? workshop.chemical : workshop.fluid)?.amount ?? 0, 1000)} / {reading(gasCapacity || fluidCapacity, 1000)} {gasCapacity ? "standard L" : "L"} <span>{(gasCapacity ? workshop.chemical : workshop.fluid)?.resource ?? "empty"}</span></p>
-            {gasCapacity > 0 && <p className="ww-help">Pressure: {reading(101.325 * (workshop.chemical?.amount ?? 0) / (20000 * (1 + workshop.upgrades.capacity)))} kPa · rated {reading(607.95 * (1 + workshop.upgrades.seal))} kPa. Sealed pickup preserves contents.</p>}
+            {!workshop.process && <p className="ww-resource-reading">{reading((gasCapacity ? workshop.chemical : workshop.fluid)?.amount ?? 0, 1000)} / {reading(gasCapacity || fluidCapacity, 1000)} {gasCapacity ? "standard L" : "L"} <span>{(gasCapacity ? workshop.chemical : workshop.fluid)?.resource ?? "empty"}</span></p>}
+            {gasCapacity > 0 && !workshop.process && <p className="ww-help">Pressure: {reading(101.325 * (workshop.chemical?.amount ?? 0) / (20000 * (1 + workshop.upgrades.capacity)))} kPa · rated {reading(607.95 * (1 + workshop.upgrades.seal))} kPa. Sealed pickup preserves contents.</p>}
             <div className="ww-inline-actions"><button type="button" onClick={() => onAction({ kind: "portable", direction: "fill" })}>Fill selected container · 1 L</button><button type="button" onClick={() => onAction({ kind: "portable", direction: "empty" })}>Empty container · 1 L</button></div>
             {gasCapacity > 0 && <div className="ww-inline-actions"><button type="button" onClick={() => onAction({ kind: "oxygen", direction: "fill" })}>Fill selected O2 equipment · 1 L</button><button type="button" onClick={() => onAction({ kind: "oxygen", direction: "empty" })}>Store selected O2 supply · 1 L</button></div>}
-            {gasCapacity > 0 && <button className="ww-vent" type="button" disabled={!workshop.chemical} onClick={() => { if (confirmVent) { onAction({ kind: "vent", confirmed: true }); setConfirmVent(false); } else setConfirmVent(true); }}>{confirmVent ? "Confirm: discard all stored gas" : "Safely vent gas…"}</button>}
+            {gasCapacity > 0 && <button className="ww-vent" type="button" disabled={!workshop.chemical} onClick={() => { if (confirmVent) { onAction({ kind: "vent", confirmed: true }); setConfirmVent(false); } else setConfirmVent(true); }}>{confirmVent ? "Confirm: discard primary gas buffer" : "Vent primary gas buffer…"}</button>}
             {kind === "fluid-pump" && <p className="ww-help">Consumes a full water source directly below: 1,000 J per litre. Neighboring tanks accept through matching fluid ports.</p>}
           </section>}
 

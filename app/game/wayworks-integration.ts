@@ -1,13 +1,17 @@
 import { BlockId, cloneSlot, Item, maxStack, type InventorySlot } from "./data";
+import { PRESSURE_CATALOG } from "./pressure-catalog";
 import { gearCapacity, lifeSupportStore, validLifeSupportItem, withLifeSupport } from "./life-support";
 import { configureMachine, createMachine, MACHINE_FACES, machineCapacity, normalizeMachine, type LocalFace, type MachineKind, type MachineState, type PortMode } from "./wayworks";
 import { transferMachineItem, transferPortableResource } from "./wayworks-machines";
 import { machineEndpoint, withMachineEndpoint } from "./wayworks-machines";
 import { transferResource, type ResourceEndpoint } from "./wayworks-resources";
+import { chemistryRecipe, chemistryReservoirs, chemicalStore } from "./pressure-chemistry";
+import { parsePressureAction, type PressureAction } from "./pressure-devices";
 import { MATERIAL_KINDS, MATERIAL_PORT_MODES, UPGRADE_ITEMS, UPGRADE_KINDS, supportedWorkshopUpgrades, validWorkshopItem, workshopFluidCapacity, workshopGasCapacity, workshopHeatCapacity, workshopRunning,
-  type MaterialKind, type MaterialPortMode, type UpgradeKind, type WorkshopSlot, type WorkshopState } from "./wayworks-stores";
+  workshopStoredTotal, type MaterialKind, type MaterialPortMode, type UpgradeKind, type WorkshopSlot, type WorkshopState } from "./wayworks-stores";
 
 export const WAYWORKS_BLOCKS: Readonly<Partial<Record<BlockId, MachineKind>>> = Object.freeze({
+  ...Object.fromEntries(Object.entries(PRESSURE_CATALOG).map(([kind, def]) => [def.id, kind])) as Partial<Record<BlockId, MachineKind>>,
   [BlockId.HandDynamo]: "hand-dynamo", [BlockId.SunplateArray]: "sunplate-array",
   [BlockId.FieldBattery]: "field-battery", [BlockId.ChargingPedestal]: "charging-pedestal", [BlockId.GridCable]: "grid-cable",
   [BlockId.HeatEngine]: "heat-engine", [BlockId.WindRotor]: "wind-rotor", [BlockId.WaterwheelGenerator]: "waterwheel-generator",
@@ -31,6 +35,10 @@ export type WorkshopAction = { kind: "crank" } | { kind: "charge"; target?: "hel
   | { kind: "filter-held" } | { kind: "clear-filter" }
   | { kind: "upgrade-install" } | { kind: "upgrade-remove"; upgrade: UpgradeKind }
   | { kind: "cancel-cycle" } | { kind: "vent"; confirmed: true }
+  | { kind: "process-recipe"; recipeId: string | null }
+  | { kind: "process-filter"; resource: "fluid" | "chemical"; value: string | null }
+  | { kind: "process-flow"; permille: number } | { kind: "process-backflow"; enabled: boolean }
+  | { kind: "pressure"; action: PressureAction }
   | { kind: "copy" } | { kind: "paste" };
 export type WorkshopClipboard = Pick<MachineState, "kind" | "ports"> & { resourcePorts: WorkshopState["resourcePorts"]; channel: string; control: WorkshopState["control"]; autoEject: boolean };
 
@@ -56,11 +64,18 @@ export function parseWorkshopAction(value: unknown): WorkshopAction | null {
     case "channel": return exact("channel") && typeof action.channel === "string" && /^[a-z0-9-]{0,24}$/.test(action.channel) ? action as WorkshopAction : null;
     case "upgrade-remove": return exact("upgrade") && UPGRADE_KINDS.includes(action.upgrade as UpgradeKind) ? action as WorkshopAction : null;
     case "vent": return exact("confirmed") && action.confirmed === true ? action as WorkshopAction : null;
+    case "process-recipe": return exact("recipeId") && (action.recipeId === null || typeof action.recipeId === "string" && !!chemistryRecipe(action.recipeId)) ? action as WorkshopAction : null;
+    case "process-filter": return exact("resource", "value") && ["fluid", "chemical"].includes(action.resource as string)
+      && (action.value === null || typeof action.value === "string" && /^[a-z][a-z0-9-]{0,63}$/.test(action.value)) ? action as WorkshopAction : null;
+    case "process-flow": return exact("permille") && Number.isSafeInteger(action.permille) && Number(action.permille) >= 0 && Number(action.permille) <= 1000 ? action as WorkshopAction : null;
+    case "process-backflow": return exact("enabled") && typeof action.enabled === "boolean" ? action as WorkshopAction : null;
+    case "pressure": return exact("action") && !!parsePressureAction(action.action) ? action as WorkshopAction : null;
     default: return null;
   }
 }
 export function workshopActionNeedsWrench(action: WorkshopAction): boolean {
-  return ["rotate", "port", "material-port", "control", "signal", "security", "trust", "channel", "eject", "copy", "paste", "clear-filter"].includes(action.kind);
+  return ["rotate", "port", "material-port", "control", "signal", "security", "trust", "channel", "eject", "copy", "paste", "clear-filter",
+    "process-recipe", "process-filter", "process-flow", "process-backflow", "pressure"].includes(action.kind);
 }
 
 export function applyWorkshopAction(state: MachineState, key: string, held: InventorySlot | null, expectedRevision: number,
@@ -68,6 +83,7 @@ export function applyWorkshopAction(state: MachineState, key: string, held: Inve
   const fail = (reason: string) => ({ ok: false, reason, machine: state, held, clipboard });
   const action = parseWorkshopAction(rawAction);
   if (!action) return fail("invalid-operation");
+  if (action.kind === "pressure") return fail("Pressure-world operations require the live host coordinator.");
   if (held && !validWorkshopItem(held)) return fail("invalid-item");
   if (expectedRevision !== state.revision || state.revision >= Number.MAX_SAFE_INTEGER) return fail("stale-revision");
   if (workshopActionNeedsWrench(action) && held?.item !== Item.FieldWrench) return fail("Select the Field Wrench to configure this machine.");
@@ -87,19 +103,40 @@ export function applyWorkshopAction(state: MachineState, key: string, held: Inve
     const item: ResourceEndpoint = { endpointId: "player/oxygen", locationId: state.locationId, revision: state.revision,
       kind: "chemical", capacity: gearCapacity(held.item).oxygenMl,
       content: store.oxygenMl > 0 ? { kind: "chemical", resource: "oxygen", quantity: store.oxygenMl } : null };
-    const tank = machineEndpoint(state, key, "chemical");
+    const choices = chemistryReservoirs(state.kind, action.direction === "fill" ? "output" : "input", "chemical", "oxygen");
+    const selected = choices.find(slot => {
+      const reservoir = chemicalStore(state.workshop, slot);
+      return action.direction === "fill" ? reservoir?.resource === "oxygen" : !reservoir || reservoir.resource === "oxygen";
+    });
+    if (!selected) return fail("No compatible oxygen reservoir.");
+    if (action.direction === "fill" && state.workshop.cycle && chemistryReservoirs(state.kind, "input", "chemical").includes(selected)) return fail("cycle-reserved");
+    const tank = machineEndpoint(state, key, selected);
     const result = action.direction === "fill" ? transferResource(tank, item, 1000) : transferResource(item, tank, 1000);
     if (!result.ok) return fail(result.reason);
     const itemAfter = action.direction === "fill" ? result.destination : result.source;
     return { ok: true, reason: `Transferred ${result.moved!.quantity} mL O2.`, clipboard,
-      machine: withMachineEndpoint(state, "chemical", action.direction === "fill" ? result.source : result.destination),
+      machine: withMachineEndpoint(state, selected, action.direction === "fill" ? result.source : result.destination),
       held: withLifeSupport(cloneSlot(held)!, { ...store, oxygenMl: itemAfter.content?.quantity ?? 0 }) };
   }
   const workshop: WorkshopState = { ...state.workshop, slots: { ...state.workshop.slots }, upgrades: { ...state.workshop.upgrades },
-    resourcePorts: structuredClone(state.workshop.resourcePorts) };
+    resourcePorts: structuredClone(state.workshop.resourcePorts), ...(state.workshop.process ? { process: { ...state.workshop.process } } : {}) };
   let selected = cloneSlot(held);
   let ports = { ...state.ports };
   switch (action.kind) {
+    case "process-recipe":
+      if (!workshop.process || workshop.cycle) return fail("Finish or cancel the current cycle before selecting a process.");
+      if (action.recipeId && chemistryRecipe(action.recipeId)?.machine !== state.kind) return fail("Recipe belongs to another machine.");
+      workshop.process.recipeId = action.recipeId; break;
+    case "process-filter":
+      if (!workshop.process) return fail("This machine has no pressure-service valve.");
+      if (action.resource === "fluid") workshop.process.fluidFilter = action.value; else workshop.process.gasFilter = action.value;
+      break;
+    case "process-flow":
+      if (!workshop.process) return fail("This machine has no pressure-service valve.");
+      workshop.process.flowPermille = action.permille; break;
+    case "process-backflow":
+      if (!workshop.process) return fail("This machine has no pressure-service valve.");
+      workshop.process.backflow = action.enabled; break;
     case "material-port": workshop.resourcePorts[action.resource][action.face] = action.mode; break;
     case "control": workshop.control = action.mode; break;
     case "signal": workshop.signal = action.enabled; break;
@@ -130,11 +167,12 @@ export function applyWorkshopAction(state: MachineState, key: string, held: Inve
       const item = UPGRADE_ITEMS[action.upgrade];
       if (held && (held.item !== item || held.metadata || held.durability !== undefined || held.count >= maxStack(item))) return fail("Select an empty slot or matching module stack.");
       workshop.upgrades[action.upgrade] -= 1;
-      if (state.energyJ > machineCapacity(state.kind, workshop) || (workshop.fluid?.amount ?? 0) > workshopFluidCapacity(state.kind, workshop)
-        || (workshop.chemical?.amount ?? 0) > workshopGasCapacity(state.kind, workshop) || workshop.heatJ > workshopHeatCapacity(workshop)) return fail("Drain the extra capacity before removing this module.");
+      if (state.energyJ > machineCapacity(state.kind, workshop) || workshopStoredTotal(workshop, "fluid") > workshopFluidCapacity(state.kind, workshop)
+        || workshopStoredTotal(workshop, "chemical") > workshopGasCapacity(state.kind, workshop) || workshop.heatJ > workshopHeatCapacity(workshop)) return fail("Drain the extra capacity before removing this module.");
       selected = { item, count: (held?.count ?? 0) + 1 }; break;
     }
     case "vent":
+      if (workshop.cycle) return fail("Cancel the reserved cycle before venting.");
       if (!workshop.chemical) return fail("Gas store is empty.");
       workshop.chemical = null; break;
     case "copy": return { ok: true, reason: "Copied compatible face and control settings.", machine: state, held, clipboard: {
@@ -184,5 +222,7 @@ export function placedWorkshopMachine(kind: MachineKind, slot: InventorySlot, lo
   const state = saved && typeof saved === "object" && (saved as MachineState).kind === kind
     ? normalizeMachine({ ...saved, locationId, ownerId }, kind, locationId, ownerId)
     : createMachine(kind, locationId, ownerId, facing);
+  // Carry resource custody, not a past world's installation/link identity.
+  if (state.workshop.process) state.workshop.process.installationId = null;
   return { ...state, facing, revision: state.revision + 1 };
 }

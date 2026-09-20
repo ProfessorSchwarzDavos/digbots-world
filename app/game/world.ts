@@ -2914,6 +2914,8 @@ export function createBlockAtlas() {
 }
 
 export class ChunkWorld {
+  /** Local derived-system invalidation. Observers do not own or serialize blocks. */
+  readonly blockEditObservers = new Set<(point: { x: number; y: number; z: number }) => void>();
   group = new THREE.Group();
   chunks = new Map<string, Chunk>();
   edits = new Map<string, Map<number, BlockId>>();
@@ -7569,6 +7571,7 @@ export class ChunkWorld {
     this.markPlayerEditMutation();
     if (!isDirectionallyPlacedBlock(resolvedType)) this.blockFacings.delete(`${x},${y},${z}`);
     this.writeChunkBlock(chunk, index, resolvedType);
+    for (const observe of this.blockEditObservers) observe({ x, y, z });
     this.lightEngine.updateBlock({ x, y, z, previous: previousType, next: resolvedType });
     if (previousType === BlockId.Lava || resolvedType === BlockId.Lava) this.refreshLavaLightCell(x, y, z);
     if (record) {
@@ -7636,6 +7639,7 @@ export class ChunkWorld {
       this.markPlayerEditMutation();
       if (!isDirectionallyPlacedBlock(resolvedType)) this.blockFacings.delete(`${change.x},${change.y},${change.z}`);
       this.writeChunkBlock(chunk, index, resolvedType);
+      for (const observe of this.blockEditObservers) observe({ x: change.x, y: change.y, z: change.z });
       const lightChange = { x: change.x, y: change.y, z: change.z, previous: previousType, next: resolvedType };
       if (batchRelight) lightChanges.push(lightChange);
       else this.lightEngine.updateBlock(lightChange);

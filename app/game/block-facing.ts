@@ -9,6 +9,7 @@ export const BLOCK_FACING_SOUTH = 2 as const;
 export const BLOCK_FACING_WEST = 3 as const;
 
 const DIRECTIONAL_SHAPES = new Set([
+  "wayworks",
   "chest",
   "fireplace",
   "apiary",

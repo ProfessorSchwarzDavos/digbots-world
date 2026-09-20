@@ -5124,7 +5124,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
       {overlay === "orb-rack" && renderOrbStationPanel("orb-rack", hud.activeOrbRack)}
       {overlay === "healing-station" && renderOrbStationPanel("healing-station", hud.activeHealingStation)}
       {overlay === "wayworks" && hud.activeWayworks && (
-        <WayworksPanel {...hud.activeWayworks} feedback={toast} onClose={resume}
+        <WayworksPanel key={hud.activeWayworks.workshop?.process?.installationId ?? hud.activeWayworks.kind} {...hud.activeWayworks} feedback={toast} onClose={resume}
           onInspectResource={resource => engineRef.current?.inspectWorkshopResource(resource)}
           onAction={action => engineRef.current?.workshopAction(action, hud.activeWayworks!.revision)} />
       )}

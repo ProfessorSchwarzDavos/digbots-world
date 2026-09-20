@@ -1,3 +1,5 @@
+import { PRESSURE_CATALOG } from "./pressure-catalog";
+
 export enum BlockId {
   Air = 0,
   Grass = 1,
@@ -352,6 +354,35 @@ export enum BlockId {
   FluidPump = 639,
   FluidTank = 640,
   GasTank = 641,
+  LiquidPipe = 659,
+  Gasline = 660,
+  HeatConduit = 661,
+  AtmosphericCondenser = 662,
+  Electrolyzer = 663,
+  GasCompressor = 664,
+  FluidRefinery = 665,
+  ChemicalMixer = 666,
+  ReactionChamber = 667,
+  CarbonScrubber = 668,
+  LifeSupportController = 669,
+  ThermalRegulator = 670,
+  HydrogenTurbine = 671,
+  MethaneReformer = 672,
+  GasEngine = 673,
+  PressureDoor = 674,
+  HorizonDoor = 675,
+  HangarPressureGate = 676,
+  AirlockController = 677,
+  AtmosphereVent = 678,
+  EqualizationVent = 679,
+  RecoveryPump = 680,
+  PressureSensor = 681,
+  EmergencyShutter = 682,
+  ReinforcedWindow = 683,
+  HangarFrame = 684,
+  PressureDoorUpper = 685,
+  HorizonDoorUpper = 686,
+  EmergencyShutterUpper = 687,
 }
 
 export const Item = {
@@ -373,6 +404,11 @@ export const Item = {
   MufflingModule: 656,
   SealModule: 657,
   ThermalModule: 658,
+  HabitatFilter: 688,
+  SpentHabitatFilter: 689,
+  CarbonPowder: 690,
+  CeramicMembrane: 691,
+  PressurePolymer: 692,
   None: 0,
   Stick: 100,
   Coal: 101,
@@ -1139,6 +1175,12 @@ export const BLOCKS: Record<number, BlockDefinition> = {
   [BlockId.FluidPump]: block(BlockId.FluidPump, "Fluid Pump", 40, 40, 40, 2, "#71b8bd", "pickaxe", 1, { layer: "none", shape: "wayworks" }),
   [BlockId.FluidTank]: block(BlockId.FluidTank, "Fluid Tank", 40, 40, 40, 2, "#80b8bb", "pickaxe", 1, { layer: "none", shape: "wayworks" }),
   [BlockId.GasTank]: block(BlockId.GasTank, "Gas Tank", 40, 40, 40, 3, "#bbbe9a", "pickaxe", 1, { layer: "none", shape: "wayworks" }),
+  ...Object.fromEntries(Object.values(PRESSURE_CATALOG).map(def => [def.id, block(def.id, def.name, 40, 40, 40, 3, def.color, "pickaxe", 1, { layer: "none", shape: "wayworks" })])),
+  [BlockId.ReinforcedWindow]: block(BlockId.ReinforcedWindow, "Reinforced Window", 12, 12, 12, 3, "#b4d9d5", "pickaxe", 1, { layer: "none", shape: "wayworks" }),
+  [BlockId.HangarFrame]: block(BlockId.HangarFrame, "Hangar Frame", 40, 40, 40, 4, "#8eaaa9", "pickaxe", 2, { layer: "none", shape: "wayworks" }),
+  [BlockId.PressureDoorUpper]: block(BlockId.PressureDoorUpper, "Pressure Door Upper", 40, 40, 40, 3, "#9caeab", "pickaxe", 1, { layer: "none", shape: "wayworks" }),
+  [BlockId.HorizonDoorUpper]: block(BlockId.HorizonDoorUpper, "Horizon Door Upper", 40, 40, 40, 3, "#c3d4cc", "pickaxe", 1, { layer: "none", shape: "wayworks" }),
+  [BlockId.EmergencyShutterUpper]: block(BlockId.EmergencyShutterUpper, "Emergency Shutter Upper", 40, 40, 40, 3, "#b79e7d", "pickaxe", 1, { layer: "none", shape: "wayworks" }),
   [BlockId.Torch]: block(BlockId.Torch, "Torch", 39, 39, 39, 0.05, "#f4bd4f", "hand", 0, { solid: false, layer: "emissive", shape: "torch", replaceable: true }),
   [BlockId.CopperOre]: block(BlockId.CopperOre, "Copper Ore", 40, 40, 40, 1.9, "#b16d4e", "pickaxe", 1),
   [BlockId.GoldOre]: block(BlockId.GoldOre, "Gold Ore", 41, 41, 41, 2.4, "#cda934", "pickaxe", 2),
@@ -1579,7 +1621,7 @@ for (const definition of Object.values(BLOCKS)) {
     id: definition.id,
     name: definition.name,
     color: definition.color,
-    maxStack: definition.shape === "wayworks" && definition.id !== BlockId.GridCable ? 1 : 64,
+    maxStack: definition.shape === "wayworks" && ![BlockId.GridCable, BlockId.LiquidPipe, BlockId.Gasline, BlockId.HeatConduit, BlockId.ReinforcedWindow, BlockId.HangarFrame].includes(definition.id) ? 1 : 64,
     placeBlock: definition.id,
     ...(["cross", "tall-flower", "aquatic"].includes(definition.shape ?? "") ? { worldTextureBlock: definition.id } : {}),
     ...(definition.id === BlockId.CraftingTable ? { iconKind: "crafting-table" as const } : {}),
@@ -1622,6 +1664,11 @@ Object.assign(ITEMS, {
   [Item.MufflingModule]: { id: Item.MufflingModule, name: "Muffling Module", color: "#a899b0", maxStack: 16 },
   [Item.SealModule]: { id: Item.SealModule, name: "Seal Module", color: "#7fbfb1", maxStack: 16 },
   [Item.ThermalModule]: { id: Item.ThermalModule, name: "Thermal Module", color: "#c59873", maxStack: 16 },
+  [Item.HabitatFilter]: { id: Item.HabitatFilter, name: "Habitat Filter Cartridge", color: "#b9c3a8", maxStack: 16 },
+  [Item.SpentHabitatFilter]: { id: Item.SpentHabitatFilter, name: "Spent Habitat Filter", color: "#817970", maxStack: 16 },
+  [Item.CarbonPowder]: { id: Item.CarbonPowder, name: "Recovered Carbon", color: "#596264", maxStack: 64 },
+  [Item.CeramicMembrane]: { id: Item.CeramicMembrane, name: "Ceramic Membrane", color: "#d1ceb8", maxStack: 64 },
+  [Item.PressurePolymer]: { id: Item.PressurePolymer, name: "Pressure Polymer", color: "#a2bdaf", maxStack: 64 },
   [Item.FieldBreatherHelmet]: { ...armorItem(Item.FieldBreatherHelmet, "Field Breather Helmet", "#d3d6ca", "head", 1, 340), lifeSupportKind: "helmet" },
   [Item.LightOxygenTank]: { id: Item.LightOxygenTank, name: "Light O2 Tank", color: "#a8cec1", maxStack: 1, equipmentSlot: "back", lifeSupportKind: "tank" },
   [Item.ExpeditionOxygenTank]: { id: Item.ExpeditionOxygenTank, name: "Expedition O2 Tank", color: "#74a9a8", maxStack: 1, equipmentSlot: "back", lifeSupportKind: "tank" },
@@ -2455,7 +2502,8 @@ export const WILD_BONDS_TOMES: readonly ItemCode[] = Object.freeze([
 ]);
 
 export const CREATIVE_BLOCKS: ItemCode[] = [...new Set<ItemCode>([...DRAGON_ITEMS, ...V1_CULTURE_ITEMS, ...V1_STORAGE_ITEMS, ...V1_2_HOMESTEAD_ITEMS, ...WILD_BONDS_TOMES, Item.IronFilings, Item.MoonberryCookie, Item.Flour, ...Object.values(BLOCKS)
-  .filter((definition) => ITEMS[definition.id] && BLOCK_ITEM_ALIASES[definition.id] === undefined && !definition.replaceable && definition.id !== BlockId.WheatCrop)
+  .filter((definition) => ITEMS[definition.id] && BLOCK_ITEM_ALIASES[definition.id] === undefined && !definition.replaceable && definition.id !== BlockId.WheatCrop
+    && ![BlockId.PressureDoorUpper, BlockId.HorizonDoorUpper, BlockId.EmergencyShutterUpper].includes(definition.id))
   .map((definition) => definition.id), ...CREATIVE_FLORA, ...Object.values(BLOCK_ITEM_ALIASES).filter((item): item is ItemCode => item !== undefined), BlockId.Torch, Item.WildwoodDoor, Item.WildwoodBed, Item.Sailboat, Item.CaptureOrb, Item.WorldshellEgg, Item.AetherbellEgg, Item.Shellfruit, Item.Reefglass, Item.LivingCoral, Item.LumenPearl, Item.PrismaticPearl, Item.TideglassTrident, Item.GlowmenderSalve, Item.TemperedRootspike, Item.RareSeedPouch, Item.WargFeed, Item.Honeycomb, Item.HoneyJar, Item.RoyalJelly, Item.Beeswax, Item.MilkBottle, Item.CloudglassRelic, Item.QueenCell, Item.WorkerBee, Item.GlassBottle, Item.WaterBottle, Item.HealthPotion, Item.WayfarerPotion, Item.HearthwardTonic, Item.GloamstepElixir, Item.WaterBreathingPotion, Item.Honeymead, Item.HobbitCrossbowBlueprint, Item.FineCrossbowBlueprint, Item.GoblinSpearBlueprint, Item.GloamstepBlueprint, Item.HearthwardBlueprint, Item.MeadBlueprint, Item.HearthguardCrossbow, Item.WayfarerCrossbow, Item.CrossbowBolt, Item.GoblinsmithSpear, Item.Berry, Item.Sunberry, Item.Apple, Item.Banana, Item.Wheat, Item.WheatSeeds, Item.Moonrice, Item.MoonriceSeeds, Item.Sunroot, Item.SunrootStarts, Item.SaltbrushSprig, Item.CoastAsterPetal, Item.LumenKelpFrond, Item.StarCoralShard, Item.AbyssBloomNectar, Item.TidevineFiber, Item.RainveilLog, Item.SakurabloomLog, Item.RainveilSapling, Item.SakurabloomSapling, Item.SakuraBloomItem, Item.DreamblossomItem, Item.RainveilFernItem, Item.LanternLotusItem, Item.WildwoodTableItem, Item.WildwoodStoolItem, Item.WildwoodShelfItem, Item.SealedBarrelItem, Item.RainveilLeavesItem, Item.SakurabloomLeavesItem, Item.RainveilGrassBlock, Item.SakurabloomGrassBlock, Item.StarrootScepter, Item.Feather, Item.RawFish, Item.CookedFish, Item.GlowScale, Item.BreatherCharm, Item.SunwardCompass, Item.WoodHoe, Item.StoneHoe, Item.IronHoe, Item.HarvestScythe, Item.Bucket, Item.WaterBucket, Item.LavaBucket, Item.HoneyBucket, Item.SyrupBucket, Item.Lead, Item.WildwoodFenceGate, Item.Saddle, Item.NocturneHeart, Item.ButterflyNet, Item.MeadowwingJar, Item.AzureSkipperJar, Item.EmbertipJar, Item.FrostveilJar, Item.BloomMonarchJar, Item.FenLanternJar, Item.BonbonwingTreat, Item.SyrupfinFillet, Item.CandiedAlloy, Item.RockcandySaber, Item.PeppermintLance, Item.FondantCrown, Item.FondantCuirass, Item.FondantGreaves, Item.FondantBoots, Item.PeppermintRush, Item.MarshmallowWard, Item.SugarcourtArmsBlueprint, Item.FondantArmorBlueprint, Item.PeppermintRushBlueprint, Item.MarshmallowWardBlueprint, Item.HideHood, Item.HideTunic, Item.HideLeggings, Item.HideBoots, Item.IronHelm, Item.IronPlate, Item.IronGreaves, Item.IronBoots, Item.WindSilk, Item.LivingInk, Item.ClockworkSpring])];
 
 /**
@@ -2464,7 +2512,8 @@ export const CREATIVE_BLOCKS: ItemCode[] = [...new Set<ItemCode>([...DRAGON_ITEM
  * items appear automatically. Migration-only retired capture items stay hidden.
  */
 export const CREATIVE_ITEMS: readonly ItemCode[] = Object.freeze(Object.values(ITEMS)
-  .filter((definition) => definition.id !== Item.LegacyCaptureOrb && !definition.name.startsWith("Retired "))
+  .filter((definition) => definition.id !== Item.LegacyCaptureOrb && !definition.name.startsWith("Retired ")
+    && ![BlockId.PressureDoorUpper, BlockId.HorizonDoorUpper, BlockId.EmergencyShutterUpper].includes(definition.id))
   .sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" }) || left.id - right.id)
   .map((definition) => definition.id));
 
@@ -2510,6 +2559,39 @@ const anyDragonScale: ItemCode[] = [Item.FireDragonScale, Item.IceDragonScale, I
 const anyDragonHeart: ItemCode[] = [Item.FireDragonHeart, Item.IceDragonHeart, Item.SteelDragonHeart, Item.SeaDragonHeart, Item.GoldDragonHeart, Item.SilverDragonHeart];
 
 export const RECIPES: Recipe[] = [
+  { id: "ceramic-membrane", name: "Ceramic Membrane", width: 3, height: 1, pattern: [BlockId.SunbakedClay, Item.StoneDust, BlockId.Glass], output: { item: Item.CeramicMembrane, count: 4 }, table: true },
+  { id: "habitat-filter", name: "Habitat Filter", width: 3, height: 2, pattern: [Item.Fiber, Item.CarbonPowder, Item.Fiber, Item.IronSheet, Item.CeramicMembrane, Item.IronSheet], output: { item: Item.HabitatFilter, count: 2 }, table: true },
+  { id: "starter-carbon-powder", name: "Filter Carbon", width: 2, height: 1, pattern: [ANY_COAL, Item.StoneDust], output: { item: Item.CarbonPowder, count: 2 }, table: true },
+  { id: "liquid-pipe", name: "Liquid Pipe", width: 3, height: 2, pattern: [Item.CopperSheet, 0, Item.CopperSheet, Item.CopperSheet, 0, Item.CopperSheet], output: { item: BlockId.LiquidPipe, count: 8 }, table: true },
+  { id: "gasline", name: "Gasline", width: 3, height: 2, pattern: [Item.IronSheet, Item.Fiber, Item.IronSheet, Item.IronSheet, 0, Item.IronSheet], output: { item: BlockId.Gasline, count: 8 }, table: true },
+  { id: "heat-conduit", name: "Heat Conduit", width: 3, height: 2, pattern: [BlockId.SunbakedClay, Item.CopperIngot, BlockId.SunbakedClay, Item.CopperSheet, Item.CopperIngot, Item.CopperSheet], output: { item: BlockId.HeatConduit, count: 8 }, table: true },
+  ...([
+    ["atmospheric-condenser", BlockId.AtmosphericCondenser, Item.CeramicMembrane, Item.GearCluster, BlockId.Glass],
+    ["electrolyzer", BlockId.Electrolyzer, Item.CeramicMembrane, Item.CrystalShard, BlockId.Glass],
+    ["gas-compressor", BlockId.GasCompressor, Item.GearCluster, Item.MachineAlloy, Item.CeramicMembrane],
+    ["fluid-refinery", BlockId.FluidRefinery, BlockId.Furnace, Item.GearCluster, Item.CeramicMembrane],
+    ["chemical-mixer", BlockId.ChemicalMixer, Item.GearCluster, Item.CopperSheet, Item.CeramicMembrane],
+    ["reaction-chamber", BlockId.ReactionChamber, Item.CeramicMembrane, Item.MachineAlloy, Item.CrystalShard],
+    ["carbon-scrubber", BlockId.CarbonScrubber, Item.HabitatFilter, Item.CeramicMembrane, Item.GearCluster],
+    ["life-support-controller", BlockId.LifeSupportController, Item.CrystalShard, Item.PressurePolymer, Item.CeramicMembrane],
+    ["thermal-regulator", BlockId.ThermalRegulator, Item.CopperSheet, Item.CeramicMembrane, Item.CrystalShard],
+    ["hydrogen-turbine", BlockId.HydrogenTurbine, Item.GearCluster, Item.CeramicMembrane, Item.MachineAlloy],
+    ["methane-reformer", BlockId.MethaneReformer, Item.CeramicMembrane, BlockId.Furnace, Item.CopperSheet],
+    ["gas-engine", BlockId.GasEngine, Item.GearCluster, BlockId.Furnace, Item.MachineAlloy],
+    ["pressure-door", BlockId.PressureDoor, Item.PressurePolymer, Item.GearCluster, Item.IronSheet],
+    ["horizon-door", BlockId.HorizonDoor, Item.PressurePolymer, Item.CrystalShard, BlockId.Glass],
+    ["hangar-pressure-gate", BlockId.HangarPressureGate, Item.PressurePolymer, Item.MachineAlloy, Item.GearCluster],
+    ["airlock-controller", BlockId.AirlockController, Item.CrystalShard, Item.GearCluster, Item.PressurePolymer],
+    ["atmosphere-vent", BlockId.AtmosphereVent, Item.CeramicMembrane, Item.PressurePolymer, Item.CopperSheet],
+    ["equalization-vent", BlockId.EqualizationVent, Item.PressurePolymer, Item.CeramicMembrane, Item.CopperSheet],
+    ["recovery-pump", BlockId.RecoveryPump, Item.GearCluster, Item.PressurePolymer, Item.CeramicMembrane],
+    ["pressure-sensor", BlockId.PressureSensor, BlockId.Glass, Item.CrystalShard, Item.CeramicMembrane],
+    ["emergency-shutter", BlockId.EmergencyShutter, Item.PressurePolymer, Item.GearCluster, Item.MachineAlloy],
+  ] as const).map(([id, item, top, core, bottom]) => ({ id, name: ITEMS[item].name, width: 3, height: 3,
+    pattern: [Item.IronSheet, top, Item.IronSheet, Item.CopperSheet, core, Item.CopperSheet, Item.IronSheet, bottom, Item.IronSheet],
+    output: { item, count: 1 }, table: true })),
+  { id: "reinforced-window", name: "Reinforced Window", width: 3, height: 3, pattern: [Item.IronSheet, Item.PressurePolymer, Item.IronSheet, BlockId.Glass, BlockId.Glass, BlockId.Glass, Item.IronSheet, Item.PressurePolymer, Item.IronSheet], output: { item: BlockId.ReinforcedWindow, count: 4 }, table: true },
+  { id: "hangar-frame", name: "Hangar Frame", width: 3, height: 3, pattern: [Item.MachineAlloy, Item.IronSheet, Item.MachineAlloy, Item.IronSheet, 0, Item.IronSheet, Item.MachineAlloy, Item.IronSheet, Item.MachineAlloy], output: { item: BlockId.HangarFrame, count: 8 }, table: true },
   { id: "hand-dynamo", name: "Hand Dynamo", width: 3, height: 2, pattern: [Item.IronIngot, Item.GearCluster, Item.IronIngot, BlockId.Planks, Item.Fiber, BlockId.Planks], output: { item: BlockId.HandDynamo, count: 1 }, table: true },
   { id: "sunplate-array", name: "Sunplate Array", width: 3, height: 2, pattern: [Item.CrystalShard, BlockId.Glass, Item.CrystalShard, Item.IronIngot, Item.IronIngot, Item.IronIngot], output: { item: BlockId.SunplateArray, count: 1 }, table: true },
   { id: "field-battery", name: "Field Battery", width: 3, height: 2, pattern: [Item.IronIngot, Item.CrystalShard, Item.IronIngot, Item.IronIngot, Item.GearCluster, Item.IronIngot], output: { item: BlockId.FieldBattery, count: 1 }, table: true },

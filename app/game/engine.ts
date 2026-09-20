@@ -3,12 +3,21 @@ import { advancePowerGrid, localFaceForWorldDirection, machineCapacity, machineR
 import { applyWorkshopAction, machineKindForBlock, parseWorkshopAction, placedWorkshopMachine, restoreWorkshop, WAYWORKS_BLOCKS, type WorkshopAction, type WorkshopClipboard } from "./wayworks-integration";
 import { PowerTopologyCache } from "./wayworks-network";
 import { advanceMachine, portableResource } from "./wayworks-machines";
-import { advanceMachineLinks, exportMachineToWaygrid } from "./wayworks-links";
-import { workshopAuthorized, workshopFluidCapacity, workshopGasCapacity, workshopRunning } from "./wayworks-stores";
+import { advanceMachineLinks, exportMachineToWaygrid, MaterialTopologyCache } from "./wayworks-links";
+import { workshopAuthorized, workshopFluidCapacity, workshopGasCapacity, workshopRunning, workshopStoredTotal } from "./wayworks-stores";
 import { operateWaygrid, type WaygridOperation } from "./wayworks-waygrid";
 import { compareProtectedCustody, validCustodyItem } from "./wayworks-custody";
 import { isWayworksItem } from "./wayworks-item-models";
-import { createWayworksModel, updateWayworksModel, updateWayworksPortOverlay } from "./wayworks-models";
+import { isPressurePart } from "./pressure-item-models";
+import { chemistryAtmosphere } from "./pressure-chemistry";
+import { updateWayworksPortOverlay } from "./wayworks-models";
+import { createWorkshopModel as createWayworksModel, updateWorkshopModel as updateWayworksModel } from "./workshop-models";
+import { createPressureModel, updatePressureModel, type PressureModelFace } from "./pressure-models";
+import { createPressureOverlay, disposePressureOverlay } from "./pressure-overlay";
+import { buildPressurePresentation, acceptPressurePresentation, pressurePresentationOpenDoorAt, pressurePresentationClosedGateAt,
+  pressurePresentationEnvironmentAt, type PressurePresentation } from "./pressure-presentation";
+import { PressureRuntime, type PressureSave, type PressureOccupant } from "./pressure-runtime";
+import { pressureDoorUpper, pressureDoorLower, pressurePoint, validPressureDoorEdits } from "./pressure-devices";
 import { createWaystarCatalog, validateCelestialCatalog, type CelestialCatalogSnapshot, type CelestialBodyDefinition } from "./celestial-catalog";
 import { bodyEnvironment, gravityAcceleration, gravityGait, contactPushOffSpeed, effectiveFallDistance, type BodyEnvironment } from "./celestial-environment";
 import { localBodyClock, secondsFromLocalClock, sampleCelestialSky, type CelestialSkySample } from "./celestial-ephemeris";
@@ -1551,6 +1560,7 @@ export type WorldSave = {
   furnaces: Record<string, FurnaceState>;
   wheatMills?: Record<string, WheatMillState>;
   wayworks?: Record<string, MachineState>;
+  pressure?: PressureSave;
   chests: Record<string, ChestState>;
   contextualLoot?: ContextualLootWorldState;
   roadEvents?: Record<string, RoadEventState>;
@@ -3846,6 +3856,7 @@ function itemCanCreatePlacementBlock(item: ItemCode, block: BlockId) {
   const base = ITEMS[item]?.placeBlock;
   if (base === undefined) return false;
   if (base === block) return true;
+  if (pressureDoorUpper(base) === block) return true;
   if (base === BlockId.Torch) return isTorchBlock(block);
   if (base === BlockId.DoorClosedLower) return WILDWOOD_DOOR_PLACEMENT_BLOCKS.has(block);
   if (base === BlockId.WroughtIronDoorClosedLower) return WROUGHT_IRON_DOOR_PLACEMENT_BLOCKS.has(block);
@@ -4247,6 +4258,13 @@ export class VoxelEngine {
   wayworksAccumulator = 0;
   wayworksActionReadyAt = 0;
   wayworksTopology = new PowerTopologyCache();
+  wayworksMaterialTopology = new MaterialTopologyCache();
+  pressureRuntime: PressureRuntime | null = null;
+  guestPressure: PressurePresentation | null = null;
+  pressureStructures = new Set<string>();
+  pressureOverlay: THREE.Group | null = null;
+  pressureOverlaySignature = "";
+  pressureEditObserver: ((point: { x: number; y: number; z: number }) => void) | null = null;
   wayworksNetworks: readonly { id: string; nodeKeys: readonly string[]; energyJ: number; capacityJ: number }[] = [];
   wayworksTopologyRevision = 0;
   wayworksClipboard: WorkshopClipboard | null = null;
@@ -4568,7 +4586,7 @@ export class VoxelEngine {
       minY: MIN_Y,
       maxY: MAX_Y,
       isLoaded: ({ x, y, z }) => this.world.getBlock(x, y, z) !== undefined,
-      isSolid: ({ x, y, z }) => BLOCKS[this.world.getBlock(x, y, z) ?? BlockId.Bedrock]?.solid ?? true,
+      isSolid: ({ x, y, z }) => this.pressureDoorOpen({ x, y, z }) ? false : this.pressureGateClosed({ x, y, z }) || (BLOCKS[this.world.getBlock(x, y, z) ?? BlockId.Bedrock]?.solid ?? true),
       isReplaceable: ({ x, y, z }) => {
         const type = this.world.getBlock(x, y, z);
         return type !== undefined && (type === BlockId.Air || Boolean(BLOCKS[type]?.replaceable));
@@ -6206,6 +6224,7 @@ export class VoxelEngine {
     this.primeEncounters = normalizePrimeEncounterStates(save.primeEncounters);
     this.digitalItemVault = normalizeDigitalItemVault(save.digitalItemVault);
     this.wayworks = restoreWorkshop(save.wayworks, this.world.locationScope?.locationId ?? "home-preview", "local", (x, y, z) => this.world.getBlock(x, y, z));
+    this.initializePressure(save.pressure);
     this.digitalCreatureArchive = normalizeDigitalCreatureArchive(save.digitalCreatureArchive);
     this.golemForges = new Map(Object.entries(save.golemForges ?? {}).map(([key, value]) => [key, normalizeGolemForgeState(value)]));
     this.alchemyStands = new Map(Object.entries(save.alchemyStands ?? {}).map(([key, value]) => [key, normalizeAlchemyStand(value)]));
@@ -8919,6 +8938,11 @@ export class VoxelEngine {
           if ((operation.kind === "crank" || operation.kind === "charge") && performance.now() < (this.wayworksActorReady.get(peer.identity.id) ?? 0)) { reject("Wait for the last effort or charge transfer to settle."); return; }
           const target = operation.kind === "charge" ? operation.target ?? "held" : "held";
           const selected = target === "back" ? inventorySlotFromNetwork(player.equipment.back ?? null) : target === "offhand" ? inventorySlotFromNetwork(player.offhand ?? null) : inventory[index];
+          if (operation.kind === "pressure") {
+            const pressure = this.pressureRuntime?.operate(parts.key, peer.identity.id, selected?.item, state.revision, operation.action, performance.now());
+            if (!pressure?.ok) { reject(pressure?.reason ?? "Pressure service is unavailable."); return; }
+            reason = pressure.reason;
+          } else {
           const result = applyWorkshopAction(state, parts.key, selected, state.revision, operation, this.wayworksActorClipboards.get(peer.identity.id) ?? null);
           if (!result.ok) { reject(result.reason); return; }
           if (target === "back") equipment.back = networkItemStack(result.held);
@@ -8931,6 +8955,7 @@ export class VoxelEngine {
             if (operation.kind === "rotate") this.world.setBlockFacing?.(coords[0], coords[1], coords[2], normalizeBlockFacing(result.machine.facing), true);
           };
           reason = result.reason;
+          }
         } else if ((parts.kind === "waygrid-items" || parts.kind === "waygrid-creatures") && action.operation.kind === "waygrid") {
           if (action.operation.action.kind.endsWith("creature") !== (parts.kind === "waygrid-creatures")) { reject("Wrong terminal for this resource."); return; }
           const result = operateWaygrid(this.digitalItemVault, this.digitalCreatureArchive, inventory, action.operation.action);
@@ -9334,7 +9359,7 @@ export class VoxelEngine {
       boats: [...this.boats.values()].map(({ save }) => ({
         id: save.id, x: save.x, y: save.y, z: save.z, yaw: save.yaw, velocity: save.velocity, passengers: [...save.passengers], ownerId: save.ownerId,
       })),
-      time: { tick: this.multiplayerTick, worldTime: this.worldTime, day: this.day, universeTimeSeconds: this.advanceUniverseClock(0), weather: this.weather, weatherState: { ...this.weatherState } },
+      time: { tick: this.multiplayerTick, worldTime: this.worldTime, day: this.day, universeTimeSeconds: this.advanceUniverseClock(0), weather: this.weather, weatherState: { ...this.weatherState }, pressure: this.pressureForPeer(peerId) },
       worldOptions: { ...this.worldOptions, enabledFactions: [...this.worldOptions.enabledFactions] },
       celestialCatalog: this.bodyContext().catalog,
       // Chests are demand-synced. A broad world snapshot must not truncate an
@@ -9460,6 +9485,9 @@ export class VoxelEngine {
     const centerX = hostPose?.x ?? 0;
     const centerZ = hostPose?.z ?? 0;
     this.world.initializeAround(centerX, centerZ);
+    this.initializePressure();
+    if (snapshot.time.pressure?.locationId === scope.locationId) this.guestPressure = acceptPressurePresentation(snapshot.time.pressure, null,
+      { locationId: scope.locationId, generation: snapshot.time.pressure.generation });
     const candidates = [[1.4, 0], [-1.4, 0], [0, 1.4], [0, -1.4]];
     let joined = false;
     for (const [dx, dz] of candidates) {
@@ -9883,14 +9911,16 @@ export class VoxelEngine {
         : { valid: action.consumedItem === undefined || this.mode === "builder", consumed: false, state: playerState };
       const playerPoses = [this.localNetworkPose(), ...[...this.remotePlayers.values()].map((player) => player.target)]
         .filter((pose): pose is PlayerPose => Boolean(pose));
-      const valid = Boolean(remote) && placement.valid && action.edits.length > 0 && action.edits.length <= 2_048 && action.edits.every((edit) => {
+      const valid = Boolean(remote) && placement.valid && validPressureDoorEdits(action.edits, point => this.world.getBlock(point.x, point.y, point.z)) && action.edits.length > 0 && action.edits.length <= 2_048 && action.edits.every((edit) => {
         const existing = this.world.getBlock(edit.x, edit.y, edit.z), incomingMachine = machineKindForBlock(edit.type), existingMachine = machineKindForBlock(existing);
         if (incomingMachine || existingMachine) {
-          if (!peer.identity || !playerState || action.edits.length !== 1 || action.effect) return false;
+          const pairedDoor = !!pressureDoorUpper(edit.type as BlockId) || existing !== undefined && !!pressureDoorUpper(existing);
+          if (!peer.identity || !playerState || action.edits.length !== (pairedDoor ? 2 : 1) || action.effect) return false;
           const held = inventorySlotFromNetwork(playerState.inventory[playerState.selected]);
           if (incomingMachine) {
             if (existing === undefined || (existing !== BlockId.Air && !BLOCKS[existing]?.replaceable) || this.wayworks.size >= 256
               || !held || held.item !== edit.type || !validCustodyItem(held) || this.mode === "survival" && !placement.consumed) return false;
+            if (pairedDoor && !BLOCKS[this.world.getBlock(edit.x, edit.y - 1, edit.z) ?? BlockId.Air]?.solid) return false;
           } else {
             const state = this.wayworks.get(blockKey(edit.x, edit.y, edit.z));
             if (edit.type !== BlockId.Air || !state || this.mode !== "survival" || !this.toolCanHarvest(existing!, held)
@@ -9928,7 +9958,7 @@ export class VoxelEngine {
         });
         for (const block of brokenBlocks) this.teardownBrokenBlockState(block.type, block.x, block.y, block.z);
         if (this.mode === "survival" && action.effect?.kind !== "tree-fell") for (const drop of multiplayerBreakDropPlan(
-          brokenBlocks.filter((block) => block.type !== BlockId.WildBeehive && this.toolCanHarvest(block.type, held)),
+          brokenBlocks.filter((block) => block.type !== BlockId.WildBeehive && !pressureDoorLower(block.type) && this.toolCanHarvest(block.type, held)),
         )) {
           if (drop.item !== undefined) this.spawnDrop(drop.item, 1, new THREE.Vector3(drop.x, drop.y, drop.z));
           else this.dropBlockLoot(isTorchBlock(drop.type) ? BlockId.Torch : drop.type, drop.x, drop.y, drop.z);
@@ -10304,6 +10334,10 @@ export class VoxelEngine {
         this.weather = time.weather;
         if (time.weatherState) this.weatherState = { ...time.weatherState };
         if (time.boats) this.applyNetworkBoatSnapshot(time.boats);
+        if (time.pressure && this.guestPressure) {
+          const next = acceptPressurePresentation(time.pressure, this.guestPressure, { locationId: this.world.locationScope?.locationId ?? "", generation: this.guestPressure.generation });
+          if (next) this.guestPressure = next;
+        }
       }
     }
   }
@@ -10396,6 +10430,7 @@ export class VoxelEngine {
           }, peer.identity.id);
           session.sendTimeWeather({
             tick: this.multiplayerTick, worldTime: this.worldTime, day: this.day, universeTimeSeconds: this.advanceUniverseClock(0), weather: this.weather, weatherState: { ...this.weatherState },
+            pressure: this.pressureForPeer(peer.identity.id),
             boats: [...this.boats.values()].map(({ save }) => ({ id: save.id, x: save.x, y: save.y, z: save.z, yaw: save.yaw, velocity: save.velocity, passengers: [...save.passengers], ownerId: save.ownerId })),
           }, peer.identity.id);
         } catch { /* Reconstructable images are retried on the next 5 Hz frame. */ }
@@ -12897,6 +12932,7 @@ export class VoxelEngine {
     const network = this.wayworksNetworks?.find((entry) => entry.nodeKeys.includes(this.activeWayworksKey!));
     return { ...state, name: state.kind.split("-").map(word => word[0].toUpperCase() + word.slice(1)).join(" "),
       capacityJ: machineCapacity(state.kind, state.workshop), rateW: machineRate(state.kind), heldItemName: this.selectedSlot() ? itemName(this.selectedSlot()!.item) : "Empty hand",
+      pressure: this.pressureRuntime?.devices.has(this.activeWayworksKey!) ? this.pressureRuntime.diagnosticsFor(this.activeWayworksKey!) : undefined,
       ...(network ? { network: { id: network.id, count: network.nodeKeys.length,
         energyJ: network.nodeKeys.reduce((sum, key) => sum + (this.wayworks.get(key)?.energyJ ?? 0), 0),
         capacityJ: network.capacityJ, revision: this.wayworksTopologyRevision } } : {}) };
@@ -12922,6 +12958,12 @@ export class VoxelEngine {
     const [x, y, z] = key.split(",").map(Number);
     if (Math.hypot(x - this.position.x, y - this.position.y, z - this.position.z) > 6 || machineKindForBlock(this.world.getBlock(x, y, z)) !== state.kind || state.locationId !== (this.world.locationScope?.locationId ?? "home-preview")) return fail("Machine is out of reach or no longer present.");
     if ((action.kind === "crank" || action.kind === "charge") && performance.now() < this.wayworksActionReadyAt) return fail("Wait for this transfer to settle.");
+    if (action.kind === "pressure") {
+      const result = this.pressureRuntime?.operate(key, "local", this.selectedSlot()?.item, expectedRevision, action.action, performance.now());
+      if (!result?.ok) return fail(result?.reason ?? "Pressure service is unavailable.");
+      if (action.action.kind !== "hold") this.events.onToast(result.reason);
+      this.saveSoon(); this.emitHud(true); return true;
+    }
     const target = action.kind === "charge" ? action.target ?? "held" : "held";
     const selected = target === "back" ? this.equipment.back : target === "offhand" ? this.offhand : this.selectedSlot();
     const result = applyWorkshopAction(state, key, selected, expectedRevision, action, this.wayworksClipboard);
@@ -12936,8 +12978,86 @@ export class VoxelEngine {
     this.saveSoon(); this.emitHud(true); return true;
   }
 
+  private initializePressure(saved?: PressureSave) {
+    if (this.pressureEditObserver) this.world.blockEditObservers.delete(this.pressureEditObserver);
+    this.pressureRuntime?.dispose(); this.pressureRuntime = null;
+    this.pressureStructures.clear();
+    for (const [chunk, edits] of this.world.edits) {
+      const [cx, cz] = chunk.split(",").map(Number);
+      for (const [index, type] of edits) if (type === BlockId.ReinforcedWindow || type === BlockId.HangarFrame) {
+        this.pressureStructures.add(blockKey(cx * CHUNK_SIZE + index % CHUNK_SIZE, MIN_Y + Math.floor(index / (CHUNK_SIZE * CHUNK_SIZE)), cz * CHUNK_SIZE + Math.floor(index / CHUNK_SIZE) % CHUNK_SIZE));
+      }
+      if (this.multiplayer?.role === "guest") for (const [index, type] of edits) {
+        const kind = machineKindForBlock(type); if (!kind) continue;
+        const x = cx * CHUNK_SIZE + index % CHUNK_SIZE, y = MIN_Y + Math.floor(index / (CHUNK_SIZE * CHUNK_SIZE)), z = cz * CHUNK_SIZE + Math.floor(index / CHUNK_SIZE) % CHUNK_SIZE;
+        this.wayworks.set(blockKey(x, y, z), placedWorkshopMachine(kind, { item: type, count: 1 }, this.world.locationScope?.locationId ?? "", "host", this.worldBlockFacing(x, y, z)));
+      }
+    }
+    this.pressureEditObserver = point => {
+      const type = this.world.getBlock(point.x, point.y, point.z), key = blockKey(point.x, point.y, point.z);
+      if (type === BlockId.ReinforcedWindow || type === BlockId.HangarFrame) this.pressureStructures.add(key); else this.pressureStructures.delete(key);
+      this.pressureRuntime?.onEdit(point);
+    };
+    this.world.blockEditObservers.add(this.pressureEditObserver);
+    if (this.multiplayer?.role === "guest") return;
+    this.pressureRuntime = new PressureRuntime({ locationId: this.world.locationScope?.locationId ?? "home-preview",
+      generation: this.world.locationScope?.epoch ?? 0, minY: MIN_Y, maxY: MAX_Y,
+      blockAt: ({ x, y, z }) => this.world.getBlock(x, y, z), skyTopAt: (x, z) => this.world.skyTopAt(x, z),
+      loadedColumns: () => [...this.world.chunks.keys()], machines: this.wayworks, environment: () => this.bodyContext().environment, daylight: () => this.daylightAmount(),
+      occupants: () => {
+        const point = (x: number, y: number, z: number) => ({ x: Math.floor(x + .5), y: Math.floor(y + .5), z: Math.floor(z + .5) });
+        const localPoint = point(this.position.x, this.position.y + this.cameraEyeHeight, this.position.z);
+        const draw = this.pressureRuntime?.environmentAt(localPoint).breathable || this.equipment.head?.item !== Item.FieldBreatherHelmet ? this.sprinting ? 6 : 4 : 0;
+        const occupants: PressureOccupant[] = [{ id: "player:local", kind: "player", point: localPoint, oxygenMilliMoles: draw, co2MilliMoles: draw }];
+        for (const [id, remote] of this.remotePlayers) if (remote.model.modelKind !== "drone") {
+          const p = point(remote.target.x, remote.target.y + 1.5, remote.target.z), state = this.multiplayerPlayerStates.get(id);
+          const use = this.pressureRuntime?.environmentAt(p).breathable || state?.equipment.head?.item !== Item.FieldBreatherHelmet ? remote.target.sprinting ? 6 : 4 : 0;
+          occupants.push({ id: `player:${id}`, kind: "player", point: p, oxygenMilliMoles: use, co2MilliMoles: use });
+        }
+        for (const mob of this.mobs) if (mob.health > 0 && mob.definition.movement !== "aquatic") {
+          const use = mob.definition.height > 2 ? 6 : 2;
+          occupants.push({ id: `creature:${mob.id}`, kind: mob.profession ? "npc" : "creature", point: point(mob.group.position.x, mob.group.position.y + .5, mob.group.position.z), oxygenMilliMoles: use, co2MilliMoles: use });
+        }
+        return occupants;
+      },
+      obstructed: point => blockEditIntersectsPlayer({ ...point, type: BlockId.PressureDoor }, { x: this.position.x, y: this.position.y, z: this.position.z }, this.currentPlayerHeight())
+        || [...this.remotePlayers.values()].some(remote => remote.model.modelKind !== "drone" && blockEditIntersectsPlayer({ ...point, type: BlockId.PressureDoor }, remote.target, PLAYER_HEIGHT))
+        || this.mobs.some(mob => mob.health > 0 && Math.abs(mob.group.position.x - point.x) < .7 && Math.abs(mob.group.position.z - point.z) < .7 && Math.abs(mob.group.position.y - point.y) < 1.5),
+      actorStillHolding: (actor, key) => {
+        const target = pressurePoint(key)!;
+        if (actor === "local") return this.activeWayworksKey === key && this.running && this.selectedSlot()?.item === Item.FieldWrench
+          && Math.hypot(target.x - this.position.x, target.y - this.position.y, target.z - this.position.z) <= 6;
+        const remote = this.remotePlayers.get(actor);
+        const player = this.multiplayerPlayerStates.get(actor);
+        if (remote && player) return this.multiplayerPeerActiveFacilities.get(actor) === this.sharedFacilityId("wayworks", key)
+          && player.inventory[player.selected]?.item === Item.FieldWrench && Math.hypot(target.x - remote.target.x, target.y - remote.target.y, target.z - remote.target.z) <= 6;
+        const agent = this.agentPose(actor), inventory = this.agentInventories.get(actor);
+        if (agent && inventory) return inventory.some(slot => slot?.item === Item.FieldWrench) && Math.hypot(target.x - agent.x, target.y - agent.y, target.z - agent.z) <= 6;
+        return false;
+      }, changed: () => { this.persistenceDirty = true; }, alarm: message => { this.audio.play("life-support"); this.events.onToast(message); },
+    }, saved);
+  }
+
+  private personalEnvironment() {
+    const point = { x: Math.floor(this.position.x + .5), y: Math.floor(this.position.y + this.cameraEyeHeight + .5), z: Math.floor(this.position.z + .5) };
+    return this.pressureRuntime?.environmentAt(point) ?? pressurePresentationEnvironmentAt(this.guestPressure, point, this.bodyContext().environment);
+  }
+  private pressureForPeer(peerId: string) {
+    if (!this.pressureRuntime) return undefined;
+    const position = this.remotePlayers.get(peerId)?.target ?? this.position;
+    return buildPressurePresentation(this.pressureRuntime, { x: position.x, y: position.y + 1.5, z: position.z }, this.multiplayerTick) ?? undefined;
+  }
+  private pressureDoorOpen(point: { x: number; y: number; z: number }) {
+    return this.pressureRuntime?.openDoorAt(point) ?? pressurePresentationOpenDoorAt(this.guestPressure, point);
+  }
+  private pressureGateClosed(point: { x: number; y: number; z: number }) {
+    return this.pressureRuntime?.closedGateAt(point) ?? pressurePresentationClosedGateAt(this.guestPressure, point);
+  }
+
   updateWayworks(dt: number) {
     if (this.multiplayer?.role === "guest") { this.renderWayworks(); return; }
+    if (!this.pressureRuntime) this.initializePressure();
+    this.pressureRuntime?.update(this.paused ? 0 : dt, performance.now());
     this.wayworksAccumulator += this.paused ? 0 : Math.max(0, dt);
     if (this.wayworksAccumulator < .25) { this.renderWayworks(); return; }
     const elapsedMs = Math.min(1000, Math.floor(this.wayworksAccumulator * 1000)); this.wayworksAccumulator = 0;
@@ -12972,7 +13092,10 @@ export class VoxelEngine {
     if (result.reason === "ok") for (const node of nodes) {
       const sourceKey = blockKey(node.x, node.y - 1, node.z);
       const hasSource = this.world.getBlock(node.x, node.y - 1, node.z) === BlockId.Water && this.liquidCells.get(sourceKey)?.source !== false;
-      const stepped = advanceMachine(this.wayworks.get(node.key)!, elapsedMs, { waterAvailableMl: hasSource ? 1000 : 0 });
+      const { body, environment } = this.bodyContext();
+      const intake = { x: node.x, y: node.y + 1, z: node.z };
+      const stepped = advanceMachine(this.wayworks.get(node.key)!, elapsedMs, { waterAvailableMl: hasSource ? 1000 : 0,
+        atmosphere: chemistryAtmosphere(body.id, environment, this.pressureRuntime?.exteriorAt(intake) ?? false) });
       if (stepped.waterConsumedMl === 1000) {
         this.liquidCells.delete(sourceKey);
         this.world.setBlock(node.x, node.y - 1, node.z, BlockId.Air, true, true);
@@ -12980,8 +13103,9 @@ export class VoxelEngine {
         this.publishBlockEdits([{ x: node.x, y: node.y - 1, z: node.z, type: BlockId.Air }], "break");
       }
       this.wayworks.set(node.key, stepped.state);
+      if (stepped.radiatedJ) this.pressureRuntime?.radiateMachineHeat(node.key, stepped.radiatedJ);
     }
-    const linked = advanceMachineLinks(nodes.map((node) => ({ ...node, state: this.wayworks.get(node.key)! })), elapsedMs);
+    const linked = advanceMachineLinks(nodes.map((node) => ({ ...node, state: this.wayworks.get(node.key)! })), elapsedMs, this.wayworksMaterialTopology);
     if (linked.reason === "ok") for (const [key, state] of linked.states) this.wayworks.set(key, state);
     // Adjacent vault terminals receive through their existing immutable item authority.
     for (const node of nodes) for (const [dx, dy, dz] of [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0], [0, 1, 0], [0, -1, 0]]) {
@@ -13030,14 +13154,46 @@ export class VoxelEngine {
       if (!model) { model = createWayworksModel(state.kind); this.wayworksModels.set(key, model); this.scene.add(model); }
       model.visible = true; model.position.set(x, y - .5, z); model.rotation.y = blockFacingYaw(normalizeBlockFacing(state.facing));
       const fluidCapacity = workshopFluidCapacity(state.kind, state.workshop), gasCapacity = workshopGasCapacity(state.kind, state.workshop);
+      const device = this.pressureRuntime?.devices.get(key) ?? this.guestPressure?.doors.find(door => door.key === key);
+      const connected: Partial<Record<PressureModelFace, boolean>> = {};
+      for (const [dx, dy, dz] of [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0], [0, 1, 0], [0, -1, 0]]) {
+        const neighbor = this.wayworks.get(blockKey(x + dx, y + dy, z + dz));
+        const face = localFaceForWorldDirection(state.facing, dx, dy, dz);
+        const resource = state.kind === "liquid-pipe" ? "fluid" : state.kind === "gasline" ? "chemical" : state.kind === "heat-conduit" ? "heat" : null;
+        connected[face] = !!neighbor && !!resource && this.world.getBlock(x + dx, y + dy, z + dz) !== undefined
+          && neighbor.ownerId === state.ownerId && neighbor.workshop.channel === state.workshop.channel
+          && !["disabled", "service"].includes(state.workshop.resourcePorts[resource][face])
+          && !["disabled", "service"].includes(neighbor.workshop.resourcePorts[resource][localFaceForWorldDirection(neighbor.facing, -dx, -dy, -dz)]);
+      }
       updateWayworksModel(model, { fill: state.energyJ / Math.max(1, machineCapacity(state.kind, state.workshop)),
         progress: state.workshop.cycle ? state.workshop.cycle.progressMs / state.workshop.cycle.durationMs : 0,
-        fluidFill: gasCapacity ? (state.workshop.chemical?.amount ?? 0) / gasCapacity : fluidCapacity ? (state.workshop.fluid?.amount ?? 0) / fluidCapacity : 0,
+        fluidFill: gasCapacity ? workshopStoredTotal(state.workshop, "chemical") / gasCapacity : fluidCapacity ? workshopStoredTotal(state.workshop, "fluid") / fluidCapacity : 0,
+        connected, open: device?.open ? 1 : 0, locked: device?.locked, alarm: !!this.pressureRuntime?.devices.get(key)?.airlock?.error || !!this.pressureRuntime?.gateErrors.get(key), gateWidth: device?.gateWidth, gateHeight: device?.gateHeight,
         active: !this.paused && state.enabled && ["generating", "transferring", "working"].includes(state.status), time: performance.now() / 1000 });
       const resource = this.wayworksOverlayResource;
       updateWayworksPortOverlay(model, wrench && distance < 8, resource === "energy" ? state.ports : state.workshop.resourcePorts[resource], resource);
     }
+    for (const key of this.pressureStructures) {
+      const [x, y, z] = key.split(",").map(Number), type = this.world.getBlock(x, y, z);
+      if (Math.hypot(x - this.position.x, y - this.position.y, z - this.position.z) > radius || type !== BlockId.ReinforcedWindow && type !== BlockId.HangarFrame) continue;
+      const modelKey = `structure:${key}`, kind = type === BlockId.ReinforcedWindow ? "reinforced-window" : "hangar-frame";
+      let model = this.wayworksModels.get(modelKey);
+      if (model && model.userData.pressureKind !== kind) { this.clearWayworksModels(modelKey); model = undefined; }
+      if (!model) { model = createPressureModel(kind); this.wayworksModels.set(modelKey, model); this.scene.add(model); }
+      visible.add(modelKey); model.position.set(x, y - .5, z); model.rotation.y = blockFacingYaw(this.worldBlockFacing(x, y, z));
+      updatePressureModel(model, { time: performance.now() / 1000 });
+    }
     for (const [key] of this.wayworksModels) if (!visible.has(key)) this.clearWayworksModels(key);
+    const focused = wrench && this.pressureRuntime ? this.activeWayworksKey ?? [...this.pressureRuntime.devices.keys()].find(key => {
+      const point = pressurePoint(key)!; return Math.hypot(point.x - this.position.x, point.y - this.position.y, point.z - this.position.z) < 6;
+    }) : null;
+    if (!focused || !this.pressureRuntime) { if (this.pressureOverlay) this.pressureOverlay.visible = false; }
+    else {
+      const diagnostic = this.pressureRuntime.diagnosticsFor(focused);
+      const signature = JSON.stringify([focused, diagnostic.device?.links, diagnostic.zone?.zoneId, diagnostic.zone?.status, diagnostic.topologyRevision, diagnostic.leak]);
+      if (signature !== this.pressureOverlaySignature) { disposePressureOverlay(this.pressureOverlay); this.pressureOverlay = createPressureOverlay(focused, diagnostic); this.pressureOverlaySignature = signature; this.scene.add(this.pressureOverlay); }
+      if (this.pressureOverlay) this.pressureOverlay.visible = true;
+    }
   }
 
   registerWaygridBlock(type: BlockId, key: string) {
@@ -13991,7 +14147,7 @@ export class VoxelEngine {
   }
 
   equipmentClick(slot: EquipmentSlot, button: "left" | "right", shift = false) {
-    if (!this.completingEquipmentSwap && (slot === "back" || slot === "head") && (!this.bodyContext().environment.breathable || this.headSubmerged)) {
+    if (!this.completingEquipmentSwap && (slot === "back" || slot === "head") && (!this.personalEnvironment().breathable || this.headSubmerged)) {
       if (this.equipmentSwap) { this.equipmentSwap = null; this.events.onToast("Equipment swap cancelled; original items retained."); this.emitHud(true); return; }
       this.equipmentSwap = { slot, button, shift, seconds: 1.5, signature: JSON.stringify([this.equipment[slot], this.cursor]) };
       this.events.onToast("Seal opening: resume play for the 1.5s swap. Click the slot again to cancel.");
@@ -14547,6 +14703,8 @@ export class VoxelEngine {
       if (recipe.table && size < 3) continue;
       if (blueprintCraftingLock(this.blueprints, recipe.id, recipe.blueprint)) continue;
       if (recipe.width !== width || recipe.height !== height) continue;
+      if (recipe.output.item >= BlockId.LiquidPipe && recipe.output.item <= Item.PressurePolymer
+        && this.craftGrid.some(slot => slot && (slot.durability !== undefined || slot.metadata && Object.keys(slot.metadata).length))) continue;
       for (const pattern of recipePatterns(recipe)) {
         let matches = true;
         for (let y = 0; y < size && matches; y += 1) for (let x = 0; x < size; x += 1) {
@@ -19623,6 +19781,14 @@ export class VoxelEngine {
       const playerEditFeedback = this.world.beginPlayerEditFeedback?.("place");
       this.world.setBlocksBatch(placedEdits, true, true);
       if (playerEditFeedback !== undefined) this.world.completePlayerEditFeedback?.(playerEditFeedback);
+    } else if (pressureDoorUpper(type)) {
+      const upper = this.world.getBlock(x, y + 1, z); replacedUpper = upper;
+      if (y + 1 > MAX_Y || upper === undefined || (!BLOCKS[upper]?.replaceable && upper !== BlockId.Air) || !BLOCKS[this.world.getBlock(x, y - 1, z) ?? BlockId.Air]?.solid) {
+        this.events.onToast("A pressure door needs two clear cells on solid ground."); return;
+      }
+      const facing = blockFacingForYaw(this.yaw);
+      placedEdits = [{ x, y, z, type, facing }, { x, y: y + 1, z, type: pressureDoorUpper(type)!, facing }];
+      this.world.setBlocksBatch(placedEdits, true, true); this.world.setBlockFacing(x, y, z, facing, true);
     } else if (type === BlockId.DoorClosedLower || type === BlockId.WroughtIronDoorClosedLower) {
       const upper = this.world.getBlock(x, y + 1, z);
       replacedUpper = upper;
@@ -19653,7 +19819,7 @@ export class VoxelEngine {
       if (requestedType === BlockId.BedNorthFoot) {
         const partner = placedEdits[1];
         this.world.setBlocksBatch([{ x, y, z, type: current ?? BlockId.Air }, { x: partner.x, y: partner.y, z: partner.z, type: replacedPartner ?? BlockId.Air }], true, true);
-      } else if (this.isDoor(type)) this.world.setBlocksBatch([{ x, y, z, type: current ?? BlockId.Air }, { x, y: y + 1, z, type: replacedUpper ?? BlockId.Air }], true, true);
+      } else if (this.isDoor(type) || pressureDoorUpper(type)) this.world.setBlocksBatch([{ x, y, z, type: current ?? BlockId.Air }, { x, y: y + 1, z, type: replacedUpper ?? BlockId.Air }], true, true);
       else this.world.setBlock(x, y, z, current ?? BlockId.Air, true, true);
       this.events.onToast(occupiedRemote ? "You cannot place a block inside another player." : "You cannot place a block inside yourself.");
       return;
@@ -20055,9 +20221,14 @@ export class VoxelEngine {
 
   breakTarget() {
     if (!this.target || this.target.type === BlockId.Bedrock || Boolean(BLOCKS[this.target.type]?.liquid)) return;
+    const lower = pressureDoorLower(this.target.type);
+    if (lower) {
+      if (this.world.getBlock(this.target.x, this.target.y - 1, this.target.z) !== lower) { this.events.onToast("The pressure door base is missing."); return; }
+      this.target = { ...this.target, y: this.target.y - 1, type: lower };
+    }
     const { x, y, z, type } = this.target;
     const workshop = this.wayworks.get(blockKey(x, y, z));
-    if (workshop && (workshop.energyJ > 0 || workshop.workshop.fluid || workshop.workshop.chemical || workshop.workshop.burnJ > 0 || workshop.workshop.heatJ > 0
+    if (workshop && (workshop.energyJ > 0 || workshopStoredTotal(workshop.workshop, "fluid") > 0 || workshopStoredTotal(workshop.workshop, "chemical") > 0 || workshop.workshop.burnJ > 0 || workshop.workshop.heatJ > 0 || (workshop.workshop.process?.filterUsedMl ?? 0) > 0
       || Object.values(workshop.workshop.slots).some(Boolean) || Object.values(workshop.workshop.upgrades).some((count) => count > 0))
       && (this.mode !== "survival" || !this.toolCanHarvest(type, this.selectedSlot()))) {
       this.events.onToast("This machine contains resources. Use the correct pickaxe in Survival for sealed pickup, or empty it first."); return;
@@ -20078,7 +20249,10 @@ export class VoxelEngine {
     const harvested = this.toolCanHarvest(type, this.selectedSlot());
     const playerEditFeedback = this.world.beginPlayerEditFeedback?.("break");
     let brokenEdits: Array<{ x: number; y: number; z: number; type: BlockId }>;
-    if (this.isDoor(type)) {
+    if (pressureDoorUpper(type)) {
+      brokenEdits = [{ x, y, z, type: BlockId.Air }, { x, y: y + 1, z, type: BlockId.Air }];
+      this.world.setBlocksBatch(brokenEdits, true, true);
+    } else if (this.isDoor(type)) {
       const lowerY = this.doorLowerY(type, y);
       brokenEdits = [{ x, y: lowerY, z, type: BlockId.Air }, { x, y: lowerY + 1, z, type: BlockId.Air }];
       this.world.setBlocksBatch(brokenEdits, true, true);
@@ -20546,7 +20720,7 @@ export class VoxelEngine {
   }
 
   private usesFieldLifeSupport() {
-    return !this.bodyContext().environment.breathable || Boolean(this.equipment?.back && ITEMS[this.equipment.back.item]?.lifeSupportKind) || this.equipment?.head?.item === Item.FieldBreatherHelmet;
+    return !this.personalEnvironment().breathable || Boolean(this.equipment?.back && ITEMS[this.equipment.back.item]?.lifeSupportKind) || this.equipment?.head?.item === Item.FieldBreatherHelmet;
   }
 
   private updatePersonalLifeSupport(dt: number) {
@@ -20573,7 +20747,7 @@ export class VoxelEngine {
       }
     }
     const submerged = liquidKindForBlock(this.world.getBlock(Math.floor(this.position.x + .5), Math.floor(this.position.y + this.cameraEyeHeight + .5), Math.floor(this.position.z + .5))) === "water";
-    const result = stepLifeSupport(this.equipment, this.lifeSupportState, this.bodyContext().environment, dt, {
+    const result = stepLifeSupport(this.equipment, this.lifeSupportState, this.personalEnvironment(), dt, {
       submerged: submerged && this.usesFieldLifeSupport(), effort: this.sprinting ? 1 : 0,
       immune: this.mode === "builder", consume: this.multiplayer?.role !== "guest", swapSeconds: this.equipmentSwap?.seconds ?? this.socketSwap?.seconds ?? 0,
     });
@@ -20605,7 +20779,7 @@ export class VoxelEngine {
       const pose = remote.target;
       const equipment = Object.fromEntries(Object.entries(current.equipment).map(([key, slot]) => [key, inventorySlotFromNetwork(slot ?? null)]));
       const submerged = liquidKindForBlock(this.world.getBlock(Math.round(pose.x), Math.floor(pose.y + 1.9), Math.round(pose.z))) === "water";
-      const result = stepLifeSupport(equipment, normalizeLifeSupportState(current.lifeSupport), this.bodyContext().environment, elapsed,
+      const result = stepLifeSupport(equipment, normalizeLifeSupportState(current.lifeSupport), this.pressureRuntime?.environmentAt({ x: Math.round(pose.x), y: Math.floor(pose.y + 1.9), z: Math.round(pose.z) }) ?? this.bodyContext().environment, elapsed,
         { submerged: submerged && Boolean(equipment.back || equipment.head?.item === Item.FieldBreatherHelmet), effort: pose.sprinting ? 1 : 0, immune: this.mode === "builder", swapSeconds: pose.lifeSupportSwap ? elapsed : 0 });
       if (pose.evaThrust) result.equipment.back = maneuverImpulse(result.equipment.back, elapsed, submerged, this.mode === "builder").back;
       if (!result.hud.relevant && !current.lifeSupport?.hypoxiaSeconds) continue;
@@ -20629,7 +20803,7 @@ export class VoxelEngine {
   lifeSupportAction(operation: LifeSupportOperation) {
     if (this.equipmentSwap) { this.events.onToast("Finish or cancel the current equipment swap first."); return false; }
     if (this.socketSwap) { this.socketSwap = null; this.events.onToast("Socket swap cancelled; original tanks retained."); this.emitHud(true); return false; }
-    if (!this.completingEquipmentSwap && operation.kind === "socket" && (!this.bodyContext().environment.breathable || this.headSubmerged)) {
+    if (!this.completingEquipmentSwap && operation.kind === "socket" && (!this.personalEnvironment().breathable || this.headSubmerged)) {
       const preview = operateLifeSupport(this.equipment.back, this.cursor, operation);
       if (!preview.ok) { this.events.onToast(preview.reason); return false; }
       this.socketSwap = { operation, seconds: 1.5, signature: JSON.stringify([this.equipment.back, this.cursor]) };
@@ -21151,6 +21325,8 @@ export class VoxelEngine {
     for (let x = minX; x <= maxX; x += 1) for (let y = minY; y <= maxY; y += 1) for (let z = minZ; z <= maxZ; z += 1) {
       const type = this.world.getBlock(x, y, z);
       if (type === undefined) return true;
+      if (this.pressureGateClosed({ x, y, z })) return true;
+      if (this.pressureDoorOpen({ x, y, z })) continue;
       if (this.isDoor(type)) {
         if (this.playerIntersectsDoorCell(position, x, y, z, type, height)) return true;
         continue;
@@ -26018,6 +26194,8 @@ export class VoxelEngine {
       for (let blockY = minY; blockY <= maxY; blockY += 1) {
         const type = this.world.getBlock(blockX, blockY, blockZ);
         if (type === undefined) return false;
+        if (this.pressureGateClosed({ x: blockX, y: blockY, z: blockZ })) return false;
+        if (this.pressureDoorOpen({ x: blockX, y: blockY, z: blockZ })) continue;
         const walkThrough = typeof this.world.isWalkThrough === "function"
           ? this.world.isWalkThrough(type)
           : !BLOCKS[type]?.solid;
@@ -31256,7 +31434,11 @@ export class VoxelEngine {
 
   clearEntities() {
     this.clearWayworksModels(); this.wayworks?.clear(); this.activeWayworksKey = null; this.wayworksAccumulator = 0;
-    this.wayworksTopology?.clear(); this.wayworksNetworks = []; this.wayworksTopologyRevision = 0; this.wayworksClipboard = null;
+    this.pressureRuntime?.dispose(); this.pressureRuntime = null;
+    if (this.pressureEditObserver) this.world.blockEditObservers.delete(this.pressureEditObserver);
+    this.pressureEditObserver = null; this.guestPressure = null; this.pressureStructures.clear();
+    disposePressureOverlay(this.pressureOverlay); this.pressureOverlay = null; this.pressureOverlaySignature = "";
+    this.wayworksTopology?.clear(); this.wayworksMaterialTopology?.clear(); this.wayworksNetworks = []; this.wayworksTopologyRevision = 0; this.wayworksClipboard = null;
     this.wayworksActorReady?.clear(); this.wayworksActorClipboards?.clear();
     this.celestialCreatureVelocity?.clear();
     this.universeTimeSeconds = undefined; this.clockLocalTime = undefined; this.clockLocalDay = undefined;
@@ -32346,7 +32528,7 @@ export class VoxelEngine {
         } else if (item === Item.Banana) {
           addBox([0.1, 0.34, 0.09], [-0.08, 0, 0], 0xf4d34f, [0, 0, -0.5]);
           addBox([0.1, 0.34, 0.09], [0.08, 0.04, 0], 0xf4d34f, [0, 0, 0.5]);
-        } else if (definition.heldModel || definition.lifeSupportKind || machineKindForBlock(item) || isWayworksItem(item) || item === Item.FieldWrench || definition.iconKind === "shield" || item === BlockId.CraftingTable || item === Item.DeepgearLanternItem || definition.useKind === "net" || (definition.useKind === "release-creature" && definition.creatureKind
+        } else if (definition.heldModel || definition.lifeSupportKind || machineKindForBlock(item) || isWayworksItem(item) || isPressurePart(item) || item === BlockId.ReinforcedWindow || item === BlockId.HangarFrame || item === Item.FieldWrench || definition.iconKind === "shield" || item === BlockId.CraftingTable || item === Item.DeepgearLanternItem || definition.useKind === "net" || (definition.useKind === "release-creature" && definition.creatureKind
           && BUTTERFLY_ORDER.includes(definition.creatureKind as ButterflyKind))) {
           const selectedSlot = this.selectedSlot();
           const filledCaptureOrb = item === Item.CaptureOrb && Boolean(captureOrbFromInventorySlot(selectedSlot)?.creature);
@@ -32622,6 +32804,7 @@ export class VoxelEngine {
     this.updateChestModel(dt);
     if (!this.agentMode) this.updateHeldItem(dt);
     const multiplayerGuest = this.multiplayer?.role === "guest" && this.multiplayerReceivedSnapshot;
+    if (this.running && !this.titleMode && multiplayerGuest) this.renderWayworks();
     if (this.running && !this.titleMode && !multiplayerGuest) {
       this.updateFurnaces(dt);
       this.updateWayworks(dt);
@@ -32797,6 +32980,8 @@ export class VoxelEngine {
     return {
       isLoaded: (x: number, y: number, z: number) => this.world.getBlock(x, y, z) !== undefined,
       isPassable: (x: number, y: number, z: number) => {
+        if (this.pressureGateClosed({ x, y, z })) return false;
+        if (this.pressureDoorOpen({ x, y, z })) return true;
         const block = this.world.getBlock(x, y, z);
         return block !== undefined && (!BLOCKS[block]?.solid || this.isDoor(block) || toggleFenceGate(block) !== null);
       },
@@ -33080,23 +33265,27 @@ export class VoxelEngine {
       if (command.kind === "workshop_place") {
         const slot = inventory[index], kind = slot ? machineKindForBlock(slot.item) : undefined;
         if (!slot || !kind || !validCustodyItem(slot) || this.wayworks.size >= 256 || (current !== BlockId.Air && !BLOCKS[current]?.replaceable)) return blocked("workshop_place_invalid", "Select a valid machine and an empty cell; a location supports 256 machines.");
-        const edit = { ...target, type: slot.item as BlockId, facing: Number(args.facing) };
-        if (blockEditIntersectsPlayer(edit, { x: this.position.x, y: this.position.y, z: this.position.z }, this.currentPlayerHeight())
-          || [...this.remotePlayers.values()].some(remote => remote.model.modelKind !== "drone" && blockEditIntersectsPlayer(edit, remote.target, PLAYER_HEIGHT * playerVariantHeightScale(remote.target.variant ?? "male")))) return blocked("workshop_occupied", "The machine would intersect a human player.");
+        const edit = { ...target, type: slot.item as BlockId, facing: normalizeBlockFacing(Number(args.facing)) }, upper = pressureDoorUpper(edit.type);
+        const edits = upper ? [edit, { ...edit, y: edit.y + 1, type: upper }] : [edit];
+        if (upper && (edit.y + 1 > MAX_Y || !BLOCKS[this.world.getBlock(edit.x, edit.y - 1, edit.z) ?? BlockId.Air]?.solid)) return blocked("workshop_support_required", "A pressure door needs two clear cells on solid ground.");
+        if (edits.some(part => { const block = this.world.getBlock(part.x, part.y, part.z); return block === undefined || block !== BlockId.Air && !BLOCKS[block]?.replaceable; })) return blocked("workshop_occupied", "Both pressure-door cells must be loaded and clear.");
+        if (edits.some(part => blockEditIntersectsPlayer(part, { x: this.position.x, y: this.position.y, z: this.position.z }, this.currentPlayerHeight())
+          || [...this.remotePlayers.values()].some(remote => remote.model.modelKind !== "drone" && blockEditIntersectsPlayer(part, remote.target, PLAYER_HEIGHT * playerVariantHeightScale(remote.target.variant ?? "male"))))) return blocked("workshop_occupied", "The machine would intersect a human player.");
         const state = placedWorkshopMachine(kind, slot, this.world.locationScope?.locationId ?? "home-preview", "local", edit.facing);
         state.workshop.trusted = [...new Set([...state.workshop.trusted, command.agentId])].slice(-16);
-        this.world.setBlock(target.x, target.y, target.z, edit.type, true, true); this.world.setBlockFacing?.(target.x, target.y, target.z, normalizeBlockFacing(edit.facing), true);
+        this.world.setBlocksBatch(edits, true, true); this.applyBlockEditFacings(edits, true);
         this.wayworks.set(key, state); inventory[index] = slot.count > 1 ? { ...cloneSlot(slot)!, count: slot.count - 1 } : null;
-        this.publishBlockEdits([edit], "place");
+        this.publishBlockEdits(edits, "place");
       } else {
         const state = this.wayworks.get(key);
         if (!state || machineKindForBlock(current) !== state.kind || args.expectedMachineRevision !== state.revision || !this.workshopActorAccess(state, command.agentId, { kind: "rotate" })) return blocked("workshop_pickup_denied", "Machine changed or its owner has not trusted this drone.");
         if (!inventory.some(slot => this.toolCanHarvest(current, slot))) return blocked("workshop_pickaxe_required", "Sealed pickup requires the correct pickaxe in the drone pack.");
         const moved = transferAgentStacksExact([{ item: current, count: 1, metadata: { wayworks: structuredClone(state) } }], inventory, { sourceSlot: 0, destinationSlot: index, count: 1 });
         if (!moved.ok) return blocked("workshop_pack_full", "Choose an empty destination slot for the sealed machine.");
-        this.world.setBlock(target.x, target.y, target.z, BlockId.Air, true, true); this.wayworks.delete(key); this.clearWayworksModels(key);
+        const edits = [{ ...target, type: BlockId.Air }, ...(pressureDoorUpper(current) ? [{ ...target, y: target.y + 1, type: BlockId.Air }] : [])];
+        this.world.setBlocksBatch(edits, true, true); this.wayworks.delete(key); this.clearWayworksModels(key);
         this.agentInventories.set(command.agentId, moved.destination);
-        this.publishBlockEdits([{ ...target, type: BlockId.Air }], "break");
+        this.publishBlockEdits(edits, "break");
       }
       this.saveSoon();
       return completed("workshop_moved", "The host committed the machine and its exact stores together.", { inventoryRevision: this.bumpAgentInventoryRevision(command.agentId), targetId: key });
@@ -33106,11 +33295,17 @@ export class VoxelEngine {
       const state = this.wayworks.get(key);
       if (!target || !state || Math.hypot(target.x - pose.x, target.y - pose.y, target.z - pose.z) > 5.5
         || machineKindForBlock(this.world.getBlock(target.x, target.y, target.z)) !== state.kind || !this.workshopActorAccess(state, command.agentId)) return blocked("workshop_unavailable", "Machine is unavailable, private or out of reach.");
-      if (command.kind === "workshop_get") return completed("workshop_ready", "Host-authored machine state and revision.", { targetId: key, machine: structuredClone(state), inventoryRevision: this.agentInventoryRevisions.get(command.agentId) ?? 0 });
+      if (command.kind === "workshop_get") return completed("workshop_ready", "Host-authored machine state and revision.", { targetId: key, machine: structuredClone(state), pressure: this.pressureRuntime?.devices.has(key) ? this.pressureRuntime.diagnosticsFor(key) : undefined, inventoryRevision: this.agentInventoryRevisions.get(command.agentId) ?? 0 });
       const operation = parseWorkshopAction(args.operation), inventory = this.agentInventories.get(command.agentId) ?? [], index = Number(args.inventorySlot);
       if (!operation || !Number.isInteger(index) || index < 0 || index >= inventory.length
         || args.expectedInventoryRevision !== (this.agentInventoryRevisions.get(command.agentId) ?? 0) || args.expectedMachineRevision !== state.revision) return blocked("workshop_stale", "Refresh machine and inventory revisions before retrying.");
       if (!this.agentAuthority.get(command.agentId)?.granted.includes("inventory.self.write") || !this.workshopActorAccess(state, command.agentId, operation)) return blocked("workshop_denied", "This operation requires inventory custody and machine-owner permission.");
+      if (operation.kind === "pressure") {
+        const result = this.pressureRuntime?.operate(key, command.agentId, inventory[index]?.item, state.revision, operation.action, performance.now());
+        if (!result?.ok) return blocked("pressure_rejected", result?.reason ?? "Pressure coordinator unavailable.");
+        this.saveSoon();
+        return completed("pressure_committed", result.reason, { machine: structuredClone(this.wayworks.get(key)), pressure: this.pressureRuntime?.diagnosticsFor(key), inventoryRevision: this.agentInventoryRevisions.get(command.agentId) ?? 0 });
+      }
       if ((operation.kind === "crank" || operation.kind === "charge") && performance.now() < (this.wayworksActorReady.get(command.agentId) ?? 0)) return blocked("workshop_cooldown", "Wait for the previous effort or transfer to settle.");
       const equipment = this.agentEquipment.get(command.agentId) ?? blankEquipment();
       const chargeTarget = operation.kind === "charge" ? operation.target ?? "held" : "held";
@@ -33276,7 +33471,7 @@ export class VoxelEngine {
       const targets: Array<{ x: number; y: number; z: number; type: BlockId }> = [];
       for (let x = Math.floor(pose.x - radius); x <= Math.ceil(pose.x + radius) && targets.length < 128; x += 1) for (let z = Math.floor(pose.z - radius); z <= Math.ceil(pose.z + radius) && targets.length < 128; z += 1) for (let y = Math.floor(pose.y - radius); y <= Math.ceil(pose.y + radius); y += 1) {
         const type = this.world.getBlock(x, y, z);
-        if (type !== undefined && requested.has(type) && !isMatureCultivatedPlant(type) && !machineKindForBlock(type)) targets.push({ x, y, z, type });
+        if (type !== undefined && requested.has(type) && !isMatureCultivatedPlant(type) && !machineKindForBlock(type) && !pressureDoorLower(type)) targets.push({ x, y, z, type });
       }
       if (!targets.length) return completed("resource_not_found", "No matching resource blocks were found inside the bounded loaded area.", { gathered: 0 });
       const first = targets[0];
@@ -33313,14 +33508,14 @@ export class VoxelEngine {
       const removals = Array.isArray(args.removals) ? (args.removals as Array<{ x: number; y: number; z: number }>).map((cell) => ({ ...cell })) : [];
       const duplicate = new Set<string>();
       const warnings: string[] = [];
-      if (removals.some(cell => machineKindForBlock(this.world.getBlock(cell.x, cell.y, cell.z)))) return blocked("workshop_typed_pickup_required", "Use workshop_pickup to preserve machine contents.");
+      if (removals.some(cell => { const type = this.world.getBlock(cell.x, cell.y, cell.z); return machineKindForBlock(type) || type !== undefined && pressureDoorLower(type); })) return blocked("workshop_typed_pickup_required", "Use workshop_pickup to preserve machine contents.");
       for (const placement of placements) {
         const cellKey = blockKey(placement.x, placement.y, placement.z);
         if (duplicate.has(cellKey)) return blocked("duplicate_build_cell", `The build plan addresses ${cellKey} more than once.`);
         duplicate.add(cellKey);
         const definition = BLOCKS[placement.block as BlockId];
         const current = this.world.getBlock(placement.x, placement.y, placement.z);
-        if (machineKindForBlock(placement.block) || machineKindForBlock(current)) return blocked("workshop_typed_placement_required", "Use workshop_place or workshop_pickup for instance-preserving machines.");
+        if (machineKindForBlock(placement.block) || pressureDoorLower(placement.block) || machineKindForBlock(current) || current !== undefined && pressureDoorLower(current)) return blocked("workshop_typed_placement_required", "Use workshop_place or workshop_pickup for instance-preserving machines.");
         if (!definition || placement.block === BlockId.Air || placement.y < MIN_Y || placement.y > MAX_Y) return blocked("invalid_build_cell", `The placement at ${cellKey} uses an invalid block or world height.`);
         if (current === undefined) return blocked("build_chunk_unloaded", `The placement at ${cellKey} is outside loaded host terrain.`);
         if (current !== BlockId.Air && !BLOCKS[current]?.replaceable && placement.replace !== true) return blocked("build_cell_occupied", `The placement at ${cellKey} would replace ${BLOCKS[current]?.name ?? "a solid block"} without explicit replace permission.`);
@@ -33844,7 +34039,7 @@ export class VoxelEngine {
     const refreshInterval = this.gameplayOverlayOpen ? HUD_OVERLAY_REFRESH_MS : HUD_VISUAL_REFRESH_MS;
     if (!force && now - this.lastHudTime < refreshInterval) return;
     this.lastHudTime = now;
-    this.lifeSupportHud = stepLifeSupport(this.equipment, this.lifeSupportState ?? EMPTY_LIFE_SUPPORT, this.bodyContext().environment, 0,
+    this.lifeSupportHud = stepLifeSupport(this.equipment, this.lifeSupportState ?? EMPTY_LIFE_SUPPORT, this.personalEnvironment(), 0,
       { submerged: this.headSubmerged && this.usesFieldLifeSupport(), immune: this.mode === "builder", consume: false, swapSeconds: this.equipmentSwap?.seconds ?? this.socketSwap?.seconds ?? 0 }).hud;
     this.updateCraftResult();
     const totalMinutes = Math.floor((this.worldTime % 1) * 24 * 60);
@@ -34318,6 +34513,7 @@ export class VoxelEngine {
       primeEncounters: Object.fromEntries(this.primeEncounters),
       digitalItemVault: normalizeDigitalItemVault(this.digitalItemVault),
       wayworks: Object.fromEntries(this.wayworks),
+      pressure: this.pressureRuntime?.snapshot(),
       digitalCreatureArchive: normalizeDigitalCreatureArchive(this.digitalCreatureArchive),
       golemForges: Object.fromEntries([...this.golemForges.entries()].map(([key, value]) => [key, normalizeGolemForgeState(value)])),
       alchemyStands: Object.fromEntries(this.alchemyStands.entries()),

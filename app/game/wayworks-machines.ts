@@ -2,10 +2,12 @@ import { cloneSlot, Item, maxStack, type InventorySlot } from "./data";
 import { machineCapacity, machineRate, normalizeMachine, type MachineKind, type MachineState } from "./wayworks";
 import { machineRecipe, machineRecipes, recipeCost, type MachineRecipe } from "./wayworks-recipes";
 import { resourceItemSignature, transferResource, type ResourceEndpoint, type ResourcePacket } from "./wayworks-resources";
-import { validWorkshopItem, workshopFluidCapacity, workshopGasCapacity, workshopHeatCapacity, workshopRunning,
-  type WorkshopSlot, type WorkshopState } from "./wayworks-stores";
+import { validWorkshopItem, workshopFluidCapacity, workshopHeatCapacity, workshopReservoirCapacity, workshopRunning,
+  type ProcessStoreSlot, type WorkshopSlot, type WorkshopState } from "./wayworks-stores";
+import { advanceChemistry, chemicalStore, chemistryAcceptsItem, chemistryReservoirs, chemistrySlots, setChemicalStore, type ChemistryEnvironment } from "./pressure-chemistry";
+import { chemistryMachine } from "./pressure-catalog";
 
-export type MachineResourceSlot = WorkshopSlot | "fluid" | "chemical" | "heat" | "energy";
+export type MachineResourceSlot = WorkshopSlot | ProcessStoreSlot | "fluid" | "chemical" | "heat" | "energy";
 export function machineEndpoint(state: MachineState, key: string, slot: MachineResourceSlot): ResourceEndpoint {
   const base = { endpointId: `${key}/${slot}`, locationId: state.locationId, revision: state.revision };
   if (slot === "energy" || slot === "heat") {
@@ -13,10 +15,11 @@ export function machineEndpoint(state: MachineState, key: string, slot: MachineR
     return { ...base, kind: slot, capacity: slot === "energy" ? machineCapacity(state.kind, state.workshop) : workshopHeatCapacity(state.workshop),
       content: amount > 0 ? { kind: slot, resource: "joules", quantity: amount } : null };
   }
-  if (slot === "fluid" || slot === "chemical") {
-    const store = state.workshop[slot];
-    return { ...base, kind: slot, capacity: slot === "fluid" ? workshopFluidCapacity(state.kind, state.workshop) : workshopGasCapacity(state.kind, state.workshop),
-      content: store ? { kind: slot, resource: store.resource, quantity: store.amount } : null };
+  if (slot === "fluid" || slot === "chemical" || slot === "fluidAux" || slot === "chemicalAux" || slot === "chemicalReagent") {
+    const store = chemicalStore(state.workshop, slot);
+    const kind = slot === "fluid" || slot === "fluidAux" ? "fluid" : "chemical";
+    return { ...base, kind, capacity: workshopReservoirCapacity(state.kind, state.workshop, slot),
+      content: store ? { kind, resource: store.resource, quantity: store.amount } : null };
   }
   const item = state.workshop.slots[slot];
   return { ...base, kind: "item", capacity: item ? maxStack(item.item) : 64,
@@ -25,16 +28,20 @@ export function machineEndpoint(state: MachineState, key: string, slot: MachineR
 
 /** Only call with an after-image produced by a successful resource transaction. */
 export function withMachineEndpoint(state: MachineState, slot: MachineResourceSlot, endpoint: ResourceEndpoint): MachineState {
-  const next = { ...state, revision: endpoint.revision, workshop: { ...state.workshop, slots: { ...state.workshop.slots } } };
+  const next = { ...state, revision: endpoint.revision, workshop: { ...state.workshop, slots: { ...state.workshop.slots },
+    ...(state.workshop.process ? { process: { ...state.workshop.process } } : {}) } };
   const packet = endpoint.content;
   if (slot === "energy") next.energyJ = packet?.quantity ?? 0;
   else if (slot === "heat") next.workshop.heatJ = packet?.quantity ?? 0;
-  else if (slot === "fluid" || slot === "chemical") next.workshop[slot] = packet && packet.kind !== "item" ? { resource: packet.resource, amount: packet.quantity } : null;
+  else if (slot === "fluid" || slot === "chemical" || slot === "fluidAux" || slot === "chemicalAux" || slot === "chemicalReagent") {
+    setChemicalStore(next.workshop, slot, packet && packet.kind !== "item" ? { resource: packet.resource, amount: packet.quantity } : null);
+  }
   else next.workshop.slots[slot] = packet?.kind === "item" ? cloneSlot(packet.slot) : null;
   return next;
 }
 
 export function machineSlots(kind: MachineKind): readonly WorkshopSlot[] {
+  if (chemistryMachine(kind)) return chemistrySlots(kind);
   if (kind === "heat-engine" || kind === "biofuel-engine") return ["fuel"];
   const recipes = machineRecipes(kind);
   if (!recipes.length) return [];
@@ -51,7 +58,7 @@ export function transferMachineItem(state: MachineState, key: string, slot: Work
   if (direction === "insert" && (slot === "output" || slot === "byproduct")) return fail("output-only");
   if (direction === "insert" && held) {
     const accepted = slot === "fuel" ? state.kind === "heat-engine" ? held.item === Item.Coal || held.item === Item.Charcoal : state.kind === "biofuel-engine" && held.item === Item.BiofuelPellet
-      : machineRecipes(state.kind).some(recipe => (slot === "reagent" ? recipe.reagent : recipe.input)?.items.includes(held.item));
+      : chemistryAcceptsItem(state.kind, slot, held.item) || machineRecipes(state.kind).some(recipe => (slot === "reagent" ? recipe.reagent : recipe.input)?.items.includes(held.item));
     if (!accepted) return fail("That item is not an ingredient for this machine slot.");
   }
   if (direction === "extract" && state.workshop.cycle && (slot === "input" || slot === "reagent")) return fail("cycle-reserved");
@@ -83,23 +90,29 @@ function canOutput(slot: InventorySlot | null, output: MachineRecipe["output"] |
 const subtract = (slot: InventorySlot, count: number): InventorySlot | null => slot.count > count ? { ...slot, count: slot.count - count } : null;
 const add = (slot: InventorySlot | null, output: MachineRecipe["output"]): InventorySlot => ({ item: output.item, count: (slot?.count ?? 0) + output.count });
 
-export type MachineStep = { state: MachineState; consumedJ: number; generatedJ: number; fuelConsumed: number; waterConsumedMl: number; completed: string | null };
+export type MachineStep = { state: MachineState; consumedJ: number; generatedJ: number; radiatedJ: number; fuelConsumed: number; waterConsumedMl: number; completed: string | null };
 /** No wall clock, inventory authority or world writes. Returned finite debit is committed by the host. */
-export function advanceMachine(input: MachineState, elapsedMs: number, environment: { waterAvailableMl?: number } = {}): MachineStep {
+export function advanceMachine(input: MachineState, elapsedMs: number, environment: ChemistryEnvironment & { waterAvailableMl?: number } = {}): MachineStep {
   const state = normalizeMachine(input, input.kind, input.locationId, input.ownerId);
-  const result: MachineStep = { state, consumedJ: 0, generatedJ: 0, fuelConsumed: 0, waterConsumedMl: 0, completed: null };
+  const result: MachineStep = { state, consumedJ: 0, generatedJ: 0, radiatedJ: 0, fuelConsumed: 0, waterConsumedMl: 0, completed: null };
   const dt = Number.isFinite(elapsedMs) ? Math.max(0, Math.min(1000, Math.floor(elapsedMs))) : 0;
   if (!dt || state.revision >= Number.MAX_SAFE_INTEGER || state.status === "invalid-state") return result;
   const workshop = state.workshop;
   const before = JSON.stringify([state.energyJ, workshop]);
-  // Passive radiator: energy leaves this local thermal store, never appears as electricity.
-  workshop.heatJ = Math.max(0, workshop.heatJ - Math.floor(2000 * (1 + workshop.upgrades.thermal) * dt / 1000));
+  // Explicit boundary flux: host deposits this heat into a known room, otherwise
+  // it dissipates to the body's exterior. It never appears as electricity.
+  result.radiatedJ = Math.min(workshop.heatJ, Math.floor(2000 * (1 + workshop.upgrades.thermal) * dt / 1000));
+  workshop.heatJ -= result.radiatedJ;
   const finish = () => {
     if (JSON.stringify([state.energyJ, workshop]) !== before) state.revision += 1;
     return result;
   };
   if (!state.enabled) { state.status = "disabled"; return finish(); }
   if (!workshopRunning(workshop)) { state.status = "control-off"; return finish(); }
+  if (chemistryMachine(state.kind)) {
+    Object.assign(result, advanceChemistry(state, dt, environment));
+    return finish();
+  }
   if (state.kind === "heat-engine" || state.kind === "biofuel-engine") {
     const room = machineCapacity(state.kind, workshop) - state.energyJ;
     if (room <= 0) { state.status = "buffer-full"; return finish(); }
@@ -202,15 +215,23 @@ export function transferPortableResource(state: MachineState, key: string, held:
   const kind = item === Item.FluidCanister ? "fluid" : "chemical";
   const portable: ResourceEndpoint = { endpointId: "player/portable", locationId: state.locationId, revision: expectedRevision,
     kind, capacity: PORTABLE_RESOURCE_CAPACITY[item], content };
-  const machine = machineEndpoint(state, key, kind);
-  if (direction === "fill" && state.workshop.cycle && kind === "fluid") return fail("cycle-reserved");
+  const choices = chemistryReservoirs(state.kind, direction === "fill" ? "output" : "input", kind,
+    content && content.kind !== "item" ? content.resource : undefined);
+  const selected = choices.find(slot => {
+    const store = chemicalStore(state.workshop, slot);
+    return direction === "fill" ? !!store && (!content || content.kind !== "item" && store.resource === content.resource)
+      : !store || content?.kind !== "item" && store.resource === content?.resource;
+  });
+  if (!selected) return fail("no-compatible-reservoir");
+  const machine = machineEndpoint(state, key, selected);
+  if (direction === "fill" && state.workshop.cycle && chemistryReservoirs(state.kind, "input", kind).includes(selected)) return fail("cycle-reserved");
   const result = direction === "fill" ? transferResource(machine, portable, 1000) : transferResource(portable, machine, 1000);
   if (!result.ok) return fail(result.reason);
   const after = direction === "fill" ? result.destination : result.source;
   const cloned = cloneSlot(held)!;
   const metadata = { ...cloned.metadata };
   if (after.content) metadata.wayworksResource = after.content; else delete metadata.wayworksResource;
-  return { ok: true, reason: "ok", machine: withMachineEndpoint(state, kind, direction === "fill" ? result.source : result.destination),
+  return { ok: true, reason: "ok", machine: withMachineEndpoint(state, selected, direction === "fill" ? result.source : result.destination),
     held: { ...cloned, metadata }, moved: result.moved!.quantity };
 }
 

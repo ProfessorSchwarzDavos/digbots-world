@@ -2,6 +2,14 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — revision12, first transaction checkpoint
 
+- Exact a20dd9e build-r7/official-r7 PASS. Normal cabin-r1 built42 physical
+  blocks, preserved door12kJ and placed the disabled finite controller at its
+  real socket, rotated south with the wrench. Desktop14/mobile17 reviewed:
+  fixed close header stays visible;390px has no overflow. SaveQuit195 retained.
+  Same-frame Shift+use opened the inspector before the crouch pose updated;
+  placement now consults live Shift keys as well as pose. Focused-r28 19/19 and
+  static-r24 PASS; failed-r27 lacked an empty lead registry in the test stub.
+  Battery attachment and finite room breathing remain unverified.
 - Exact97d56f4 build-r6/official-r6 PASS. Normal browser-station-r1 founded the
   finite deck, docked the original ship, renamed/trusted/public-dock configured,
   SaveQuit49/cold54 retained exact custody; strict browser-station-custody-r1 PASS.

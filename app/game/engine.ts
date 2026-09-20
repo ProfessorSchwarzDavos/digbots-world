@@ -19813,7 +19813,10 @@ export class VoxelEngine {
           return;
         }
       }
-      if (shouldBypassOpenableUse(this.crouching, heldDefinition?.placeBlock !== undefined, this.target.type)) {
+      // Input can arrive between simulation frames; honor Shift immediately,
+      // before the next movement update has published the crouched pose.
+      const placementModifier = this.crouching || this.keys?.has("ShiftLeft") || this.keys?.has("ShiftRight");
+      if (shouldBypassOpenableUse(!!placementModifier, heldDefinition?.placeBlock !== undefined, this.target.type)) {
         this.placeBlock();
         return;
       }

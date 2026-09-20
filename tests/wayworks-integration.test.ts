@@ -27,6 +27,24 @@ test("whole joules charge exact existing CF3 metadata without rounding its fract
   assert.equal(chargeLifeSupportItem({ ...machine, energyJ: 0 }, cell(), 0).ok, false);
   assert.equal(machine.energyJ, 3000);
 });
+
+test("same-frame Shift use places against a machine before crouch pose updates", () => {
+  for (const key of ["ShiftLeft", "ShiftRight"]) {
+    let placed = 0, inspected = 0;
+    const engine = Object.assign(Object.create(VoxelEngine.prototype), {
+      inventory: [{ item: BlockId.GridBattery, count: 1 }], selected: 0,
+      placeCooldown: 0, crouching: false, keys: new Set([key]), leadAnchors: new Map(),
+      target: { type: BlockId.LifeSupportController, x: 10, y: 33, z: 0 },
+      placeBlock: () => { placed++; }, openOverlay: () => { inspected++; },
+      applyHarvest: () => false,
+    }) as VoxelEngine;
+    engine.useSelected();
+    assert.equal(placed, 1); assert.equal(inspected, 0);
+    assert.equal(engine.crouching, false, "interaction does not falsify the physical pose");
+    engine.keys.clear(); engine.useSelected();
+    assert.equal(placed, 1); assert.equal(inspected, 1, "unmodified use still inspects");
+  }
+});
 test("machine carry/reload retains charge and partitions location authority", () => {
   const state = { ...createMachine("field-battery", "L", "O"), energyJ: 12345 };
   const placed = placedWorkshopMachine("field-battery", { item: BlockId.FieldBattery, count: 1, metadata: { wayworks: state } }, "L2", "O", 2);

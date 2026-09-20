@@ -14,6 +14,12 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
   missing-host-identity/bed-stack/type-only fixture failures retained. Final
   lint/committed build/official smoke pending. Generation routing's three expected
   red tests are preserved separately; no runtime generation changes yet.
+- Peer correction2f76f9a final committed-source r6 134PASS, static51/lint35 and
+  isolated build23 P87GhMOQKiW9kgSFNJ6ED PASS. Unchanged official23 cold-saved
+  orbit smoke PASS; screenshot personally reviewed, health10/rig energy exact,
+  canonical copper hole still targets y42. No captured browser error files.
+  Preview21858 stopped; all owned jobs/helpers drained. Source/evidence handoff
+  in CF6/r14-peer-correction; director acceptance still required, fullCF6 open.
 - Connected geometry checkpoint9b236bf/runtime3c5c95b/build18 is frozen and
   director accepted; evidence remains unchanged in CF6/r14-connected-geometry.
 - New universe-owned asteroid fields migrate ordinary orbit edits and project

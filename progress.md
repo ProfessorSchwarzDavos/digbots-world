@@ -10,7 +10,10 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
   intersection replaces the corner-only test. Voxel chunk/index projection and
   merge preserve outside edits; finite ore mirrors strip only after canonical
   page readback and reconstruct on cold projection. Static71 test tuple inference
-  error retained and explicitly annotated; static72/lint55PASS. No engine/storage/travel integration
+  error retained and explicitly annotated; static72/lint54PASS. Lint55 was still
+  running at commit7cad02f (its premature PASS label is corrected here); it finished
+  PASS at22:11:17UTC. Committed7cad02f owner-r6 repeats136PASS.
+  No engine/storage/travel integration
   or production/runtime acceptance is claimed for these isolated prerequisites.
 - Attached block/pressure projection and merge primitives now retain outside
   components exactly, reject stale/cross-boundary/duplicate-identity state, and

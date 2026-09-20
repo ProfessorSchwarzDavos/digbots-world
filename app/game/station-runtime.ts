@@ -3,8 +3,9 @@ import { parseLocationId, type LocationId } from "./location-address";
 import { applyStationAction, stationAllows, stationAt, STATION_CLAIM_RADIUS, validateStationRegistrySave, type StationActor, type StationPosition, type StationRegistrySave } from "./orbital-station";
 import { validateSpacefleetSave, type SpacefleetSave, type SpaceVehicleState } from "./space-vehicle";
 import { validCustodyItem } from "./wayworks-custody";
+import type { BlockFacing } from "./block-facing";
 
-export type StationBlock = { x: number; y: number; z: number; type: BlockId };
+export type StationBlock = { x: number; y: number; z: number; type: BlockId; facing?: BlockFacing };
 export type StationDockReference = { stationId: string; dockId: string; locationId: LocationId };
 
 /** Optional ordinary-material blueprint. The open controller socket prevents a
@@ -25,7 +26,9 @@ export function planStationCabin(input: { registry: StationRegistrySave; station
     const type = dx === -1 && dz === 0 && dy === 1 ? BlockId.PressureDoor
       : dx === -1 && dz === 0 && dy === 2 ? BlockId.PressureDoorUpper
         : dy === 2 && (dx === 1 && dz === 0 || dx === 0 && dz === 1) ? BlockId.ReinforcedWindow : BlockId.StoneBrick;
-    blocks.push({ x: point[0], y: point[1], z: point[2], type });
+    const facing: BlockFacing | undefined = type === BlockId.ReinforcedWindow ? dx === 1 ? 1 : 2
+      : type === BlockId.PressureDoor || type === BlockId.PressureDoorUpper ? 1 : undefined;
+    blocks.push({ x: point[0], y: point[1], z: point[2], type, ...(facing !== undefined ? { facing } : {}) });
   }
   for (const point of volume) if (stationAt(input.registry, point)?.id !== station.id || input.blockAt(...point) !== BlockId.Air || input.blocked(point)) {
     throw Error("The cabin needs a clear, loaded, unoccupied 3 × 5 × 3 space east of the claim core.");

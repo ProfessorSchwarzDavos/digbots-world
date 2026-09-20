@@ -45,6 +45,38 @@ test("same-frame Shift use places against a machine before crouch pose updates",
     assert.equal(placed, 1); assert.equal(inspected, 1, "unmodified use still inspects");
   }
 });
+
+test("upper pressure-door use inspects the real lower machine and supports placement bypass", () => {
+  assert.equal(shouldBypassOpenableUse(true, true, BlockId.PressureDoorUpper), true);
+  const opened: string[] = [];
+  const engine = Object.assign(Object.create(VoxelEngine.prototype), {
+    inventory: [{ item: Item.FieldWrench, count: 1 }], selected: 0, placeCooldown: 0,
+    crouching: false, keys: new Set(), leadAnchors: new Map(),
+    target: { type: BlockId.PressureDoorUpper, x: 9, y: 34, z: 1 },
+    world: { getBlock: () => BlockId.PressureDoor }, applyHarvest: () => false,
+    openOverlay: (_kind: string, key: string) => opened.push(key),
+  }) as VoxelEngine;
+  engine.useSelected(); assert.deepEqual(opened, ["9,33,1"]);
+});
+
+test("wrench rotates pressure-window presentation without changing the seal or inventory", () => {
+  let facing = 0, allowed = true;
+  const published: unknown[] = [], messages: string[] = [];
+  const engine = Object.assign(Object.create(VoxelEngine.prototype), {
+    inventory: [{ item: Item.FieldWrench, count: 1 }], selected: 0, placeCooldown: 0,
+    target: { type: BlockId.ReinforcedWindow, x: 11, y: 34, z: 1 }, position: new THREE.Vector3(10, 32.5, 1),
+    world: { getBlock: () => BlockId.ReinforcedWindow, setBlockFacing: (_x: number, _y: number, _z: number, next: number) => { facing = next; } },
+    worldBlockFacing: () => facing, stationActorAccess: () => allowed,
+    publishBlockEdits: (edits: unknown) => published.push(edits), saveSoon: () => {}, emitHud: () => {},
+    events: { onToast: (message: string) => messages.push(message) },
+  }) as VoxelEngine;
+  const inventory = structuredClone(engine.inventory);
+  engine.useSelected(); assert.equal(facing, 1); assert.equal(published.length, 1); assert.deepEqual(engine.inventory, inventory);
+  engine.placeCooldown = 0; allowed = false; engine.useSelected(); assert.equal(facing, 1);
+  allowed = true; engine.multiplayer = { role: "guest" } as never; engine.useSelected(); assert.equal(facing, 1);
+  engine.multiplayer = null; engine.position.x = 30; engine.useSelected(); assert.equal(facing, 1);
+  assert.equal(published.length, 1); assert.ok(messages.at(-1)?.includes("authorized"));
+});
 test("machine carry/reload retains charge and partitions location authority", () => {
   const state = { ...createMachine("field-battery", "L", "O"), energyJ: 12345 };
   const placed = placedWorkshopMachine("field-battery", { item: BlockId.FieldBattery, count: 1, metadata: { wayworks: state } }, "L2", "O", 2);

@@ -2,6 +2,21 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — revision12, first transaction checkpoint
 
+- Exact851b875 build-r8/official-r8 PASS. Cabin-r3 normal battery attachment,
+  door entry/closure, controller enable and suit-free breathing PASS. Save335/
+  cold344/save347 strict browser-cabin-pressure-custody-r1 PASS:99.311kPa,
+  health10 without helmet/back, exact600LO2+2400Linert custody and electrical
+  heating with0.154J rounding. No ship resupply. Oxygen feed empty; CO2 grows,
+  so this is not sustainable-habitat proof. Screenshots314/326/330 reviewed.
+  First r2 browser startup raced preview readiness and is retained as failed.
+  Visual review found the east blueprint window edge-on; new facing records
+  align windows, with normal wrench rotation for existing structures. Upper-door
+  inspection and station administration from inside a sealed cabin are repaired;
+  focused-r31 33PASS. Failed-r29 frozen fleet mutation was a test setup error;
+  r30 exposed an invalid synthetic pressure-zone ID. Static-r25 found the
+  publisher's missing optional-facing signature; it now reuses the actual
+  BlockAction edits type. Static-r26/lint-r15 PASS; fresh build/browser pending. FullCF6
+  remains incomplete.
 - Exact a20dd9e build-r7/official-r7 PASS. Normal cabin-r1 built42 physical
   blocks, preserved door12kJ and placed the disabled finite controller at its
   real socket, rotated south with the wrench. Desktop14/mobile17 reviewed:

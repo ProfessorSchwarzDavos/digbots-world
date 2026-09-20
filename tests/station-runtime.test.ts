@@ -57,6 +57,7 @@ test("cabin blueprint debits exact ordinary blocks, leaves a real socket and pre
   const plan = planStationCabin(input);
   assert.deepEqual(plan.inventory, [null, null, null, null]); assert.equal(plan.blocks.length, 42);
   assert.equal(plan.blocks.filter(block => block.type === BlockId.StoneBrick).length, 37);
+  assert.deepEqual(plan.blocks.filter(block => block.type === BlockId.ReinforcedWindow).map(block => block.facing).sort(), [1, 2]);
   assert.deepEqual(plan.doorSlot.metadata?.wayworks, door); assert.deepEqual(plan.socket, [9, 33, -1]);
   assert.ok(!plan.blocks.some(block => [block.x, block.y, block.z].join() === plan.socket.join()));
   assert.equal(inventory[0].count, 37); assert.equal(f.registry.revision, 1);
@@ -127,7 +128,7 @@ test("actual engine founders consume physical kit, dock, deny stale/guest edits 
   const engine = Object.assign(Object.create(VoxelEngine.prototype), {
     persistent: true, activeWorldId: "station-runtime", locationTransitioning: false, spaceflightBusy: false, pendingSpaceArrival: null,
     multiplayer: null, remotePlayers: new Map(), spacefleet: { schema: 1, vehicles: { hopper: f.ship } }, orbitalStations: null,
-    activeWayworksKey: null, wayworks: new Map(), inventory: f.inventory, position: new THREE.Vector3(0, 32.51, 0),
+    activeWayworksKey: null, wayworks: new Map(), inventory: f.inventory, position: new THREE.Vector3(0, 32.51, 0), velocity: new THREE.Vector3(),
     world: { locationScope: { locationId: orbit, epoch: 1, revision: 1 }, getBlock: f.blockAt,
       setBlocksBatch: (blocks: StationBlock[]) => blocks.forEach(block => f.cells.set(`${block.x},${block.y},${block.z}`, block.type)), setBlockFacing: () => {} },
     currentPlayerHeight: () => 1.8, publishBlockEdits: () => {}, events: { onToast: (message: string) => messages.push(message) }, emitHud: () => {}, saveSoon: () => {},
@@ -150,4 +151,16 @@ test("actual engine founders consume physical kit, dock, deny stale/guest edits 
   assert.equal(await engine.spaceflightAction({ kind: "station-cabin", stationId: station.id, registryRevision: 3, vehicleRevision: 1 }), true, messages.at(-1));
   assert.deepEqual(engine.inventory, [null, null, null, null]); assert.equal(engine.wayworks.size, 12);
   assert.equal([...engine.wayworks.values()].find(machine => machine.kind === "pressure-door")?.energyJ, 12000);
+  assert.equal(await engine.spaceflightAction({ kind: "leave", vehicleRevision: 1 }), true);
+  engine.position.set(station.corePosition[0] + 3, station.corePosition[1] + .5, station.corePosition[2]);
+  const zoneId = `${orbit}:air:0123456789abcdef`, fleetBefore = structuredClone(engine.spacefleet);
+  Reflect.set(engine, "pressureRuntime", { snapshot: () => ({ zones: [{ zoneId, cellKeys: [engine.position.clone().floor().toArray().join(",")] }] }) });
+  assert.equal(await engine.spaceflightAction({ kind: "station-habitat", stationId: station.id, registryRevision: 3, vehicleRevision: 2 }), true,
+    `nearby station administration does not require boarding through a sealed wall: ${messages.at(-1)}`);
+  assert.deepEqual(engine.orbitalStations!.stations[station.id].pressureZoneIds, [zoneId]);
+  assert.deepEqual(engine.spacefleet, fleetBefore);
+  engine.position.x += 20;
+  assert.equal(await engine.spaceflightAction({ kind: "station-habitat", stationId: station.id, registryRevision: 4, vehicleRevision: 2 }), false);
+  engine.position.x -= 20; f.cells.delete(station.corePosition.join(","));
+  assert.equal(await engine.spaceflightAction({ kind: "station-habitat", stationId: station.id, registryRevision: 4, vehicleRevision: 2 }), false);
 });

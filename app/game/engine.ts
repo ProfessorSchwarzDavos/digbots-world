@@ -2403,7 +2403,7 @@ export function shouldShowIncorrectToolFeedback(harvested: boolean) {
 }
 
 export function isOpenableBlock(type: BlockId) {
-  if (machineKindForBlock(type)) return true;
+  if (machineKindForBlock(type) || pressureDoorLower(type)) return true;
   return [
     BlockId.DoorClosedLower, BlockId.DoorClosedUpper, BlockId.DoorOpenLower, BlockId.DoorOpenUpper,
     BlockId.DoorXClosedLower, BlockId.DoorXClosedUpper, BlockId.DoorXOpenLower, BlockId.DoorXOpenUpper,
@@ -10479,7 +10479,7 @@ export class VoxelEngine {
   }
 
   publishBlockEdits(
-    edits: Array<{ x: number; y: number; z: number; type: BlockId }>,
+    edits: BlockAction["edits"],
     kind?: BlockAction["kind"],
     effect?: BlockAction["effect"],
     consumedItem?: ItemCode,
@@ -13122,7 +13122,11 @@ export class VoxelEngine {
       && (expectedMachineRevision === undefined || machine.revision === expectedMachineRevision);
     const boardingNearby = action.kind === "board" && ship
       && this.position.distanceTo(new THREE.Vector3(...ship.transform.position)) <= 6;
-    if (!consoleReady && !aboard && !boardingNearby) return fail("Use nearby flight hardware, or approach within six blocks to board your pilot seat.");
+    const operatedStation = (action.kind === "station-name" || action.kind === "station-access" || action.kind === "station-habitat" || action.kind === "station-cabin")
+      ? this.orbitalStations?.stations[action.stationId] : undefined;
+    const stationNearby = operatedStation && this.position.distanceTo(new THREE.Vector3(...operatedStation.corePosition)) <= 8
+      && this.world.getBlock(...operatedStation.corePosition) === BlockId.StationCore;
+    if (!consoleReady && !aboard && !boardingNearby && !stationNearby) return fail("Use nearby flight hardware, approach the station core, or come within six blocks to board your pilot seat.");
     try {
       if (action.kind === "route") { firstFlightDestination(this.world.locationScope.locationId, action.route); this.spaceflightRoute = action.route; this.emitHud(true); return true; }
       if (action.kind === "deploy") {
@@ -13162,7 +13166,7 @@ export class VoxelEngine {
                 || [...this.remotePlayers.values()].some(remote => blockEditIntersectsPlayer({ x, y, z, type: BlockId.StoneBrick }, remote.target, PLAYER_HEIGHT)) });
             const door = placedWorkshopMachine("pressure-door", plan.doorSlot, actor.locationId, "local", 1);
             this.world.setBlocksBatch(plan.blocks, true, true);
-            this.world.setBlockFacing(...plan.door, 1, true); this.world.setBlockFacing(plan.door[0], plan.door[1] + 1, plan.door[2], 1, true);
+            for (const block of plan.blocks) if (block.facing !== undefined) this.world.setBlockFacing(block.x, block.y, block.z, block.facing, true);
             this.wayworks.set(blockKey(...plan.door), door);
             const bridge = plan.blocks[0]; this.wayworks.set(blockKey(bridge.x, bridge.y, bridge.z), createMachine("station-truss", actor.locationId, "local"));
             this.inventory = plan.inventory; this.publishBlockEdits(plan.blocks, "batch");
@@ -19799,6 +19803,18 @@ export class VoxelEngine {
     }
     if (this.target) {
       const key = blockKey(this.target.x, this.target.y, this.target.z);
+      if (heldSlot?.item === Item.FieldWrench && (this.target.type === BlockId.ReinforcedWindow || this.target.type === BlockId.HangarFrame)) {
+        const { x, y, z, type } = this.target;
+        if (this.multiplayer?.role === "guest" || !this.stationActorAccess("local", x, y, z, "build")
+          || this.position.distanceTo(new THREE.Vector3(x, y, z)) > 6 || this.world.getBlock(x, y, z) !== type) {
+          this.events.onToast("Only an authorized nearby host builder can rotate this pressure structure."); return;
+        }
+        const facing = normalizeBlockFacing((this.worldBlockFacing(x, y, z) + 1) % 4);
+        this.world.setBlockFacing(x, y, z, facing, true);
+        this.publishBlockEdits([{ x, y, z, type, facing }], "batch");
+        this.placeCooldown = .22; this.saveSoon(); this.emitHud(true);
+        this.events.onToast("Pressure structure rotated; its full-cell seal and stored atmosphere are unchanged."); return;
+      }
       if (heldSlot?.item === Item.GlassBottle) {
         const trackedTargetLiquid = this.liquidCells.get(key);
         const bottle = resolveBottleFillAction(heldSlot.item, this.target.type, trackedTargetLiquid?.source ?? true);
@@ -20059,6 +20075,10 @@ export class VoxelEngine {
         return;
       }
       if (this.target.type === BlockId.CraftingTable) { this.openOverlay("crafting", key); return; }
+      const pressureLower = pressureDoorLower(this.target.type);
+      if (pressureLower && this.world.getBlock(this.target.x, this.target.y - 1, this.target.z) === pressureLower) {
+        this.openOverlay("wayworks", blockKey(this.target.x, this.target.y - 1, this.target.z)); return;
+      }
       if (machineKindForBlock(this.target.type)) {
         this.openOverlay("wayworks", key); return;
       }

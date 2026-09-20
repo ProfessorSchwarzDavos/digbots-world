@@ -2,6 +2,17 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — revision12, first transaction checkpoint
 
+- Exact249e093 build-r3/official-r3 PASS. Ordinary synthetic lab jar craft,
+  capture and cold custody passed; release exposed a real roof-teleport bug.
+  Bounded local Morrow release grounding now rejects blocked/unknown footprints;
+  incomplete pressure suits warn before damage. focused-r14 30/30, static-r17
+  PASS; fresh visual recheck pending. Original flight fixture lacked pressure
+  jacket/leggings, so normal surface-return remains unproven, attempts retained.
+- Station policy helper plus primary real-air-zone integration check supplies
+  strict per-location grants, dock ownership, replay and receipt contracts;
+  12 focused policy tests PASS. Physical station/runtime/save/map integration
+  remains next; this policy checkpoint alone does not complete stations.
+
 - Rebuilt9d812ae normal browser-r3 now reaches Morrow orbit/surface and EVA;
   SaveQuit082-storage retained. Cockpit/third-person/mobile/focus fixes personally
   reviewed, official-r2 PASS. No new resource/ship state staged after first craft.

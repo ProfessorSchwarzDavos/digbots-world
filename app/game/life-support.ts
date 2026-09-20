@@ -168,11 +168,16 @@ export function stepLifeSupport(equipment: PersonalEquipment, previous: LifeSupp
   else state.damageAccumulator = 0;
   const remaining = sourceOxygen(nextEquipment.back);
   const secondsRemaining = remaining.amount / drawRate;
-  const level = needsAir && !breathing ? "danger" : needsAir && secondsRemaining < 30 ? "critical" : needsAir && secondsRemaining < 90 ? "low" : "safe";
+  // Oxygen delivery alone does not make an incomplete suit safe in vacuum.
+  // Warn immediately, before accumulated pressure/thermal exposure causes harm.
+  const pressureUnprotected = environment.requiresPressureSuit && !(sealed && weave === 1);
+  const level = needsAir && !breathing || pressureUnprotected || hazards.length > 0 ? "danger"
+    : needsAir && secondsRemaining < 30 ? "critical" : needsAir && secondsRemaining < 90 ? "low" : "safe";
   const hud: LifeSupportHud = { relevant: needsAir || Boolean(back && kind) || hazards.length > 0, source: back ? ITEMS[back.item].name : "No back source",
     oxygenLiters: remaining.amount / 1000, capacityLiters: remaining.capacity / 1000, secondsRemaining, sealed, breathing,
     scrubber: hasScrubber ? `${Math.ceil(store!.scrubberSeconds)}s` : "open cycle", leak, level,
-    status: swapping ? "SWAPPING - SEAL OPEN" : needsAir && !helmet ? "SEALED HELMET REQUIRED" : needsAir && !compatible ? "COMPATIBLE BACK SOURCE REQUIRED" : needsAir && source.amount <= 0 ? "OXYGEN EMPTY" : breathing ? "BREATHING" : "HOLDING BREATH",
+    status: swapping ? "SWAPPING - SEAL OPEN" : needsAir && !helmet ? "SEALED HELMET REQUIRED" : needsAir && !compatible ? "COMPATIBLE BACK SOURCE REQUIRED" : needsAir && source.amount <= 0 ? "OXYGEN EMPTY"
+      : pressureUnprotected ? "PRESSURE SUIT INCOMPLETE" : hazards.length ? `${hazards[0]} EXPOSURE` : breathing ? "BREATHING" : "HOLDING BREATH",
     hazards, energyJ: store?.energyJ ?? 0, swapSeconds: input.swapSeconds ?? 0 };
   return { equipment: nextEquipment, state, hud, damage, impairment: !input.immune && state.hypoxiaSeconds > 6 ? .55 : 1 };
 }

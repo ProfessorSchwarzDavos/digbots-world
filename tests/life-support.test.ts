@@ -115,6 +115,22 @@ test("Dive Harness cannot seal in vacuum but breathes while submerged at home pr
   assert.equal(sourceOxygen(underwater.equipment.back).amount, 3_000);
 });
 
+test("HUD warns about incomplete vacuum protection before damage, independently of oxygen", () => {
+  const equipment: PersonalEquipment = { head: slot(Item.FieldBreatherHelmet), feet: slot(Item.MagneticBoots),
+    back: stocked(Item.LightOxygenTank, { oxygenMl: 100_000 }) };
+  const partial = stepLifeSupport(equipment, { ...EMPTY_LIFE_SUPPORT }, vacuum, .1);
+  assert.equal(partial.hud.breathing, true);
+  assert.equal(partial.damage, 0);
+  assert.equal(partial.hud.level, "danger");
+  assert.equal(partial.hud.status, "PRESSURE SUIT INCOMPLETE");
+  const complete = { ...equipment, chest: slot(Item.PressureWeaveChest), legs: slot(Item.PressureWeaveLegs) };
+  const safe = stepLifeSupport(complete, { ...EMPTY_LIFE_SUPPORT }, vacuum, .1);
+  assert.equal(safe.hud.level, "safe"); assert.equal(safe.hud.status, "BREATHING");
+  const exposed = stepLifeSupport(complete, { ...EMPTY_LIFE_SUPPORT, pressureSeconds: 80 }, vacuum, .1);
+  assert.equal(exposed.hud.level, "danger"); assert.equal(exposed.hud.status, "PRESSURE EXPOSURE");
+  assert.equal(stepLifeSupport(equipment, { ...EMPTY_LIFE_SUPPORT }, home, .1).hud.level, "safe");
+});
+
 test("pressure, temperature, corrosion and radiation are independent hazards; full weave protects", () => {
   const pressure = { ...home, requiresPressureSuit: true } satisfies BodyEnvironment;
   const thermal = { ...home, temperatureC: [-80, 100] as const } satisfies BodyEnvironment;

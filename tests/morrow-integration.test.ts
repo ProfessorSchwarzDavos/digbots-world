@@ -83,6 +83,21 @@ test("native moon spawn dispatch never falls through to Home fauna or hostile ta
   engine.trySpawnMob("passive"); engine.trySpawnMob("hostile"); assert.equal(calls.length, 1);
 });
 
+test("indoor jar release stays below the ceiling and rejects blocked or unloaded footprints", () => {
+  let blocked = false, missing = false;
+  const engine = Object.assign(Object.create(VoxelEngine.prototype), { world: {
+    findWalkableY: () => { throw Error("Top-down release would teleport through the habitat roof"); },
+    getBlock: (_x: number, y: number) => missing ? undefined
+      : y === 32 || y === 36 || blocked && y === 33 ? BlockId.StoneBrick : BlockId.Air,
+  } }) as VoxelEngine;
+  assert.deepEqual(engine.creatureReleasePosition(specimen, new THREE.Vector3(8, 33, 0))?.toArray(), [8, 32.5, 0]);
+  blocked = true;
+  assert.equal(engine.creatureReleasePosition(specimen, new THREE.Vector3(8, 33, 0)), null);
+  blocked = false; missing = true;
+  assert.equal(engine.creatureReleasePosition(specimen, new THREE.Vector3(8, 33, 0)), null);
+  assert.equal(engine.creatureReleasePosition(specimen, new THREE.Vector3(NaN, 33, 0)), null);
+});
+
 test("actual Owl controller makes bounded crossings and rests on its real dream refuge", () => {
   const mob = { id: 1, kind: "morrow-owl", definition: MOB_DEFS["morrow-owl"], group: new THREE.Group(), health: 20,
     morrowExposure: { exposureSeconds: 0, veilSeconds: 8 }, morrowRoost: { x: -120, y: .5, z: 120 },

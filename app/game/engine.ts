@@ -17383,6 +17383,29 @@ export class VoxelEngine {
 
   creatureReleasePosition(metadata: CreatureMetadata, requested: THREE.Vector3) {
     const definition = MOB_DEFS[metadata.kind];
+    if (isMorrowMobKind(metadata.kind)) {
+      // A jar opened inside a habitat must not search top-down and move its
+      // occupant through the ceiling. Only nearby, loaded, supported cells
+      // around the actual requested height qualify; failure retains custody.
+      if (![requested.x, requested.y, requested.z].every(Number.isFinite)) return null;
+      const savedSize = (metadata.custom.progression as unknown as { phenotype?: { sizeScale?: unknown } } | undefined)?.phenotype?.sizeScale;
+      const size = typeof savedSize === "number" && Number.isFinite(savedSize) ? savedSize : 1;
+      const radius = definition.radius * clamp(size, .5, 2), height = Math.ceil(definition.height * clamp(size, .5, 2));
+      const ground = chooseLocalWalkableGround(Math.floor(requested.y - .5), candidateY => {
+        for (let x = Math.floor(requested.x - radius + .5); x <= Math.floor(requested.x + radius + .499); x++) {
+          for (let z = Math.floor(requested.z - radius + .5); z <= Math.floor(requested.z + radius + .499); z++) {
+            const support = this.world.getBlock(x, candidateY, z);
+            if (support === undefined || !BLOCKS[support]?.solid) return false;
+            for (let y = candidateY + 1; y <= candidateY + height; y++) {
+              const cell = this.world.getBlock(x, y, z);
+              if (cell === undefined || BLOCKS[cell]?.solid) return false;
+            }
+          }
+        }
+        return true;
+      }, 0, 2);
+      return ground === null ? null : new THREE.Vector3(requested.x, ground + definition.footOffset, requested.z);
+    }
     const aquatic = definition.movement === "aquatic" || definition.aquatic || isLeviathanKind(metadata.kind);
     if (aquatic) {
       const inhabitsLiquid = (type: BlockId | undefined) => metadata.kind === "syrupfin"

@@ -12,9 +12,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
   clearance cells. focused-r35:48PASS/3FAIL (unchanged legacy location-runtime
   fixtures use unsupported bare morrow body ID); all16 new regressions PASS.
   focused-r36 bounded44PASS; static-r28/lint-r17 and green historical-column
-  cache-correction-r1 PASS, y33.5 and old-v1 rejection. Build/cold-load pending;
-  old invalid specimens preserved, not relocated/deleted. Director budget-drain
-  ACK: finish only this bounded checkpoint, drain all jobs, no follow-on work.
+  cache-correction-r1 PASS, y33.5 and old-v1 rejection. Exactdad6640 build-r11
+  vLaqMvaj7J7EOxeZKRpM4/official-r11 PASS; legal fresh Lantern y34.5. One normal
+  cold copy retained16 original specimen identities and ordinary restoration
+  regrounded all5 invalid creatures, plus2 legal births. Exact fleet/inventory/
+  edits/wayworks/facings. Strict audit remains partial: three Slatefin naturalPool
+  fields normalized to underground, persisted target2,0 row absent,103 original
+  disposable keys absent from test cache (immutable originals intact). Initial
+  locator/command/name-collision failures retained; no follow-on repair. Both
+  screenshots reviewed. Save013/close14; all jobs drained, ports4338/4339 absent.
+  Director budget-drain ACK: paused checkpoint, no new work or automatic resume.
 - b4d529d build-r9/official-r9 and normal cabin-r4/r5 interaction custody PASS:
   old east window rotated, upper-door inspection and nearby habitat refresh,
   exact facing/link persistence, original fleet/inventory/gas/heat retained.

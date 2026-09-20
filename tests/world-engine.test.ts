@@ -479,6 +479,7 @@ test("zero-density worlds skip habitat scans as well as natural population creat
   const focus = { id: "local", x: 0, y: 32, z: 0, yaw: 0 };
   const engine = Object.create(VoxelEngine.prototype) as VoxelEngine;
   Object.assign(engine, {
+    world: { celestialTerrain: null },
     worldOptions: { ...DEFAULT_WORLD_OPTIONS, mobDensity: 0 },
     skyVisibility: 1,
     naturalSpawnInterestCursor: 0,
@@ -749,7 +750,7 @@ test("generator-v2 saves migrate their voxel edit indices into the deeper world"
   assert.deepEqual(migrated?.edits["0,0"], [[16384, BlockId.Glowstone]], "an old y=0 edit must remain at y=0 after MIN_Y moves from -32 to -64");
 });
 
-test("climate sampler can produce every advertised biome", () => {
+test("Home climate sampler produces every Home biome and excludes destination-only biomes", () => {
   const world = new ChunkWorld();
   world.reset("BIOME-SAFARI");
   const biomes = new Set<number>();
@@ -758,7 +759,10 @@ test("climate sampler can produce every advertised biome", () => {
     const z = ((index * 104729) % 240_000) - 120_000;
     biomes.add(world.sampleColumn(x, z).biome);
   }
-  assert.equal(biomes.size, Object.keys(BIOME_NAMES).length, `expected all biomes, found ${[...biomes].map((id) => BIOME_NAMES[id]).join(", ")}`);
+  const destinationOnly = new Set([BiomeId.PaleRegolithSea, BiomeId.StarshadowCraters, BiomeId.MoonSlateHighlands,
+    BiomeId.IceLanternRilles, BiomeId.BuriedWaystoneGalleries, BiomeId.OrbitalVoid]);
+  const homeBiomes = Object.keys(BIOME_NAMES).map(Number).filter(id => !destinationOnly.has(id));
+  assert.deepEqual([...biomes].sort((a, b) => a - b), homeBiomes.sort((a, b) => a - b));
   world.dispose();
 });
 
@@ -1114,10 +1118,12 @@ test("Creative starts empty, exposes every player-facing item, and toggles fligh
   assert.deepEqual(initialInventoryForMode("survival")[0], { item: Item.Berry, count: 3 });
 
   const retired = new Set([Item.LegacyCaptureOrb, ...LEGACY_LENS_ORB_ITEMS, ...LEGACY_SPECIES_ORB_ITEMS]);
-  const expected = Object.values(ITEMS).filter((definition) => !retired.has(definition.id));
+  const pairedOnly = new Set([BlockId.PressureDoorUpper, BlockId.HorizonDoorUpper, BlockId.EmergencyShutterUpper]);
+  const expected = Object.values(ITEMS).filter((definition) => !retired.has(definition.id) && !pairedOnly.has(definition.id));
   assert.equal(CREATIVE_ITEMS.length, expected.length);
   for (const definition of expected) assert.ok(CREATIVE_ITEMS.includes(definition.id), `${definition.name} is searchable in Creative`);
   for (const item of retired) assert.equal(CREATIVE_ITEMS.includes(item), false);
+  for (const item of pairedOnly) assert.equal(CREATIVE_ITEMS.includes(item), false, "upper halves are supplied only by their complete door item");
 
   const first = resolveCreativeFlightTap(false, -Infinity, 1_000);
   assert.equal(first.toggled, false);
@@ -2008,7 +2014,7 @@ test("2×2 and 3×3 crafting recognize shaped recipes", () => {
   assert.equal(engine.cursor?.durability, ITEMS[Item.StonePickaxe].maxDurability, "manually crafted tools start at full durability");
 });
 
-test("rejected solid placement records its rollback and player chests start empty", () => {
+test("rejected solid placement never mutates the world and player chests start empty", () => {
   const engine = Object.create(VoxelEngine.prototype) as VoxelEngine;
   const writes: Array<{ type: BlockId; record?: boolean }> = [];
   engine.world = {
@@ -2025,8 +2031,8 @@ test("rejected solid placement records its rollback and player chests start empt
   engine.collidesAt = () => true;
   engine.events = { onToast: () => undefined } as unknown as VoxelEngine["events"];
   engine.placeBlock();
-  assert.deepEqual(writes.map((write) => write.type), [BlockId.Stone, BlockId.TallGrass]);
-  assert.notEqual(writes[1].record, false, "rollback must persist across chunk regeneration");
+  assert.deepEqual(writes, [], "preflight preserves the replaceable cell without a transient solid or rollback record");
+  assert.deepEqual(engine.inventory[0], { item: BlockId.Stone, count: 1 });
 
   writes.length = 0;
   engine.inventory[0] = { item: BlockId.Chest, count: 1 };

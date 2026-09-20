@@ -1,5 +1,25 @@
 Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks; add double-tap-forward sprinting; build scalable butterfly exhibit blocks with inventories, flowers, landing behavior, and capacity up to about 20 connected blocks; make recipe-book hover previews and click-to-fill crafting, fix crafting/furnace arrows, add recipe search and mirrored recipes; animate and flow water, improve swimming/shore exits, add oxygen; add ocean, river, and underground fish; add a larger two-seat sailboat with crouch-use chest storage; fix third-person vertical controls and interaction; allow mobs through open doors; remove tree-growth notices; add five surface mobs, birds, desert plants/features, desert and forest temple POIs with chests, a new enemy, and rare magical durable loot; add a tameable breedable banana-rabbit pet with naming and commands; add metadata-preserving creature cages; add male/female player choice with multiplayer, armor, and held-item representation; add a banana-rabbit POI; add visible game versions and save-version metadata plus title-screen fullscreen; add skeleton archery; optimize and benchmark 10-default/16-max render distance with separate 6-8 simulation distance; rework clouds and biome-sensitive weather; enrich meadow grass, flowers, butterflies, and a large butterfly POI. Do all of it thoughtfully and report only when entirely done.
 
+## Celestial Frontiers CF6 — placement preflight correction
+
+- Strict station cold-custody audit caught a real rejected-placement side effect:
+  the engine wrote a solid block, notified world/pressure observers, then restored
+  air on collision. Validation now reads proposed cells before any mutation,
+  preserving exact door/furniture collision geometry and rejecting either local
+  or remote occupancy before edits, facing, machine creation or inventory debit.
+- Three actual-engine red regressions became green; strengthened four-case suite
+  also proves a clear original room and thin-door geometry. Combined station,
+  pressure and world suite passes 196 cases. Three old world fixtures now specify
+  Home-only biomes, an actual Home context, and non-player-facing paired door
+  uppers; failed receipts remain available. Static-r34 caught a test-only Item
+  type annotation, corrected to ItemCode; fresh static/build/browser pending.
+- Previous station67284ba build-r13/lint-r21/official-r13 passed. Normal desktop
+  and390px UI, name/icon/association/grants, physical collar registration and
+  duplicate/unplaced rejections passed, but strict browser custody remains open
+  until the correction is rebuilt and replayed on the unchanged synthetic input.
+  No fullCF6, sustainable habitat, crafting, clear docking approach or real-peer
+  acceptance claim. All browser/preview jobs from that first replay are drained.
+
 ## Celestial Frontiers CF6 — independent station console and service grants
 
 - Station-only intents now use registry revision and intact-core reach without a

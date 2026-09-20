@@ -20242,8 +20242,6 @@ export class VoxelEngine {
     if (!this.stationActorAccess("local", x, y, z, "build")) { this.events.onToast("Station building permission is required."); return; }
     if (y < MIN_Y || y > MAX_Y) return;
     const current = this.world.getBlock(x, y, z);
-    let replacedUpper: BlockId | undefined;
-    let replacedPartner: BlockId | undefined;
     let type = requestedType;
     let placedEdits: Array<{ x: number; y: number; z: number; type: BlockId; facing?: BlockFacing }>;
     if (current === undefined || (!BLOCKS[current]?.replaceable && current !== BlockId.Air)) return;
@@ -20300,7 +20298,6 @@ export class VoxelEngine {
       const headX = x + bed.dx;
       const headZ = z + bed.dz;
       const partner = this.world.getBlock(headX, y, headZ);
-      replacedPartner = partner;
       const footSupport = this.world.getBlock(x, y - 1, z);
       const headSupport = this.world.getBlock(headX, y - 1, headZ);
       if (partner === undefined || (!BLOCKS[partner]?.replaceable && partner !== BlockId.Air)
@@ -20313,20 +20310,15 @@ export class VoxelEngine {
         { x, y, z, type: bed.foot },
         { x: headX, y, z: headZ, type: bed.head },
       ];
-      const playerEditFeedback = this.world.beginPlayerEditFeedback?.("place");
-      this.world.setBlocksBatch(placedEdits, true, true);
-      if (playerEditFeedback !== undefined) this.world.completePlayerEditFeedback?.(playerEditFeedback);
     } else if (pressureDoorUpper(type)) {
-      const upper = this.world.getBlock(x, y + 1, z); replacedUpper = upper;
+      const upper = this.world.getBlock(x, y + 1, z);
       if (y + 1 > MAX_Y || upper === undefined || (!BLOCKS[upper]?.replaceable && upper !== BlockId.Air) || !BLOCKS[this.world.getBlock(x, y - 1, z) ?? BlockId.Air]?.solid) {
         this.events.onToast("A pressure door needs two clear cells on solid ground."); return;
       }
       const facing = blockFacingForYaw(this.yaw);
       placedEdits = [{ x, y, z, type, facing }, { x, y: y + 1, z, type: pressureDoorUpper(type)!, facing }];
-      this.world.setBlocksBatch(placedEdits, true, true); this.world.setBlockFacing(x, y, z, facing, true);
     } else if (type === BlockId.DoorClosedLower || type === BlockId.WroughtIronDoorClosedLower) {
       const upper = this.world.getBlock(x, y + 1, z);
-      replacedUpper = upper;
       const support = this.world.getBlock(x, y - 1, z);
       if (y + 1 > MAX_Y || upper === undefined || (!BLOCKS[upper]?.replaceable && upper !== BlockId.Air) || !BLOCKS[support ?? BlockId.Air]?.solid) {
         this.events.onToast("A door needs two clear blocks and solid ground.");
@@ -20338,27 +20330,22 @@ export class VoxelEngine {
         { x, y, z, type: placedDoor.lower },
         { x, y: y + 1, z, type: placedDoor.upper },
       ];
-      const playerEditFeedback = this.world.beginPlayerEditFeedback?.("place");
-      this.world.setBlocksBatch(placedEdits, true, true);
-      if (playerEditFeedback !== undefined) this.world.completePlayerEditFeedback?.(playerEditFeedback);
     } else {
       const facing = isDirectionallyPlacedBlock(type) ? blockFacingForYaw(this.yaw) : undefined;
       placedEdits = [{ x, y, z, type, ...(facing === undefined ? {} : { facing }) }];
-      const playerEditFeedback = this.world.beginPlayerEditFeedback?.("place");
-      this.world.setBlock(x, y, z, type, true, true);
-      if (facing !== undefined) this.world.setBlockFacing?.(x, y, z, facing, true);
-      if (playerEditFeedback !== undefined) this.world.completePlayerEditFeedback?.(playerEditFeedback);
     }
+    // Validate against a read-only proposed world. Writing and then rolling back
+    // is not harmless: pressure observers already see the transient solid cell.
     const occupiedRemote = BLOCKS[type].solid && placedEdits.some((edit) => [...(this.remotePlayers?.values() ?? [])].some((remote) => remote.model.modelKind !== "drone" && blockEditIntersectsPlayer(edit, remote.target, PLAYER_HEIGHT * playerVariantHeightScale(remote.target.variant ?? "male"))));
-    if (BLOCKS[type].solid && (this.collidesAt(this.position) || occupiedRemote)) {
-      if (requestedType === BlockId.BedNorthFoot) {
-        const partner = placedEdits[1];
-        this.world.setBlocksBatch([{ x, y, z, type: current ?? BlockId.Air }, { x: partner.x, y: partner.y, z: partner.z, type: replacedPartner ?? BlockId.Air }], true, true);
-      } else if (this.isDoor(type) || pressureDoorUpper(type)) this.world.setBlocksBatch([{ x, y, z, type: current ?? BlockId.Air }, { x, y: y + 1, z, type: replacedUpper ?? BlockId.Air }], true, true);
-      else this.world.setBlock(x, y, z, current ?? BlockId.Air, true, true);
+    if (BLOCKS[type].solid && (occupiedRemote || this.collidesAt(this.position, this.currentPlayerHeight(), placedEdits))) {
       this.events.onToast(occupiedRemote ? "You cannot place a block inside another player." : "You cannot place a block inside yourself.");
       return;
     }
+    const playerEditFeedback = this.world.beginPlayerEditFeedback?.("place");
+    if (placedEdits.length > 1) this.world.setBlocksBatch(placedEdits, true, true);
+    else this.world.setBlock(x, y, z, type, true, true);
+    for (const edit of placedEdits) if (edit.facing !== undefined) this.world.setBlockFacing?.(edit.x, edit.y, edit.z, edit.facing, true);
+    if (playerEditFeedback !== undefined) this.world.completePlayerEditFeedback?.(playerEditFeedback);
     this.publishBlockEdits(
       placedEdits,
       placedEdits.length > 1 ? "batch" : "place",
@@ -21856,7 +21843,7 @@ export class VoxelEngine {
     return false;
   }
 
-  collidesAt(position: THREE.Vector3, height = this.currentPlayerHeight()) {
+  collidesAt(position: THREE.Vector3, height = this.currentPlayerHeight(), proposed?: ReadonlyArray<{ x: number; y: number; z: number; type: BlockId; facing?: BlockFacing }>) {
     const minX = Math.floor(position.x - PLAYER_RADIUS + 0.5);
     const maxX = Math.floor(position.x + PLAYER_RADIUS - 0.001 + 0.5);
     // Scan a quarter block below the feet so 1.25-block fences remain solid
@@ -21866,10 +21853,11 @@ export class VoxelEngine {
     const minZ = Math.floor(position.z - PLAYER_RADIUS + 0.5);
     const maxZ = Math.floor(position.z + PLAYER_RADIUS - 0.001 + 0.5);
     for (let x = minX; x <= maxX; x += 1) for (let y = minY; y <= maxY; y += 1) for (let z = minZ; z <= maxZ; z += 1) {
-      const type = this.world.getBlock(x, y, z);
+      const planned = proposed?.find(edit => edit.x === x && edit.y === y && edit.z === z);
+      const type = planned?.type ?? this.world.getBlock(x, y, z);
       if (type === undefined) return true;
       if (this.pressureGateClosed({ x, y, z })) return true;
-      if (this.pressureDoorOpen({ x, y, z })) continue;
+      if (!planned && this.pressureDoorOpen({ x, y, z })) continue;
       if (this.isDoor(type)) {
         if (this.playerIntersectsDoorCell(position, x, y, z, type, height)) return true;
         continue;
@@ -21881,7 +21869,7 @@ export class VoxelEngine {
           continue;
         }
         if (["table", "shelf", "archive-shelf", "fireplace"].includes(definition.shape ?? "")) {
-          if (this.playerIntersectsFurnitureCell(position, x, y, z, type, height)) return true;
+          if (this.playerIntersectsFurnitureCell(position, x, y, z, type, height, planned?.facing)) return true;
           continue;
         }
         const bottom = y - 0.5;
@@ -21892,7 +21880,7 @@ export class VoxelEngine {
     return false;
   }
 
-  playerIntersectsFurnitureCell(position: THREE.Vector3, x: number, y: number, z: number, type: BlockId, height = this.currentPlayerHeight()) {
+  playerIntersectsFurnitureCell(position: THREE.Vector3, x: number, y: number, z: number, type: BlockId, height = this.currentPlayerHeight(), facing = this.worldBlockFacing(x, y, z)) {
     const shape = BLOCKS[type]?.shape;
     const bounds = shape === "table" ? { x0: -0.48, x1: 0.48, y1: 0.42, z0: -0.42, z1: 0.42 }
       : shape === "fireplace" ? { x0: -0.5, x1: 0.5, y1: 0.48, z0: -0.4, z1: 0.4 }
@@ -21900,7 +21888,6 @@ export class VoxelEngine {
           : shape === "shelf" ? { x0: -0.47, x1: 0.47, y1: 0.5, z0: -0.2, z1: 0.2 }
             : null;
     if (!bounds) return true;
-    const facing = this.worldBlockFacing(x, y, z);
     const corner0 = rotateBlockOffset(bounds.x0, bounds.z0, facing);
     const corner1 = rotateBlockOffset(bounds.x1, bounds.z1, facing);
     const blockMinX = x + Math.min(corner0.x, corner1.x);

@@ -50,14 +50,25 @@ export function rebaseAsteroidCell(frame: AsteroidAttachmentFrame, key: string, 
   const sign = from === "orbit" ? -1 : 1;
   return keyOf({ x: point.x + sign * frame.offset.x, y: point.y + sign * frame.offset.y, z: point.z + sign * frame.offset.z });
 }
-/** Continuous entity anchors occupy a cell, so the upper edge is exclusive.
+/** Cell keys are block centers, as in the engine's floor(position + 0.5) lookup.
+ * This physical box spans those complete centered voxels; upper edges belong to
+ * the next frame. It is not an entity collider or a travel permission. */
+export function asteroidAttachmentPhysicalBounds(frame: AsteroidAttachmentFrame, view: AsteroidAttachmentView): CelestialBounds {
+  const b = view === "orbit" ? frame.orbitBounds : frame.localBounds;
+  return { minX: b.minX - .5, maxX: b.maxX + .5, minY: b.minY - .5, maxY: b.maxY + .5,
+    minZ: b.minZ - .5, maxZ: b.maxZ + .5 };
+}
+export function asteroidAttachmentContainsPosition(frame: AsteroidAttachmentFrame, point: CelestialPoint, view: AsteroidAttachmentView): boolean {
+  const b = asteroidAttachmentPhysicalBounds(frame, view);
+  return axes.every(axis => Number.isFinite(point[axis])) && point.x >= b.minX && point.x < b.maxX
+    && point.y >= b.minY && point.y < b.maxY && point.z >= b.minZ && point.z < b.maxZ;
+}
+/** Continuous entity anchors occupy a centered cell; the upper edge is exclusive.
  * No quantization or rotation. Capture must retain the original canonical point
  * when its projected value was unchanged, avoiding repeated floating-point drift.
  */
 export function rebaseAsteroidPosition(frame: AsteroidAttachmentFrame, point: CelestialPoint, from: AsteroidAttachmentView): CelestialPoint {
-  const b = from === "orbit" ? frame.orbitBounds : frame.localBounds;
-  if (!axes.every(axis => Number.isFinite(point[axis])) || point.x < b.minX || point.x >= b.maxX + 1
-    || point.y < b.minY || point.y >= b.maxY + 1 || point.z < b.minZ || point.z >= b.maxZ + 1)
+  if (!asteroidAttachmentContainsPosition(frame, point, from))
     throw Error("Attached entity or anchor crosses the asteroid frame boundary.");
   const sign = from === "orbit" ? -1 : 1;
   return { x: point.x + sign * frame.offset.x, y: point.y + sign * frame.offset.y, z: point.z + sign * frame.offset.z };

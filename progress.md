@@ -2,6 +2,13 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Continuous frame bounds now match centered voxel ownership[min-0.5,max+0.5),
+  correcting the old half-cell offset before engine integration. Retained
+  centered-bounds-red-r1:0PASS/3FAIL proves left-edge valid points rejected and
+  right-edge outside points accepted. Corrected54PASS checks every axis/both
+  views/all252columns; static83/lint64PASS completed before commit. Integer keys,
+  ore pages, resources and accepted runtime remain unchanged. Full body/guard and
+  cross-identity selection still required; no local travel opening.
 - Repository checkpoint5969ed9/runtimebe0d4b4/build31 independently accepted by
   Wildkeeper23:46:37UTC. Next whole-unit entity capture prerequisite preserves
   exact unchanged canonical axes across known body/roost/work/dragon/boat anchors,

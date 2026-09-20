@@ -60,9 +60,9 @@ test("duplicate live/sleeping/specimen/boat identities and cross-unit relationsh
   assert.throws(() => rebaseAsteroidEntities(frame, { ...input, leads: [{ mobId: 7, fence: { x: 32, y: 32, z: 0 }, maximumLength: 8 }] }, "local", ["host"]), /boundary/);
 });
 test("continuous positions are not rounded; invalid or outside coordinates reject", () => {
-  const point = { x: 31.875, y: 32.25, z: -.125 }, output = rebaseAsteroidPosition(frame, point, "local");
+  const point = { x: 31.375, y: 32.25, z: -.125 }, output = rebaseAsteroidPosition(frame, point, "local");
   assert.deepEqual(rebaseAsteroidPosition(frame, output, "orbit"), point);
-  for (const x of [32, -32.001, NaN, Infinity]) assert.throws(() => rebaseAsteroidPosition(frame, { ...point, x }, "local"), /boundary/);
+  for (const x of [31.5, -32.501, NaN, Infinity]) assert.throws(() => rebaseAsteroidPosition(frame, { ...point, x }, "local"), /boundary/);
 });
 test("unknown entity resource fields fail closed instead of being silently left in another frame", () => {
   for (const key of ["creatures", "sleepingCreatures", "boats", "drops", "leads"] as const) {

@@ -3123,6 +3123,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
   };
 
   const resume = () => {
+    if (engineRef.current?.fieldSurveyPending) { setOverlay("pause"); return; }
     engineRef.current?.closeContainer();
     setOverlay(null);
     engineRef.current?.activate();
@@ -4777,7 +4778,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
               <button type="button" onClick={exportLegacyRecovery}>Legacy backup</button>
             </div>}
             <div className="stacked-menu-buttons">
-              <PixelButton className="gold-button" onClick={() => { setOverlay(null); engineRef.current?.activate(); }}>Back to Game</PixelButton>
+              <PixelButton className="gold-button" onClick={resume}>Back to Game</PixelButton>
               <PixelButton className="secondary-button" disabled={worldActionBusy || persistenceState.saving} onClick={saveAndQuit}>{worldActionBusy ? "Waiting for checkpoint…" : "Save & Quit to Title"}</PixelButton>
               <PixelButton onClick={() => engineRef.current?.openOverlay("map")}>Map <kbd>M</kbd></PixelButton>
               {hud.spaceflight && <PixelButton onClick={() => engineRef.current?.openOverlay("spaceflight")}>Spacecraft Mission <kbd>P</kbd></PixelButton>}
@@ -5133,7 +5134,10 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
       {overlay === "wayworks" && hud.activeWayworks && (
         <WayworksPanel key={hud.activeWayworks.workshop?.process?.installationId ?? hud.activeWayworks.kind} {...hud.activeWayworks} feedback={toast} onClose={resume}
           onInspectResource={resource => engineRef.current?.inspectWorkshopResource(resource)}
-          onFlightAction={action => { void engineRef.current?.spaceflightAction(action, hud.activeWayworks!.revision).then(ok => { if (ok && action.kind === "launch") resume(); }); }}
+          onFlightAction={action => { void engineRef.current?.spaceflightAction(action, hud.activeWayworks!.revision).then(ok => {
+            if (engineRef.current?.fieldSurveyPending || ok && action.kind === "asteroid-survey") setOverlay("pause");
+            else if (ok && action.kind === "launch") resume();
+          }); }}
           onAction={action => engineRef.current?.workshopAction(action, hud.activeWayworks!.revision)} />
       )}
       {overlay === "spaceflight" && hud.spaceflight && <SpaceflightDialog mission={hud.spaceflight} feedback={toast} onClose={resume}

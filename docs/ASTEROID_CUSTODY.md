@@ -49,6 +49,20 @@ guest discards its active runtime. Generation-worker protocol 2 prevents an olde
 worker from silently generating the unexpanded field. Canonical asteroid IDs
 determine their orbit band in local-coordinate reconstruction.
 
+An owned, enabled Station Observatory in orbit can survey the next finite ring,
+up to extent 3. Each survey converts 1 kJ of stored electricity into 1 kJ of
+instrument heat and requires current machine/field revisions and container access.
+Existing asteroid records, claims and excavation pages remain unchanged; new rock
+is unclaimed and is not automatically discovered or credited to inventory.
+
+The survey checkpoints the current world, commits the expanded field and paid
+instrument together, then rebuilds the local view while paused. Resume explicitly
+from the pause menu. Close any shared session first; shared-session regeneration
+is not yet supported. If acknowledgement or reconstruction fails, use **Retry
+checkpoint** in the pause menu or reload the page to reopen the last committed
+world. The unchanged pending transaction is retained and cannot be overwritten
+by an old-runtime autosave or charged a second time on retry.
+
 Only the descriptor's bounded voxel region is claimed. Construction outside that
 region remains ordinary orbital construction, not an infinitely extending claim.
 Keep exports before moving between versions. Older binaries do not enforce the
@@ -60,6 +74,6 @@ Orbit gameplay uses these records. The pure local-coordinate projection and real
 ChunkWorld reconstruction are tested, but separate engine travel into an asteroid
 local frame is deliberately refused until attached containers, machine instances,
 facings and other metadata have one canonical frame owner. No duplicate resource
-view or debug travel path is opened. Runtime field expansion and the complete
-Celestial Frontiers travel/agent/verification matrix remain separate unfinished
-work; this checkpoint is not full expansion completion.
+view or debug travel path is opened. Shared-session field expansion and the
+complete Celestial Frontiers travel/agent/verification matrix remain unfinished;
+the solo observatory survey does not imply full expansion completion.

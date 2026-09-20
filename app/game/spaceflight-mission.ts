@@ -5,6 +5,7 @@ import type { StationAccess, StationAssociation, StationPosition, StationRegistr
 import type { StationTelemetry } from "./station-telemetry";
 import type { AsteroidClaim, AsteroidGrant } from "./asteroid-custody";
 import type { CelestialPoint } from "./celestial-terrain";
+import type { AsteroidSurveyIntent } from "./asteroid-survey";
 
 export const FIRST_FLIGHT_ROUTES = ["home-orbit", "home-surface", "morrow-orbit", "morrow-surface"] as const;
 export type FirstFlightRoute = typeof FIRST_FLIGHT_ROUTES[number];
@@ -36,6 +37,7 @@ export type StationManagementIntent =
 export type SpaceflightIntent =
   | { kind: "deploy" }
   | { kind: "observatory-read" }
+  | AsteroidSurveyIntent
   | { kind: "route"; route: FirstFlightRoute }
   | { kind: "supply"; resource: VehicleResource; vehicleRevision: number }
   | { kind: "board" | "consent" | "leave" | "abort" | "launch" | "retry-arrival"; vehicleRevision: number }

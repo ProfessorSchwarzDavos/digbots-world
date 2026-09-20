@@ -2,6 +2,18 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Guest checkpoint de50da5 independently accepted by Wildkeeper. Solo ordinary
+  Observatory survey now prepares one finite ring, exactly converts1000J to heat,
+  commits before runtime reconstruction, and retains an exact retry receipt through
+  acknowledgement/hydration failure. Autosave/other transitions cannot overwrite
+  a pending candidate; shared sessions are explicitly refused. Focused37PASS,
+  expanded79PASS, static59+60/lint41+42PASS; final candidate deep-copy added against
+  nested live-metadata aliasing, recheck pending. Real IndexedDB
+  seven fault stages plus exact retry/cold/Home-orbit custody PASS. Initial UI-test
+  import failed because CSS loader was missing (64PASS1FAIL); existing adapter
+  corrected without runtime weakening. Pose-only fixture retains60asteroids and
+  existing1000J instrument. Source-bound build/normal UI/mobile/cold replay remain
+  pending; separate local-frame travel and fullCF6 remain incomplete. Zero helpers.
 - Typed guest checkpoint0f028e7/build27 FbED-5hbZ7V6B5ess6EDS locally verified:
   committed123PASS/static58/lint39+40/build27/unchanged official27PASS. Fresh native
   two-browser protocol5 accepts six ordinary till/plant/fill/pour/insert/remove

@@ -15,6 +15,8 @@ export type UniverseSaveStatus = Readonly<{
   message: string;
 }>;
 type LegacyCandidate = Readonly<{ world: StoredWorld; sourceGeneratorVersion: number; backups: readonly { sourceKey: string; raw: string }[] }>;
+type ReloadCheckpoint = { universeId: string; transactionId: string; save: WorldSave; revision: number;
+  metadata: WorldMetadata; options: WorldOptions; world?: StoredWorld };
 
 function issue(error: unknown): WorldStorageIssue {
   const code = error instanceof UniverseStorageError ? error.code : "unavailable";
@@ -87,6 +89,7 @@ export class UniverseWorldStorage {
   private writerConfirmed = false;
   private disposed = false;
   private pendingVehicleCommit: { destination: LocationId; save: WorldSave; input: VehicleLocationCommit; revision: number; universeId: string } | null = null;
+  private reloadCheckpoint: ReloadCheckpoint | null = null;
   /** A durable commit can succeed before renderer/worker hydration fails. Retain
    * one exact receipt until the next save so retry never uses the new revision. */
   private completedVehicleCommit: { destination: LocationId; save: WorldSave; input: VehicleLocationCommit; universeId: string; world: StoredWorld } | null = null;
@@ -197,7 +200,7 @@ export class UniverseWorldStorage {
     try {
       const loaded = await this.repository.load(universeId(id), lease);
       if (loaded.manifest.deletedAt !== null) throw new UniverseStorageError("not-found", "This universe was removed from the catalog.");
-      this.active = loaded; this.pendingVehicleCommit = null; this.completedVehicleCommit = null; this.writerConfirmed = true; this.selectedId = id; this.startHeartbeat(); return loaded;
+      this.active = loaded; this.pendingVehicleCommit = null; this.completedVehicleCommit = null; this.reloadCheckpoint = null; this.writerConfirmed = true; this.selectedId = id; this.startHeartbeat(); return loaded;
     } catch (error) { await this.repository.release(lease); throw error; }
   }
 
@@ -238,6 +241,7 @@ export class UniverseWorldStorage {
       const active = this.active;
       if (!active?.lease || active.manifest.id !== id) throw new UniverseStorageError("conflict", "This session does not own that world.");
       if (this.pendingVehicleCommit) throw new UniverseStorageError("conflict", "An arrival acknowledgement is pending. Retry arrival or reopen the committed world before saving.");
+      if (this.reloadCheckpoint) throw new UniverseStorageError("conflict", "A field reload is pending. Retry its unchanged checkpoint or reopen the committed world before saving.");
       const now = Date.now();
       const metadata: WorldMetadata = { ...active.world.metadata, mode: captured.save.mode, updatedAt: now, lastPlayedAt: captured.markPlayed === false ? active.world.metadata.lastPlayedAt : now,
         playTimeMs: Math.min(Number.MAX_SAFE_INTEGER, active.world.metadata.playTimeMs + Math.max(0, Math.trunc(captured.playTimeDeltaMs ?? 0))), lastSavedGameVersion: normalizeGameVersion(captured.save.lastSavedGameVersion) };
@@ -247,11 +251,40 @@ export class UniverseWorldStorage {
     });
   }
 
+  /** Stable same-location commit used when the runtime must be rebuilt. Keep the
+   * exact metadata/options as well as payload across uncertain acknowledgements. */
+  commitReloadCheckpoint(id: string, save: WorldSave, transactionId: string): Promise<WorldStorageResult<StoredWorld>> {
+    const captured = cloneUniverseJson(save);
+    return this.perform("saving", "Committing the surveyed field before rebuilding its view…", async () => {
+      const active = this.active;
+      if (!active?.lease || active.manifest.id !== id || this.pendingVehicleCommit) throw new UniverseStorageError("conflict", "This session cannot replace the current field checkpoint.");
+      const pending = this.reloadCheckpoint;
+      if (pending && (pending.universeId !== id || pending.transactionId !== transactionId || canonicalJson(pending.save) !== canonicalJson(captured))) throw new UniverseStorageError("conflict", "Retry the unchanged field checkpoint first.");
+      const attempt = pending ?? { universeId: id, transactionId, save: captured, revision: active.manifest.revision,
+        metadata: { ...active.world.metadata, updatedAt: Date.now() }, options: cloneUniverseJson(active.world.options) };
+      this.reloadCheckpoint = attempt;
+      if (attempt.world) return cloneUniverseJson(attempt.world);
+      const loaded = await this.repository.checkpoint(universeId(id), attempt.save, attempt.revision, active.lease,
+        { transactionId: attempt.transactionId, metadata: attempt.metadata, options: attempt.options });
+      this.acceptLoadedCheckpoint(loaded);
+      attempt.world = cloneUniverseJson(loaded.world);
+      return cloneUniverseJson(attempt.world);
+    });
+  }
+
+  /** Release the overwrite barrier only after the exact committed view loaded. */
+  acknowledgeReloadCheckpoint(transactionId: string): void {
+    if (!this.reloadCheckpoint?.world || this.reloadCheckpoint.transactionId !== transactionId) throw new UniverseStorageError("conflict", "No matching committed field reload is ready.");
+    this.reloadCheckpoint = null;
+    this.completedVehicleCommit = null;
+  }
+
   /** Test-only travel keeps the departing payload until the atomic commit. */
   transitionSyntheticLocation(destination: LocationId, save: WorldSave, initialSyntheticSave: WorldSave): Promise<WorldStorageResult<StoredWorld>> {
     const captured = cloneUniverseJson(save), initial = cloneUniverseJson(initialSyntheticSave);
     return this.perform("saving", "Committing the departing location and transferring player custody…", async () => {
       const active = this.active;
+      if (this.reloadCheckpoint) throw new UniverseStorageError("conflict", "Complete the field reload before changing location.");
       if (!active?.lease || active.world.save.agentTestWorld !== true) throw new UniverseStorageError("invalid", "Synthetic travel requires an owned test-admin world.");
       const loaded = await this.repository.transition(active.manifest.id, captured, destination, active.manifest.revision, active.lease,
         { transactionId: crypto.randomUUID(), initialSyntheticSave: initial });
@@ -264,6 +297,7 @@ export class UniverseWorldStorage {
     const captured = cloneUniverseJson(save), intent = cloneUniverseJson(input);
     return this.perform("saving", "Committing ship, crew and cargo at the destination…", async () => {
       const active = this.active;
+      if (this.reloadCheckpoint) throw new UniverseStorageError("conflict", "Complete the field reload before changing location.");
       if (!active?.lease) throw new UniverseStorageError("conflict", "This session does not own the departing universe.");
       const completed = this.completedVehicleCommit;
       if (completed?.universeId === active.manifest.id && completed.input.checkpointId === intent.checkpointId) {

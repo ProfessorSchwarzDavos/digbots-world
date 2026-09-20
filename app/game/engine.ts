@@ -799,6 +799,7 @@ import { firstFlightDestination, inspectSpaceflightMission, isStationManagementI
 import { applyStationAction, createStationRegistry, stationAllows, stationAt, validateStationRegistrySave, type StationPermission, type StationRegistrySave } from "./orbital-station";
 import { asteroidAtPoint, asteroidOrbitFor, captureAsteroidEdits, prepareAsteroidLocation, withAsteroidField, type AsteroidFieldsSave } from "./asteroid-runtime";
 import { applyAsteroidAction, asteroidAllows } from "./asteroid-custody";
+import { prepareAsteroidSurvey, type AsteroidSurveyIntent } from "./asteroid-survey";
 import { planStationFoundation, planStationCabin, planStationDock, planStationDockRegistration, shipDock, validateStationFleetCustody } from "./station-runtime";
 import { inspectLaunchPad, supplyVehicleFromMachine, type LaunchPadCheck } from "./spaceflight-infrastructure";
 import { spaceflightMachineKind } from "./spaceflight-catalog";
@@ -4620,6 +4621,8 @@ export class VoxelEngine {
   agentReturningMaterials = new Map<string, InventorySlot[]>();
   private locationTransitioning = false;
   private pendingSpaceArrival: { destination: LocationId; save: WorldSave; input: VehicleLocationCommit; running: boolean; paused: boolean; overlay: boolean } | null = null;
+  private pendingFieldSurvey: { save: WorldSave; transactionId: string; worldId: string; running: boolean; paused: boolean; overlay: boolean } | null = null;
+  get fieldSurveyPending() { return !!this.pendingFieldSurvey; }
   /** Additive legacy metadata is retained but never interpreted by gameplay. */
   private saveExtensions: Record<string, unknown> = {};
   agentObservationSequences = new Map<string, number>();
@@ -6698,7 +6701,7 @@ export class VoxelEngine {
   /** Host-owned final boundary. Normal flight supplies a generated destination;
    * no origin renderer/worker/inventory is retired before the IDB commit. */
   async commitSpaceVehicleLocation(vehicleId: string, initialDestinationSave?: WorldSave, landingPosition?: [number, number, number]) {
-    if (!this.persistent || !this.activeWorldId || this.multiplayer?.role === "guest" || this.locationTransitioning) return { ok: false as const, code: "vehicle_authority_denied" };
+    if (!this.persistent || !this.activeWorldId || this.multiplayer?.role === "guest" || this.locationTransitioning || this.pendingFieldSurvey) return { ok: false as const, code: "vehicle_authority_denied" };
     if (this.multiplayer?.role === "host" && this.remotePlayers.size) {
       this.events.onToast("Arrival held: another participant occupies the origin. End the shared session, then retry this checkpoint.");
       return { ok: false as const, code: "vehicle_origin_occupied" };
@@ -6735,6 +6738,45 @@ export class VoxelEngine {
       this.running = this.pendingSpaceArrival ? false : previous.running;
       this.paused = this.pendingSpaceArrival ? true : previous.paused;
       this.gameplayOverlayOpen = this.pendingSpaceArrival ? true : previous.overlay;
+    }
+  }
+
+  /** Same-location regeneration has the same commit-before-retire boundary as
+   * travel. It deliberately requires a closed shared session until resnapshot
+   * admission is implemented; a lobby cannot admit a peer during the commit. */
+  private async commitFieldSurvey(intent?: AsteroidSurveyIntent, expectedMachineRevision?: number): Promise<boolean> {
+    if (!this.persistent || !this.activeWorldId || this.multiplayer || this.locationTransitioning || this.pendingSpaceArrival) return false;
+    const previous = this.pendingFieldSurvey ?? { running: this.running, paused: this.paused, overlay: this.gameplayOverlayOpen };
+    this.locationTransitioning = true; this.running = false; this.paused = true;
+    try {
+      if (!this.pendingFieldSurvey) {
+        if (!intent || expectedMachineRevision === undefined || !this.activeWayworksKey || !await this.saveNow(false)) return false;
+        const save = structuredClone(prepareAsteroidSurvey(this.serialize(), this.world.locationScope.locationId,
+          this.activeWayworksKey, expectedMachineRevision, intent));
+        this.pendingFieldSurvey = { ...previous, save, transactionId: crypto.randomUUID(), worldId: this.activeWorldId };
+      }
+      const attempt = this.pendingFieldSurvey;
+      if (attempt.worldId !== this.activeWorldId) throw Error("The pending survey belongs to a different world.");
+      const result = await this.worldStorage.commitReloadCheckpoint(attempt.worldId, attempt.save, attempt.transactionId);
+      if (!result.ok) throw Error(result.error.message);
+      this.loadWorld(result.value.save, result.value.options, result.value.metadata.id);
+      this.worldStorage.acknowledgeReloadCheckpoint(attempt.transactionId);
+      this.pendingFieldSurvey = null;
+      this.persistenceError = null; this.reportPersistence();
+      this.events.onToast("Field survey committed. One new finite ring is available; existing asteroids and claims are unchanged.");
+      return true;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      this.persistenceError = this.pendingFieldSurvey
+        ? `Survey paused: ${detail} Use Retry checkpoint in the pause menu, or reload the page to reopen the committed world. Do not start another survey.`
+        : detail;
+      this.reportPersistence(); this.events.onToast(this.persistenceError); return false;
+    } finally {
+      this.locationTransitioning = false;
+      this.running = this.pendingFieldSurvey ? false : previous.running;
+      this.paused = this.pendingFieldSurvey ? true : previous.paused;
+      this.gameplayOverlayOpen = this.pendingFieldSurvey ? true : previous.overlay;
+      this.emitHud(true);
     }
   }
 
@@ -10782,6 +10824,7 @@ export class VoxelEngine {
   }
 
   activate() {
+    if (this.pendingFieldSurvey || this.locationTransitioning) { this.events.onToast("Finish the pending checkpoint before resuming."); return; }
     this.running = true;
     this.paused = false;
     this.titleMode = false;
@@ -13404,6 +13447,7 @@ export class VoxelEngine {
     const fail = (message: string) => { this.events.onToast(message); this.emitHud(true); return false; };
     if (this.multiplayer?.role === "guest" || !this.persistent || !this.activeWorldId || this.locationTransitioning || this.spaceflightBusy) return fail("Only the current universe host can operate this mission.");
     if (this.pendingSpaceArrival && action.kind !== "retry-arrival") return fail("Retry the pending arrival or reopen the committed world first.");
+    if (this.pendingFieldSurvey) return fail("Retry the pending field checkpoint from the pause menu, or reload the page first.");
     if (action.kind === "asteroid-claim" || action.kind === "asteroid-access") {
       try { return this.manageAsteroid(action); }
       catch (error) { return fail(error instanceof Error ? error.message : String(error)); }
@@ -13422,11 +13466,16 @@ export class VoxelEngine {
       && this.position.distanceTo(new THREE.Vector3(...ship.transform.position)) <= 6;
     if (!consoleReady && !aboard && !boardingNearby) return fail("Use nearby flight hardware or come within six blocks to board your pilot seat.");
     try {
-      if (action.kind === "observatory-read") {
+      if (action.kind === "observatory-read" || action.kind === "asteroid-survey") {
         if (!consoleReady || machine.kind !== "station-observatory" || !workshopRunning(machine.workshop)
           || !this.stationActorAccess("local", ...key.split(",").map(Number) as VehicleVector, "container")) return fail("Use your enabled, authorized nearby observatory.");
         if (expectedMachineRevision === undefined || machine.revision !== expectedMachineRevision || machine.revision >= Number.MAX_SAFE_INTEGER) return fail("Inspect the observatory again before reading its chart.");
         if (machine.energyJ < 1000 || workshopHeatCapacity(machine.workshop) - machine.workshop.heatJ < 1000) return fail("The observatory needs 1 kJ and room to reject its computation heat.");
+        if (action.kind === "asteroid-survey") {
+          if (this.multiplayer) return fail("Close the shared session before surveying; the local field view must reload.");
+          if (Object.values(this.spacefleet.vehicles).some(vehicle => vehicle.trip)) return fail("Finish or resolve the current flight before surveying.");
+          return await this.commitFieldSurvey(action, expectedMachineRevision);
+        }
         const { catalog, body } = this.bodyContext();
         // These are the explicitly available first-flight charts, not every
         // catalog body. The current body's identity is observed locally.
@@ -13606,6 +13655,11 @@ export class VoxelEngine {
         && this.guestPressureOnlyFacility?.locationId === state.locationId,
       ...(spaceflightMachineKind(state.kind) && !["station-truss", "station-radiator", "station-observatory"].includes(state.kind) ? { flight: this.spaceflightMission() } : {}),
       ...(state.kind === "station-observatory" && this.multiplayer?.role !== "guest" ? { observatoryCharts: this.observatoryCharts } : {}),
+      ...(state.kind === "station-observatory" ? { asteroidSurvey: (() => {
+        const registry = this.asteroidFields?.fields[this.world.locationScope.locationId];
+        return registry ? { level: registry.expansionLevel, count: registry.asteroids.length, epoch: registry.epoch,
+          registryRevision: registry.revision, shared: !!this.multiplayer } : null;
+      })() } : {}),
       ...(state.kind === "station-radiator" ? { radiatorBoundary: this.pressureRuntime?.machineThermalBoundary(this.activeWayworksKey!) ?? "unknown" } : {}),
       capacityJ: machineCapacity(state.kind, state.workshop), rateW: machineRate(state.kind), heldItemName: this.selectedSlot() ? itemName(this.selectedSlot()!.item) : "Empty hand",
       pressure: this.multiplayer?.role === "guest" ? this.guestPressureInspector?.diagnostics
@@ -13630,6 +13684,7 @@ export class VoxelEngine {
   workshopAction(action: WorkshopAction, expectedRevision: number) {
     const key = this.activeWayworksKey, state = key ? this.wayworks.get(key) : undefined;
     const fail = (message: string) => { this.events.onToast(message); this.emitHud(true); return false; };
+    if (this.locationTransitioning || this.pendingFieldSurvey) return fail("Finish the pending field checkpoint before changing machines.");
     if (key && this.multiplayer?.role === "guest") return this.requestSemanticFacilityOperation({ id: this.sharedFacilityId("wayworks", key), kind: "wayworks" },
       { kind: "workshop", action, inventorySlot: this.selected });
     // The host owns this local universe; a transient room identity is not a
@@ -35636,6 +35691,11 @@ export class VoxelEngine {
 
   async saveNow(notify = true): Promise<boolean> {
     if (!this.persistent) return true;
+    if (this.pendingFieldSurvey) {
+      if (notify && !this.locationTransitioning) return this.commitFieldSurvey();
+      this.persistenceError = "Field checkpoint pending: use Retry checkpoint or reopen before saving.";
+      this.reportPersistence(); return false;
+    }
     if (this.pendingSpaceArrival) {
       this.persistenceError = "Arrival acknowledgement pending: retry arrival or reopen before saving.";
       this.reportPersistence(); return false;

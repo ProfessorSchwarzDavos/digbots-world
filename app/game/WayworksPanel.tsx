@@ -36,6 +36,7 @@ export type WayworksPanelProps = Readonly<{
   pressureOnly?: boolean;
   radiatorBoundary?: "room" | "exterior" | "unknown";
   observatoryCharts?: { system: CelestialChartProjection; orbit: CelestialChartProjection } | null;
+  asteroidSurvey?: { level: number; count: number; epoch: number; registryRevision: number; shared: boolean } | null;
   pressure?: ReturnType<PressureRuntime["diagnosticsFor"]>;
   flight?: SpaceflightMission;
   onFlightAction?: (action: SpaceflightIntent) => void;
@@ -121,6 +122,13 @@ export function WayworksPanel(props: WayworksPanelProps) {
           {kind === "station-observatory" && <section aria-label="Observatory chart reader">
             <p className="ww-help">Read the first-flight chart for Waystar, Blockwild and Morrow, plus your current body. This snapshot includes only authorized local station points. Reading consumes 1 kJ and transfers it to the instrument heat buffer; no travel or hidden-world discovery is granted.</p>
             <button type="button" disabled={!enabled || energyJ < 1000 || !props.onFlightAction} onClick={() => props.onFlightAction?.({ kind: "observatory-read" })}>Read first-flight chart · 1 kJ</button>
+            {props.asteroidSurvey && <div aria-label="Finite asteroid field survey">
+              <p className="ww-help">Field extent {props.asteroidSurvey.level} / 3 · {props.asteroidSurvey.count} asteroids. A survey adds one finite ring, preserves existing claims and excavations, and reloads the local view after saving. The world stays paused until you resume. It grants no ownership or ore.</p>
+              <button type="button" disabled={!enabled || energyJ < 1000 || !props.onFlightAction || props.asteroidSurvey.shared || props.asteroidSurvey.level >= 3}
+                onClick={() => props.onFlightAction?.({ kind: "asteroid-survey", epoch: props.asteroidSurvey!.epoch, registryRevision: props.asteroidSurvey!.registryRevision })}>
+                {props.asteroidSurvey.level >= 3 ? "Field fully surveyed" : "Survey next ring and reload · 1 kJ"}</button>
+              {props.asteroidSurvey.shared && <p className="ww-help">Close the shared session to survey. Shared-session field reload is not available yet.</p>}
+            </div>}
             {props.observatoryCharts && <CelestialChart charts={props.observatoryCharts} initialMode="orbit" />}
           </section>}
           {kind === "station-radiator" && <p className="ww-help">Thermal boundary: {props.radiatorBoundary ?? "unknown"}. Connect imported heat through a Heat Conduit. Exposed panels reject up to {8 * (1 + workshop.upgrades.thermal)} kW; indoor panels transfer up to {2 * (1 + workshop.upgrades.thermal)} kW into the measured room. No electricity or coolant is created or consumed. Unknown boundaries retain heat.</p>}

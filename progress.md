@@ -11,7 +11,13 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
   transition/pointer failure retained; no unsupported layout patch. The actual
   oxygen-rich CO2 failure was mislabeled HYPOXIA; small warning-only correction
   keeps exposure/damage/custody unchanged and explains CO2 removal or sealed O2.
-  Focused-r32 61PASS/static-r27/lint-r16 PASS; fresh build/browser pending.
+  Exact838d27b focused-r32 61PASS/static-r27/lint-r16/build-r10/official-r10 PASS.
+  Normal co2-r1 desktop5/mobile8 warning and finite-suit recovery44 reviewed;
+  strict browser-co2-warning-r1 PASS exact inventory/fleet/room custody. First
+  quick equipment sequence cancelled the required1.5s unsafe-air swap; sequential
+  resumed swaps completed normally. Save50 retains recovered finite gear, not a
+  scrubbed room. Director hold: no new large integrations/helpers until cleared;
+  CF6/CFV remain incomplete. Owned preview/browser closed; checkpoint handoff.
 - Exact851b875 build-r8/official-r8 PASS. Cabin-r3 normal battery attachment,
   door entry/closure, controller enable and suit-free breathing PASS. Save335/
   cold344/save347 strict browser-cabin-pressure-custody-r1 PASS:99.311kPa,

@@ -2,6 +2,18 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Survey54c02c2/runtimeb3efd23/build29 independently accepted by Wildkeeper.
+  Attached-frame prerequisite now covers disjoint252-cell coordinate contracts,
+  whole machine/aquarium/pressure rebasing, exact gas/heat/deadline/identity custody,
+  real PressureTopology cold hydration, live/sleeping/boat/drop/lead transforms,
+  and exhaustive current location-field classification. Expanded82tests PASS.
+  A new actual-station-validator test exposed old-location pressure zone IDs
+  (zone-binding-r1 red retained); derived zone IDs and airlock references now
+  rebase with membership, while molecules/heat/installation identities stay exact.
+  No engine/storage/travel imports these new codecs; local-frame refusal remains.
+  Canonical owner catalog, complete component selector, durable split/compose,
+  all transaction faults and ordinary travel/visual proof are still unfinished.
+  No new browser/build/runtime acceptance is inferred from pure prerequisite tests.
 - Final survey runtimeb3efd232f84865ac7d2f450668e6c53c6c3a46b1/build29
   ABA8dhdUwNLNbrWF_dRlg passed committed79/static61/lint42-44, focusedUI19,
   unchanged official29 and normal/cold custody-r1. Exact paused1000J debit/heat,

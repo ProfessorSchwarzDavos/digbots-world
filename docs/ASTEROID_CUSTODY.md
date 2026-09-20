@@ -77,3 +77,19 @@ facings and other metadata have one canonical frame owner. No duplicate resource
 view or debug travel path is opened. Shared-session field expansion and the
 complete Celestial Frontiers travel/agent/verification matrix remain unfinished;
 the solo observatory survey does not imply full expansion completion.
+
+### Attached-frame development contract
+
+The current coordinate-codec prerequisites are isolated from engine travel:
+`asteroid-attachment-frame.ts` handles disjoint bounded cell views, whole machines,
+aquariums and pressure; `asteroid-attachment-entities.ts` handles known entity
+anchors and complete lead/passenger relationships; `asteroid-attachment-policy.ts`
+classifies every location-owned save field. These are not save-owner adapters or
+travel permission checks. Portable inventory metadata remains opaque.
+
+Pressure zone IDs are derived from location and membership, so projections must
+remap their station/airlock references together. Gas, heat, installation identities,
+airlock deadlines and finite cargo cannot change merely because coordinates do.
+Unknown fields and components crossing frame boundaries must block admission.
+The remaining single-owner catalog, complete physical/component selector, atomic
+storage integration and ordinary travel evidence are required before entry opens.

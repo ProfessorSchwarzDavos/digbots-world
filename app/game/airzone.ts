@@ -152,6 +152,19 @@ export function normalizeAirZoneState(value: unknown): AirZoneState | null {
   if (result.temperatureMilliC < -273_150 || result.temperatureMilliC > 2_000_000) return null;
   return result;
 }
+/** Rebase a whole saved room without redistributing gas or re-deriving resources.
+ * The caller owns the frame transaction and must reject any crossing installation.
+ * Zone IDs are derived location/membership references, not resource identities.
+ * Installation IDs live outside this record and stay opaque.
+ */
+export function rebaseAirZoneState(state: AirZoneState, locationId: string, cellKey: (key: string) => string): AirZoneState {
+  if (!normalizeAirZoneState(state) || !locationId || locationId.length > 200) throw new RangeError("invalid-frame-room");
+  const cellKeys = state.cellKeys.map(cellKey), controllerIds = state.controllerIds.map(cellKey);
+  const membershipDigest = digest(sortedUnique(cellKeys));
+  const rebased = { ...state, locationId, cellKeys, controllerIds, membershipDigest, zoneId: `${locationId}:air:${membershipDigest}` };
+  if (!normalizeAirZoneState(rebased)) throw new RangeError("invalid-frame-membership");
+  return rebased;
+}
 /** Whole gas quanta only; retain residualMl at the source endpoint. */
 export function gasMilliLitersToMilliMoles(volumeMl: number): Readonly<{ milliMoles: number; residualMl: number }> {
   if (!integer(volumeMl)) throw new RangeError("invalid-volume");

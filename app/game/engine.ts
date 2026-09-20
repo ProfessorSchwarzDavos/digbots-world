@@ -784,11 +784,17 @@ import {
   type WorldOptions,
 } from "./world-storage";
 import { UniverseWorldStorage as WorldStorage } from "./universe-world-storage";
-import { homeLocation, locationAddress, locationId, parseLocationId, sameLocationStamp, universeId, type LocationId } from "./location-address";
+import { deriveLocationSeed, homeLocation, locationAddress, locationId, parseLocationId, sameLocationStamp, universeId, type LocationId } from "./location-address";
 import { splitUniverseSave, composeUniverseSave } from "./universe-save";
 import { validateAgentCustody, type AgentCustodySave } from "./agent-custody";
 import { resetLocationTransients, validateLocationPlayerState, validLocationVelocity, type LocationPlayerState } from "./location-manager";
-import { validateSpacefleetSave, type SpacefleetSave } from "./space-vehicle";
+import { applySpaceVehicleAction, createSurveyHopper, SURVEY_HOPPER_CAPACITY, validateSpacefleetSave, type SpacefleetSave, type SpaceVehicleState, type VehicleVector } from "./space-vehicle";
+import { firstFlightDestination, inspectSpaceflightMission, type FirstFlightRoute, type SpaceflightIntent, type SpaceflightMission } from "./spaceflight-mission";
+import { inspectLaunchPad, supplyVehicleFromMachine, type LaunchPadCheck } from "./spaceflight-infrastructure";
+import { spaceflightMachineKind } from "./spaceflight-catalog";
+import { advanceSpaceCabin, advanceSpaceflight } from "./spaceflight-flight";
+import { createSpaceflightModel, updateSpaceflightModel } from "./spaceflight-models";
+import { celestialTerrainSeed, createCelestialTerrain } from "./celestial-terrain";
 import type { VehicleLocationCommit } from "./universe-storage";
 import {
   TYPESCRIPT_AGENT_ID_KEY,
@@ -1281,6 +1287,7 @@ export type RecipePlanResult =
 export type InventoryDragTarget = Readonly<{ area: "inventory" | "craft"; index: number }>;
 
 export type HudState = {
+  spaceflight?: SpaceflightMission | null;
   celestial?: { bodyName: string; gravityG: number; pressureKPa: number; localDayLengthMinutes: number; synthetic: boolean };
   health: number;
   hunger: number;
@@ -1301,7 +1308,7 @@ export type HudState = {
   activeOrbRack?: OrbRackHudState | null;
   activeHealingStation?: HealingStationHudState | null;
   activeWaygridItems?: WaygridItemHudState | null;
-  activeWayworks?: (MachineState & { name: string; capacityJ: number; rateW: number; heldItemName: string;
+  activeWayworks?: (MachineState & { name: string; capacityJ: number; rateW: number; heldItemName: string; flight?: SpaceflightMission;
     network?: { id: string; count: number; energyJ: number; capacityJ: number; revision: number } }) | null;
   activeWaygridCreatures?: WaygridCreatureHudState | null;
   activeAquarium?: AquariumHudState | null;
@@ -1644,7 +1651,7 @@ export type WorldSave = {
   savedAt: number;
 };
 
-export type OverlayKind = "wayworks" | "inventory" | "crafting" | "furnace" | "wheat-mill" | "chest" | "apiary" | "morph-loom" | "orb-rack" | "healing-station" | "waygrid-items" | "waygrid-creatures" | "aquarium" | "golem-forge" | "bestiary" | "creature-camp" | "multiplayer" | "sleep" | "pet" | "dragon" | "magic" | "skills" | "spell-wheel" | "library" | "incubator" | "map" | "quests" | "guilds" | "cardforge" | "cartography" | "alchemy" | "distillery" | "sugarworks" | "sentient" | "trade" | "bank" | "settlement" | "follower";
+export type OverlayKind = "spaceflight" | "wayworks" | "inventory" | "crafting" | "furnace" | "wheat-mill" | "chest" | "apiary" | "morph-loom" | "orb-rack" | "healing-station" | "waygrid-items" | "waygrid-creatures" | "aquarium" | "golem-forge" | "bestiary" | "creature-camp" | "multiplayer" | "sleep" | "pet" | "dragon" | "magic" | "skills" | "spell-wheel" | "library" | "incubator" | "map" | "quests" | "guilds" | "cardforge" | "cartography" | "alchemy" | "distillery" | "sugarworks" | "sentient" | "trade" | "bank" | "settlement" | "follower";
 export type CameraMode = "first" | "third-rear" | "third-front";
 
 export type MultiplayerUiState = {
@@ -4270,6 +4277,9 @@ export class VoxelEngine {
   wayworksMaterialTopology = new MaterialTopologyCache();
   pressureRuntime: PressureRuntime | null = null;
   spacefleet: SpacefleetSave = { schema: 1, vehicles: {} };
+  spaceflightRoute: FirstFlightRoute = "home-orbit";
+  spaceflightModels = new Map<string, THREE.Group>();
+  private spaceflightBusy = false;
   guestPressure: PressurePresentation | null = null;
   guestPressureInspector: PressureInspector | null = null;
   pressureInspectorSequence = 0;
@@ -4936,6 +4946,7 @@ export class VoxelEngine {
     // React owns keys while any menu is open. This explicit flag also covers
     // multiplayer, where opening a menu intentionally does not pause the host.
     if (this.titleMode || this.paused || this.gameplayOverlayOpen) return;
+    if (event.code === "KeyP" && !event.repeat && this.nearbySpaceVehicle()) { this.openOverlay("spaceflight"); return; }
     if (["KeyW", "KeyA", "KeyS", "KeyD", "Space", "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight", "KeyF", "KeyQ", "KeyZ", "KeyX", "KeyC"].includes(event.code)) event.preventDefault();
     if (event.code === "KeyE" && !event.repeat) {
       this.openOverlay("inventory");
@@ -13024,6 +13035,163 @@ export class VoxelEngine {
     }
   }
 
+  private nearbySpaceVehicle(): SpaceVehicleState | null {
+    const pending = this.pendingSpaceArrival?.save.spacefleet?.vehicles[this.pendingSpaceArrival.input.vehicleId];
+    if (pending) return pending;
+    const ships = Object.values(this.spacefleet?.vehicles ?? {}).filter(ship => ship.locationId === this.world.locationScope.locationId);
+    return ships.find(ship => ship.passengers.some(passenger => passenger.actorId === "local"))
+      ?? ships.filter(ship => this.position.distanceTo(new THREE.Vector3(...ship.transform.position)) <= 12)
+        .sort((a, b) => this.position.distanceToSquared(new THREE.Vector3(...a.transform.position)) - this.position.distanceToSquared(new THREE.Vector3(...b.transform.position)))[0] ?? null;
+  }
+
+  private launchPadFor(ship: SpaceVehicleState | null): LaunchPadCheck | null {
+    if (parseLocationId(this.world.locationScope.locationId).kind !== "surface") return null;
+    const occupants: VehicleVector[] = [...this.remotePlayers.values()].map(remote => [remote.target.x, remote.target.y, remote.target.z]);
+    if (!ship?.passengers.some(passenger => passenger.actorId === "local")) occupants.push(this.position.toArray() as VehicleVector);
+    const check = (center: VehicleVector, facing: number) => inspectLaunchPad((x, y, z) => this.world.getBlock(x, y, z), center, facing, occupants);
+    if (ship) return check([Math.round(ship.transform.position[0]), Math.round(ship.transform.position[1] - .51), Math.round(ship.transform.position[2])],
+      ((Math.round(ship.transform.rotation[1] / (Math.PI / 2)) % 4) + 4) % 4);
+    const pads = [...this.wayworks].filter(([key, state]) => state.kind === "launch-pad" && this.position.distanceTo(new THREE.Vector3(...key.split(",").map(Number))) <= 10)
+      .map(([key, state]) => check(key.split(",").map(Number) as VehicleVector, state.facing));
+    return pads.sort((a, b) => a.blockers.length - b.blockers.length)[0] ?? null;
+  }
+
+  private spaceflightMission(): SpaceflightMission {
+    const ship = this.nearbySpaceVehicle();
+    return inspectSpaceflightMission(ship, this.world.locationScope, this.spaceflightRoute, this.launchPadFor(ship), this.weather === "clear");
+  }
+
+  /** Human mission requests share the pure host authority and one save owner. */
+  async spaceflightAction(action: SpaceflightIntent, expectedMachineRevision?: number): Promise<boolean> {
+    const fail = (message: string) => { this.events.onToast(message); this.emitHud(true); return false; };
+    if (this.multiplayer?.role === "guest" || !this.persistent || !this.activeWorldId || this.locationTransitioning || this.spaceflightBusy) return fail("Only the current universe host can operate this mission.");
+    if (this.pendingSpaceArrival && action.kind !== "retry-arrival") return fail("Retry the pending arrival or reopen the committed world first.");
+    const key = this.activeWayworksKey, machine = key ? this.wayworks.get(key) : undefined, ship = this.nearbySpaceVehicle();
+    const aboard = ship?.passengers.some(passenger => passenger.actorId === "local");
+    const consoleReady = key && machine && spaceflightMachineKind(machine.kind) && machine.enabled && machine.ownerId === "local"
+      && machine.locationId === this.world.locationScope.locationId && machineKindForBlock(this.world.getBlock(...key.split(",").map(Number) as VehicleVector)) === machine.kind
+      && this.position.distanceTo(new THREE.Vector3(...key.split(",").map(Number))) <= 6
+      && (expectedMachineRevision === undefined || machine.revision === expectedMachineRevision);
+    if (!consoleReady && !aboard) return fail("Use nearby flight hardware, or board your pilot seat.");
+    try {
+      if (action.kind === "route") { firstFlightDestination(this.world.locationScope.locationId, action.route); this.spaceflightRoute = action.route; this.emitHud(true); return true; }
+      if (action.kind === "deploy") {
+        const held = this.selectedSlot(), pad = this.launchPadFor(null);
+        if (ship || held?.item !== Item.SurveyHopper || held.metadata || !pad?.valid) return fail(pad?.blockers[0] ?? "Select one crafted Hopper beside a complete, clear launch pad.");
+        const position: VehicleVector = [pad.center[0], pad.center[1] + .51, pad.center[2]];
+        const created = structuredClone(createSurveyHopper(crypto.randomUUID(), "local", this.world.locationScope.locationId, position));
+        created.transform.rotation[1] = pad.facing * Math.PI / 2;
+        this.spacefleet = validateSpacefleetSave({ schema: 1, vehicles: { ...this.spacefleet.vehicles, [created.vehicleId]: created } });
+        this.inventory[this.selected] = held.count > 1 ? { ...held, count: held.count - 1 } : null;
+      } else {
+        if (!ship || ship.revision !== action.vehicleRevision) return fail("The spacecraft changed. Inspect the current mission again.");
+        const actor = { actorId: "local", locationId: this.world.locationScope.locationId, expectedVehicleRevision: ship.revision };
+        const base = { vehicleId: ship.vehicleId, actionId: crypto.randomUUID() };
+        if (action.kind === "retry-arrival") {
+          if (this.pendingSpaceArrival) return (await this.commitSpaceVehicleLocation(ship.vehicleId)).ok;
+          return this.arriveSpaceVehicle(ship);
+        }
+        if (action.kind === "supply") {
+          const gantries = [...this.wayworks].filter(([, state]) => state.kind === "fuel-gantry" || state.kind === "orbital-dock")
+            .sort(([a], [b]) => Number(b === key) - Number(a === key));
+          let error = "Place a powered Fuel Gantry within seven blocks of the ship.";
+          let supplied = false;
+          for (const [gantryKey, state] of gantries) try {
+            const result = supplyVehicleFromMachine({ fleet: this.spacefleet, vehicleId: ship.vehicleId, expectedVehicleRevision: ship.revision,
+              machine: state, machineKey: gantryKey, expectedMachineRevision: state.revision, actorId: "local", actorLocationId: actor.locationId,
+              resource: action.resource, maximum: SURVEY_HOPPER_CAPACITY[action.resource], actionId: base.actionId });
+            this.spacefleet = result.fleet; this.wayworks.set(gantryKey, result.machine); supplied = true; break;
+          } catch (caught) { error = caught instanceof Error ? caught.message : String(caught); }
+          if (!supplied) return fail(error);
+        } else if (action.kind === "launch") {
+          const mission = this.spaceflightMission();
+          if (mission.blockers.length || !mission.destination) return fail(mission.blockers[0] ?? "Choose a destination.");
+          this.spaceflightBusy = true;
+          try {
+            const target = await this.worldStorage.describeLocation(mission.destination);
+            const current = this.spaceflightMission();
+            if (current.ship?.vehicleId !== ship.vehicleId || current.ship.revision !== ship.revision || current.destination !== mission.destination || current.blockers.length) return fail(current.blockers[0] ?? "Mission changed while preparing the route.");
+            this.spacefleet = applySpaceVehicleAction(this.spacefleet, { ...actor, originStamp: this.world.locationScope, destinationStamp: target.stamp },
+              { ...base, type: "reserve", transactionId: crypto.randomUUID() }).fleet;
+          } finally { this.spaceflightBusy = false; }
+        } else if (action.kind === "cargo-in") {
+          const held = this.selectedSlot(); if (!held) return fail("Select a stack to load.");
+          const result = applySpaceVehicleAction(this.spacefleet, { ...actor, source: { id: "pilot-pack", revision: ship.revision, locationId: actor.locationId,
+            resources: { fuelMl: 0, oxidizerMl: 0, oxygenMl: 0, batteryJoules: 0 }, cargo: [cloneSlot(held)], cargoOwnership: [crypto.randomUUID()] } },
+          { ...base, type: "cargo-in", sourceId: "pilot-pack", sourceRevision: ship.revision, sourceSlot: 0, vehicleSlot: action.slot });
+          this.spacefleet = result.fleet; this.inventory[this.selected] = null;
+        } else if (action.kind === "cargo-out") {
+          const result = applySpaceVehicleAction(this.spacefleet, actor, { ...base, type: "cargo-out", vehicleSlot: action.slot });
+          const credit = result.externalWrites.find(write => write.kind === "cargo-credit");
+          if (!credit || credit.kind !== "cargo-credit") return fail("Cargo could not be transferred.");
+          const moved = transferAgentStacksExact([credit.cargo], this.inventory, { sourceSlot: 0, destinationSlot: null, count: credit.cargo.count });
+          if (!moved.ok || moved.moved !== credit.cargo.count) return fail("Make room for the complete cargo stack.");
+          this.inventory = moved.destination; this.spacefleet = result.fleet;
+        } else {
+          const result = applySpaceVehicleAction(this.spacefleet, actor, action.kind === "consent" ? { ...base, type: "consent", consent: true }
+            : { ...base, type: action.kind });
+          this.spacefleet = result.fleet;
+          if (action.kind === "leave") { this.position.set(ship.transform.position[0] + 2.5, ship.transform.position[1] + .5, ship.transform.position[2]); this.velocity.set(0, 0, 0); }
+        }
+      }
+      this.saveSoon(); this.emitHud(true); return true;
+    } catch (error) { return fail(error instanceof Error ? error.message : String(error)); }
+  }
+
+  private async arriveSpaceVehicle(ship: SpaceVehicleState) {
+    if (!ship.trip || this.spaceflightBusy || this.pendingSpaceArrival) return false;
+    this.spaceflightBusy = true;
+    try {
+      const address = parseLocationId(ship.trip.destination), target = await this.worldStorage.describeLocation(ship.trip.destination);
+      const seed = deriveLocationSeed("body", this.worldStorage.currentManifest?.metadata.seed ?? this.world.seedText, address.bodyId);
+      const terrain = createCelestialTerrain({ location: address, seed: celestialTerrainSeed(seed) });
+      const berth = ship.modules.find(component => component.kind === "avionics")?.metadata.homeBerth as { locationId?: string; position?: unknown } | undefined;
+      let landing: VehicleVector;
+      if (berth?.locationId === ship.trip.destination && Array.isArray(berth.position) && berth.position.length === 3 && berth.position.every(value => Number.isFinite(value))) landing = [...berth.position] as VehicleVector;
+      else if (terrain) landing = [Math.round(terrain.arrival.position.x), terrain.arrival.position.y - .49, Math.round(terrain.arrival.position.z)];
+      else if (target.spawn) landing = [target.spawn.x, target.spawn.y, target.spawn.z];
+      else throw Error("Destination has no supported terrain or remembered landing site.");
+      const initial: WorldSave = { version: 2, generatorVersion: GENERATOR_VERSION, generatorProfile: "world-below-v15", seed,
+        mode: this.mode, edits: {}, player: { x: landing[0], y: landing[1], z: landing[2], yaw: 0, pitch: 0 }, spawn: { x: landing[0], y: landing[1], z: landing[2] },
+        inventory: [], selected: 0, health: 10, hunger: 10, xp: 0, level: 0, time: this.worldTime, day: this.day,
+        weather: "clear", furnaces: {}, chests: {}, savedAt: Date.now() };
+      const result = await this.commitSpaceVehicleLocation(ship.vehicleId, initial, landing);
+      if (result.ok) { this.spaceflightRoute = address.kind === "surface" ? address.bodyId === "blockwild" ? "home-orbit" : "morrow-orbit" : address.bodyId === "blockwild" ? "home-surface" : "morrow-surface"; this.events.onToast("Arrival committed. P opens your mission; leave the seat only with a safe EVA plan."); }
+      else this.openOverlay("spaceflight");
+      return result.ok;
+    } catch (error) {
+      this.paused = true; this.events.onToast(`Arrival preparation paused: ${error instanceof Error ? error.message : String(error)}. Open the mission to retry.`);
+      this.openOverlay("spaceflight"); return false;
+    } finally { this.spaceflightBusy = false; this.emitHud(true); }
+  }
+
+  private updateSpaceVehicles(dt: number) {
+    const ship = this.nearbySpaceVehicle();
+    if (ship && !ship.trip && this.running && !this.paused && !this.pendingSpaceArrival) {
+      this.spacefleet = advanceSpaceCabin(this.spacefleet, ship.vehicleId, dt * 1000);
+      if (this.spacefleet.vehicles[ship.vehicleId].oxygenMl !== ship.oxygenMl) this.persistenceDirty = true;
+    }
+    if (ship?.trip && ship.passengers.some(passenger => passenger.actorId === "local") && this.running && !this.paused && !this.locationTransitioning && !this.spaceflightBusy && !this.pendingSpaceArrival) {
+      try {
+        const axis = (positive: string, negative: string) => (Number(this.keys.has(positive)) - Number(this.keys.has(negative))) as -1 | 0 | 1;
+        const frame = advanceSpaceflight(this.spacefleet, ship.vehicleId, dt * 1000, { throttle: axis("KeyW", "KeyS"), pitch: axis("ArrowUp", "ArrowDown"), turn: axis("KeyD", "KeyA") });
+        this.spacefleet = frame.fleet;
+        if (frame.phaseChanged) { this.saveSoon(); if (frame.message) this.events.onToast(frame.message); }
+        if (frame.ready) void this.arriveSpaceVehicle(frame.fleet.vehicles[ship.vehicleId]);
+      } catch (error) { this.paused = true; this.events.onToast(`Flight paused: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+    const visible = Object.values(this.spacefleet.vehicles).filter(value => value.locationId === this.world.locationScope.locationId);
+    for (const [id, model] of this.spaceflightModels) if (!visible.some(value => value.vehicleId === id)) { model.removeFromParent(); this.disposeObject(model); this.spaceflightModels.delete(id); }
+    for (const vehicle of visible) {
+      let model = this.spaceflightModels.get(vehicle.vehicleId);
+      if (!model) { model = createSpaceflightModel("survey-hopper"); this.scene.add(model); this.spaceflightModels.set(vehicle.vehicleId, model); }
+      model.position.set(...vehicle.transform.position); model.rotation.set(...vehicle.transform.rotation);
+      updateSpaceflightModel(model, { time: this.universeTimeSeconds, active: !!vehicle.trip, thrust: vehicle.phase === "ascent" ? (vehicle.flight?.throttlePermille ?? 700) / 1000 : 0,
+        landingGear: ["parked", "landed", "countdown", "descent"].includes(vehicle.phase) ? 1 : 0, fill: vehicle.fuelMl / SURVEY_HOPPER_CAPACITY.fuelMl });
+      if (vehicle.passengers.some(passenger => passenger.actorId === "local")) { this.position.set(vehicle.transform.position[0], vehicle.transform.position[1] + 1.15, vehicle.transform.position[2] - .3); this.velocity.set(0, 0, 0); }
+    }
+  }
+
   private wayworksHud() {
     const state = this.activeWayworksKey ? this.wayworks.get(this.activeWayworksKey) : undefined;
     if (!state) { this.guestPressureInspector = null; return null; }
@@ -13033,6 +13201,7 @@ export class VoxelEngine {
     }) || machineKindForBlock(this.world.getBlock(...this.activeWayworksKey!.split(",").map(Number) as [number, number, number])) !== state.kind)) this.guestPressureInspector = null;
     const network = this.wayworksNetworks?.find((entry) => entry.nodeKeys.includes(this.activeWayworksKey!));
     return { ...state, name: state.kind.split("-").map(word => word[0].toUpperCase() + word.slice(1)).join(" "),
+      ...(spaceflightMachineKind(state.kind) ? { flight: this.spaceflightMission() } : {}),
       capacityJ: machineCapacity(state.kind, state.workshop), rateW: machineRate(state.kind), heldItemName: this.selectedSlot() ? itemName(this.selectedSlot()!.item) : "Empty hand",
       pressure: this.multiplayer?.role === "guest" ? this.guestPressureInspector?.diagnostics
         : this.pressureRuntime?.devices.has(this.activeWayworksKey!) ? this.pressureRuntime.diagnosticsFor(this.activeWayworksKey!) : undefined,
@@ -13143,6 +13312,11 @@ export class VoxelEngine {
   }
 
   private personalEnvironment() {
+    const ship = this.nearbySpaceVehicle();
+    if (ship?.passengers.some(passenger => passenger.actorId === "local") && ship.oxygenMl > 0 && ship.batteryJoules > 0 && ship.hull > 0) return {
+      ...this.bodyContext().environment, pressureKPa: 95, oxygenFraction: .21, co2Fraction: .001, inertFraction: .789,
+      breathable: true, requiresPressureSuit: false, temperatureC: [18, 22] as const, radiation: 0, corrosive: false,
+    };
     const point = { x: Math.floor(this.position.x + .5), y: Math.floor(this.position.y + this.cameraEyeHeight + .5), z: Math.floor(this.position.z + .5) };
     return this.pressureRuntime?.environmentAt(point) ?? pressurePresentationEnvironmentAt(this.guestPressure, point, this.bodyContext().environment);
   }
@@ -14809,7 +14983,7 @@ export class VoxelEngine {
       if (recipe.table && size < 3) continue;
       if (blueprintCraftingLock(this.blueprints, recipe.id, recipe.blueprint)) continue;
       if (recipe.width !== width || recipe.height !== height) continue;
-      if (recipe.output.item >= BlockId.LiquidPipe && recipe.output.item <= Item.PressurePolymer
+      if (recipe.output.item >= BlockId.LiquidPipe && recipe.output.item <= Item.SurveyHopper
         && this.craftGrid.some(slot => slot && (slot.durability !== undefined || slot.metadata && Object.keys(slot.metadata).length))) continue;
       for (const pattern of recipePatterns(recipe)) {
         let matches = true;
@@ -20333,6 +20507,10 @@ export class VoxelEngine {
       this.target = { ...this.target, y: this.target.y - 1, type: lower };
     }
     const { x, y, z, type } = this.target;
+    if (type === BlockId.LaunchPad && Object.values(this.spacefleet.vehicles).some(ship => ship.locationId === this.world.locationScope.locationId
+      && Math.abs(ship.transform.position[0] - x) <= 1.5 && Math.abs(ship.transform.position[2] - z) <= 1.5 && Math.abs(ship.transform.position[1] - y) < 3)) {
+      this.events.onToast("Move or recover the spacecraft before removing its launch pad."); return;
+    }
     const workshop = this.wayworks.get(blockKey(x, y, z));
     if (workshop && (workshop.energyJ > 0 || workshopStoredTotal(workshop.workshop, "fluid") > 0 || workshopStoredTotal(workshop.workshop, "chemical") > 0 || workshop.workshop.burnJ > 0 || workshop.workshop.heatJ > 0 || (workshop.workshop.process?.filterUsedMl ?? 0) > 0
       || Object.values(workshop.workshop.slots).some(Boolean) || Object.values(workshop.workshop.upgrades).some((count) => count > 0))
@@ -21023,6 +21201,7 @@ export class VoxelEngine {
 
   updatePlayer(dt: number) {
     this.updatePersonalLifeSupport(dt);
+    if (this.nearbySpaceVehicle()?.passengers.some(passenger => passenger.actorId === "local")) { this.grounded = true; this.fallDistance = 0; this.fallVelocity = 0; return; }
     if (this.mode !== "builder") this.creativeFlying = false;
     if (this.mode === "builder") {
       this.health = 10;
@@ -31567,6 +31746,8 @@ export class VoxelEngine {
   }
 
   clearEntities() {
+    for (const model of this.spaceflightModels?.values() ?? []) { model.removeFromParent(); this.disposeObject(model); }
+    this.spaceflightModels?.clear();
     this.clearWayworksModels(); this.wayworks?.clear(); this.activeWayworksKey = null; this.wayworksAccumulator = 0;
     this.pressureRuntime?.dispose(); this.pressureRuntime = null;
     if (this.pressureEditObserver) this.world.blockEditObservers.delete(this.pressureEditObserver);
@@ -32903,6 +33084,7 @@ export class VoxelEngine {
       const chunkWorkStartedAt = performance.now();
       chunkWorkReport = this.world.update(this.position.x, this.position.z, this.position.y, this.velocity.x, this.velocity.z);
       chunkWorkMilliseconds = performance.now() - chunkWorkStartedAt;
+      this.updateSpaceVehicles(dt);
       if (this.running && !this.paused) this.updateBoats(dt);
       if (this.running && !this.paused) this.updateRemoteLifeSupport(dt);
       if (this.running && !this.paused && (this.locked || this.touchMode)) {
@@ -32932,7 +33114,7 @@ export class VoxelEngine {
       basicDistance: this.settings.basicRenderDistance,
       caveBlend: this.cameraEnvironment.caveBackdropBlend,
       framePressure: this.averageFrameMs > 24 || chunkWorkMilliseconds > 6,
-      enabled: !this.agentMode && !this.titleMode,
+      enabled: !this.agentMode && !this.titleMode && !this.world.celestialTerrain,
       now,
     });
     this.updateChestModel(dt);
@@ -34105,6 +34287,7 @@ export class VoxelEngine {
         : this.targetMob ? { type: "mob", id: this.targetMob.id, name: this.targetMob.name }
           : this.targetBoat ? { type: "boat", id: this.targetBoat.save.id } : null,
       nearbyMobs,
+      spaceflight: this.nearbySpaceVehicle() ? this.spaceflightMission() : null,
       boats: [...this.boats.values()].map((boat) => ({ id: boat.save.id, position: [boat.save.x, boat.save.y, boat.save.z], passengers: boat.save.passengers.length, storageSlots: boat.save.inventory.filter(Boolean).length })),
       exhibits: [...this.chests.entries()].filter(([key]) => key.startsWith("exhibit:")).map(([key, slots]) => ({ key, capacity: slots.length, residents: slots.filter(Boolean).length })),
       ecology: {
@@ -34202,6 +34385,7 @@ export class VoxelEngine {
     }
     const lighting = this.world.lightingProbeAt(this.position.x, this.position.y + 1, this.position.z);
     this.events.onHud({
+      spaceflight: this.nearbySpaceVehicle() ? this.spaceflightMission() : null,
       celestial: { bodyName: this.bodyContext().body.name, gravityG: this.bodyContext().environment.gravityG,
         pressureKPa: this.bodyContext().environment.pressureKPa, localDayLengthMinutes: this.bodyContext().body.rotation.dayLengthMinutes,
         synthetic: this.agentTestWorld && !this.bodyContext().home },

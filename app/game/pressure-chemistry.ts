@@ -15,6 +15,11 @@ export type ChemistryRecipe = Readonly<{
 }>;
 /** Gas is standard-volume mL (24 mL = 1 mmol); liquid is mL. Batch equations are explicit. */
 export const CHEMISTRY_RECIPES: readonly ChemistryRecipe[] = [
+  { id: "press-bio-oil", name: "Press renewable bio-oil", machine: "fluid-refinery", durationMs: 3000, energyJ: 6000,
+    itemsIn: [{ slot: "input", item: Item.BiofuelPellet, count: 4 }], inputs: [{ slot: "fluid", resource: "water", amount: 1000 }],
+    outputs: [{ slot: "fluidAux", resource: "bio-oil", amount: 1000 }], itemsOut: [{ slot: "byproduct", item: Item.CarbonPowder, count: 1 }] },
+  { id: "refine-rocket-fuel", name: "Refine rocket fuel from bio-oil", machine: "fluid-refinery", durationMs: 4000, energyJ: 10000,
+    inputs: [{ slot: "fluid", resource: "bio-oil", amount: 1000 }], outputs: [{ slot: "fluidAux", resource: "refined-rocket-fuel", amount: 1000 }] },
   { id: "condense-water", name: "Condense atmospheric moisture", machine: "atmospheric-condenser", durationMs: 2000, energyJ: 4000,
     inputs: [], outputs: [{ slot: "fluid", resource: "water", amount: 100 }], harvest: "water" },
   ...(["oxygen", "inert", "methane", "carbon-dioxide"] as const).map(resource => ({

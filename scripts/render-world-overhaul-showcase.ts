@@ -53,6 +53,12 @@ const SURFACE_COLORS: Readonly<Record<BiomeId, string>> = Object.freeze({
   [BiomeId.SugarplumVale]: "#b57b9f",
   [BiomeId.Glimmerwood]: "#477963",
   [BiomeId.SnowcapRange]: "#edf2ed",
+  [BiomeId.PaleRegolithSea]: "#b5bbb0",
+  [BiomeId.StarshadowCraters]: "#686e76",
+  [BiomeId.MoonSlateHighlands]: "#8c97a5",
+  [BiomeId.IceLanternRilles]: "#a8dbd0",
+  [BiomeId.BuriedWaystoneGalleries]: "#798485",
+  [BiomeId.OrbitalVoid]: "#050813",
 });
 const UNDERGROUND_COLORS: Readonly<Record<UndergroundBiomeId, string>> = Object.freeze({
   [UndergroundBiomeId.OrdinaryTunnel]: "#59605e",

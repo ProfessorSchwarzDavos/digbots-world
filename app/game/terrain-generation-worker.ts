@@ -12,7 +12,7 @@ self.onmessage = (event: MessageEvent<Request>) => {
     const savedEdits = request.edits.length
       ? { [request.key]: request.edits.map(([index, type]) => [index, type] as [number, number]) }
       : undefined;
-    world.reset(request.seedText, savedEdits, request.generationOptions as Partial<WorldGenerationOptions>);
+    world.reset(request.seedText, savedEdits, request.generationOptions as Partial<WorldGenerationOptions>, undefined, request.locationScope);
     const chunk = world.generateChunk(request.cx, request.cz);
     const structureMarkers = [...world.structureMarkers.entries()].filter(([, marker]) => (
       Math.floor(marker.position.x / CHUNK_SIZE) === chunk.cx

@@ -2,6 +2,20 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — revision12, first transaction checkpoint
 
+- CF6-B/C source checkpoint: distinct hardware/Hopper crafts, real bio-oil and
+  refined rocket fuel recipes, paired finite gantry debits, normal host mission
+  deploy/cargo/board/consent/abort/relaunch controls and persisted pilot timing.
+  Parked cabins consume O2/power; authored capsule/ten hardware models integrated.
+  Actual orbit/Morrow generation and worker location scope replace Home terrain
+  at these destinations; five named regions/resources/sites, no Home fauna.
+- Focused-r5 62/62, static-r9 and scoped lint-r3 PASS. Integrated host tests use
+  staged machines/ingredients; production visual/normal-input proof is pending.
+  Earlier r4's one failure expected old Ice rather than new Mineral Frost;
+  corrected named-material expectation, retaining the failed receipt.
+- Still required within CF6: complete stations/permissions/docking/asteroid edit
+  custody, rescue, four Morrow creatures/ecology/capture, full maps/agent paths,
+  full normal journey and visuals. Source checkpoint is not CF6 completion.
+
 - CF5 accepted at4dda43e/runtime8e601fa; frozen evidence unchanged. CF6 full
   spacecraft/orbit/station/Morrow/return dispatch ACKed; CF7 not authorized.
 - Added one universe-owned ship table and strict finite-resource/cargo/crew

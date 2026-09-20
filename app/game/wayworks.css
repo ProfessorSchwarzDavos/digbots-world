@@ -94,6 +94,9 @@
 .ww-module-list > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px solid #bdad89; }
 .ww-module-list span { text-transform: capitalize; }
 
+.spaceflight-cockpit { position: absolute; top: 88px; left: 50%; transform: translateX(-50%); display: grid; gap: 5px; max-width: calc(100vw - 24px); padding: 12px 18px; background: #122d30ed; color: #f0ede0; border-bottom: 2px solid #c59367; text-align: center; pointer-events: none; font-size: 13px; }
+.spaceflight-cockpit small { color: #b6d0c6; font-size: 11px; }
+
 @media (max-width: 480px) {
   .ww-header { padding: 16px; gap: 10px; }
   .ww-body { padding: 16px; }

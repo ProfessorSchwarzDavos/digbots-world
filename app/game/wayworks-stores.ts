@@ -2,6 +2,7 @@ import { cloneSlot, Item, ITEMS, maxStack, type InventorySlot, type ItemCode } f
 import { validResourcePacket, type ResourceKind } from "./wayworks-resources";
 import type { LocalFace, MachineKind } from "./wayworks";
 import { chemistryMachine, pressureMachineKind, pressureMachineMeta, TRANSPORT_KINDS } from "./pressure-catalog";
+import { spaceflightMachineMeta } from "./spaceflight-catalog";
 import { AIRZONE_MAX_ENERGY, airThermalEnergy, totalAirGas, type AirGas } from "./airzone";
 
 export const WORKSHOP_SLOTS = ["input", "reagent", "fuel", "output", "byproduct"] as const;
@@ -85,11 +86,11 @@ export function createWorkshop(kind?: MachineKind): WorkshopState {
 }
 const whole = (value: unknown, maximum: number): value is number => Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= maximum;
 export function workshopFluidCapacity(kind: MachineKind, workshop: WorkshopState): number {
-  const base = pressureMachineMeta(kind)?.fluid ?? (kind === "fluid-tank" ? 64_000 : kind === "fluid-pump" ? 8_000 : kind === "enrichment-mill" ? 4_000 : 0);
+  const base = spaceflightMachineMeta(kind)?.fluid ?? pressureMachineMeta(kind)?.fluid ?? (kind === "fluid-tank" ? 64_000 : kind === "fluid-pump" ? 8_000 : kind === "enrichment-mill" ? 4_000 : 0);
   return base * (1 + workshop.upgrades.capacity);
 }
 export function workshopGasCapacity(kind: MachineKind, workshop: WorkshopState): number {
-  return (pressureMachineMeta(kind)?.gas ?? (kind === "gas-tank" ? 120_000 : 0)) * (1 + workshop.upgrades.capacity) * (1 + workshop.upgrades.seal);
+  return (spaceflightMachineMeta(kind)?.gas ?? pressureMachineMeta(kind)?.gas ?? (kind === "gas-tank" ? 120_000 : 0)) * (1 + workshop.upgrades.capacity) * (1 + workshop.upgrades.seal);
 }
 export function workshopStoredTotal(workshop: WorkshopState, kind: "fluid" | "chemical"): number {
   return (workshop[kind]?.amount ?? 0) + (kind === "fluid" ? workshop.process?.fluidAux?.amount ?? 0

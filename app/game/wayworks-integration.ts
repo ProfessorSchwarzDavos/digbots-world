@@ -1,5 +1,6 @@
 import { BlockId, cloneSlot, Item, maxStack, type InventorySlot } from "./data";
 import { PRESSURE_CATALOG } from "./pressure-catalog";
+import { SPACEFLIGHT_CATALOG } from "./spaceflight-catalog";
 import { gearCapacity, lifeSupportStore, validLifeSupportItem, withLifeSupport } from "./life-support";
 import { configureMachine, createMachine, MACHINE_FACES, machineCapacity, normalizeMachine, type LocalFace, type MachineKind, type MachineState, type PortMode } from "./wayworks";
 import { transferMachineItem, transferPortableResource } from "./wayworks-machines";
@@ -11,6 +12,7 @@ import { MATERIAL_KINDS, MATERIAL_PORT_MODES, UPGRADE_ITEMS, UPGRADE_KINDS, supp
   workshopStoredTotal, type MaterialKind, type MaterialPortMode, type UpgradeKind, type WorkshopSlot, type WorkshopState } from "./wayworks-stores";
 
 export const WAYWORKS_BLOCKS: Readonly<Partial<Record<BlockId, MachineKind>>> = Object.freeze({
+  ...Object.fromEntries(Object.entries(SPACEFLIGHT_CATALOG).map(([kind, def]) => [def.id, kind])) as Partial<Record<BlockId, MachineKind>>,
   ...Object.fromEntries(Object.entries(PRESSURE_CATALOG).map(([kind, def]) => [def.id, kind])) as Partial<Record<BlockId, MachineKind>>,
   [BlockId.HandDynamo]: "hand-dynamo", [BlockId.SunplateArray]: "sunplate-array",
   [BlockId.FieldBattery]: "field-battery", [BlockId.ChargingPedestal]: "charging-pedestal", [BlockId.GridCable]: "grid-cable",

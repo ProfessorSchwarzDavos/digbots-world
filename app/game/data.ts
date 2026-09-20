@@ -1,4 +1,5 @@
 import { PRESSURE_CATALOG } from "./pressure-catalog";
+import { SPACEFLIGHT_CATALOG } from "./spaceflight-catalog";
 
 export enum BlockId {
   Air = 0,
@@ -383,6 +384,18 @@ export enum BlockId {
   PressureDoorUpper = 685,
   HorizonDoorUpper = 686,
   EmergencyShutterUpper = 687,
+  LaunchPad = 693,
+  FuelGantry = 694,
+  MissionConsole = 695,
+  TrackingBeacon = 696,
+  OrbitalDock = 697,
+  RecoveryCrane = 698,
+  StationCore = 699,
+  StationTruss = 700,
+  StationRadiator = 701,
+  StationObservatory = 702,
+  PaleRegolith = 704,
+  MineralFrost = 705,
 }
 
 export const Item = {
@@ -409,6 +422,7 @@ export const Item = {
   CarbonPowder: 690,
   CeramicMembrane: 691,
   PressurePolymer: 692,
+  SurveyHopper: 703,
   None: 0,
   Stick: 100,
   Coal: 101,
@@ -1176,6 +1190,9 @@ export const BLOCKS: Record<number, BlockDefinition> = {
   [BlockId.FluidTank]: block(BlockId.FluidTank, "Fluid Tank", 40, 40, 40, 2, "#80b8bb", "pickaxe", 1, { layer: "none", shape: "wayworks" }),
   [BlockId.GasTank]: block(BlockId.GasTank, "Gas Tank", 40, 40, 40, 3, "#bbbe9a", "pickaxe", 1, { layer: "none", shape: "wayworks" }),
   ...Object.fromEntries(Object.values(PRESSURE_CATALOG).map(def => [def.id, block(def.id, def.name, 40, 40, 40, 3, def.color, "pickaxe", 1, { layer: "none", shape: "wayworks" })])),
+  ...Object.fromEntries(Object.values(SPACEFLIGHT_CATALOG).map(def => [def.id, block(def.id, def.name, 40, 40, 40, 4, def.color, "pickaxe", 1, { layer: "none", shape: "wayworks" })])),
+  [BlockId.PaleRegolith]: block(BlockId.PaleRegolith, "Pale Regolith", 9, 9, 9, 1.2, "#b5bbb0", "shovel", 0),
+  [BlockId.MineralFrost]: block(BlockId.MineralFrost, "Mineral Frost", 21, 21, 21, 1.5, "#a8dbd0", "pickaxe", 0),
   [BlockId.ReinforcedWindow]: block(BlockId.ReinforcedWindow, "Reinforced Window", 12, 12, 12, 3, "#b4d9d5", "pickaxe", 1, { layer: "none", shape: "wayworks" }),
   [BlockId.HangarFrame]: block(BlockId.HangarFrame, "Hangar Frame", 40, 40, 40, 4, "#8eaaa9", "pickaxe", 2, { layer: "none", shape: "wayworks" }),
   [BlockId.PressureDoorUpper]: block(BlockId.PressureDoorUpper, "Pressure Door Upper", 40, 40, 40, 3, "#9caeab", "pickaxe", 1, { layer: "none", shape: "wayworks" }),
@@ -1669,6 +1686,7 @@ Object.assign(ITEMS, {
   [Item.CarbonPowder]: { id: Item.CarbonPowder, name: "Recovered Carbon", color: "#596264", maxStack: 64 },
   [Item.CeramicMembrane]: { id: Item.CeramicMembrane, name: "Ceramic Membrane", color: "#d1ceb8", maxStack: 64 },
   [Item.PressurePolymer]: { id: Item.PressurePolymer, name: "Pressure Polymer", color: "#a2bdaf", maxStack: 64 },
+  [Item.SurveyHopper]: { id: Item.SurveyHopper, name: "Survey Hopper", color: "#bdc3b2", maxStack: 1 },
   [Item.FieldBreatherHelmet]: { ...armorItem(Item.FieldBreatherHelmet, "Field Breather Helmet", "#d3d6ca", "head", 1, 340), lifeSupportKind: "helmet" },
   [Item.LightOxygenTank]: { id: Item.LightOxygenTank, name: "Light O2 Tank", color: "#a8cec1", maxStack: 1, equipmentSlot: "back", lifeSupportKind: "tank" },
   [Item.ExpeditionOxygenTank]: { id: Item.ExpeditionOxygenTank, name: "Expedition O2 Tank", color: "#74a9a8", maxStack: 1, equipmentSlot: "back", lifeSupportKind: "tank" },
@@ -2557,8 +2575,21 @@ const softNetting: ItemCode[] = [Item.Fiber, Item.Feather];
 export const ANY_COAL: ItemCode[] = [Item.Coal, Item.Charcoal];
 const anyDragonScale: ItemCode[] = [Item.FireDragonScale, Item.IceDragonScale, Item.SteelDragonScale, Item.SeaDragonScale, Item.GoldDragonScale, Item.SilverDragonScale];
 const anyDragonHeart: ItemCode[] = [Item.FireDragonHeart, Item.IceDragonHeart, Item.SteelDragonHeart, Item.SeaDragonHeart, Item.GoldDragonHeart, Item.SilverDragonHeart];
+const spaceflightCraftCore: Record<keyof typeof SPACEFLIGHT_CATALOG, number> = {
+  "launch-pad": Item.IronSheet, "fuel-gantry": BlockId.FluidTank,
+  "mission-console": Item.CrystalShard, "tracking-beacon": Item.CopperIngot,
+  "orbital-dock": BlockId.GasTank, "recovery-crane": Item.GearCluster,
+  "station-core": BlockId.FieldBattery, "station-truss": Item.CopperSheet,
+  "station-radiator": BlockId.HeatConduit, "station-observatory": BlockId.Glass,
+};
 
 export const RECIPES: Recipe[] = [
+  { id: "survey-hopper", name: "Survey Hopper", width: 3, height: 3,
+    pattern: [Item.MachineAlloy, BlockId.ReinforcedWindow, Item.MachineAlloy, BlockId.ShipBatteryBank, Item.GearCluster, BlockId.LifeSupportController, Item.MachineAlloy, BlockId.HeatEngine, Item.MachineAlloy],
+    output: { item: Item.SurveyHopper, count: 1 }, table: true },
+  ...Object.entries(SPACEFLIGHT_CATALOG).map(([kind, def]) => ({ id: `spaceflight-${def.id}`, name: def.name, width: 3, height: 3,
+    pattern: [Item.IronSheet, Item.CopperSheet, Item.IronSheet, Item.MachineAlloy, spaceflightCraftCore[kind as keyof typeof SPACEFLIGHT_CATALOG], Item.MachineAlloy, Item.IronSheet, Item.CrystalShard, Item.IronSheet],
+    output: { item: def.id, count: def.id === BlockId.StationTruss ? 8 : def.id === BlockId.LaunchPad ? 9 : 1 }, table: true })),
   { id: "ceramic-membrane", name: "Ceramic Membrane", width: 3, height: 1, pattern: [BlockId.SunbakedClay, Item.StoneDust, BlockId.Glass], output: { item: Item.CeramicMembrane, count: 4 }, table: true },
   { id: "habitat-filter", name: "Habitat Filter", width: 3, height: 2, pattern: [Item.Fiber, Item.CarbonPowder, Item.Fiber, Item.IronSheet, Item.CeramicMembrane, Item.IronSheet], output: { item: Item.HabitatFilter, count: 2 }, table: true },
   { id: "starter-carbon-powder", name: "Filter Carbon", width: 2, height: 1, pattern: [ANY_COAL, Item.StoneDust], output: { item: Item.CarbonPowder, count: 2 }, table: true },

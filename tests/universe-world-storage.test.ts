@@ -4,8 +4,26 @@ import type { WorldSave } from "../app/game/engine.ts";
 import { UniverseWorldStorage, readLegacyUniverseCandidates } from "../app/game/universe-world-storage.ts";
 import type { UniverseLoadedWorld } from "../app/game/universe-storage.ts";
 import { LEGACY_WORLD_KEY, WORLD_CATALOG_KEY, WORLD_DATA_PREFIX, migrateLegacyWorldSave, normalizeWorldOptions } from "../app/game/world-storage.ts";
+import { flightFixture } from "./spaceflight-fixtures";
 
 const save = (generatorVersion = 18): WorldSave => ({ version: 2, generatorVersion, seed: "CF1-READONLY-MIGRATION", mode: "builder", player: { x: -17, y: 33, z: 0, yaw: 0, pitch: 0 }, spawn: { x: -17, y: 33, z: 0 }, inventory: [null], selected: 0, health: 10, hunger: 10, xp: 0, level: 0, edits: { "-2,0": [[100, 1]] }, time: 0.32, day: 1, weather: "clear", chests: { "-17,33,0": [null] }, furnaces: {}, savedAt: 1000 });
+
+test("facade replays the exact committed arrival after destination hydration fails", async () => {
+  const f = flightFixture("facade-hydration"), revisions: number[] = [];
+  const lease = { id: f.world.metadata.id, universeId: f.world.metadata.id, owner: "test", epoch: 1, expiresAt: Date.now() + 30000 };
+  const loaded = { world: { ...f.world, save: f.initial }, manifest: { id: f.world.metadata.id, revision: 8 }, lease };
+  const facade = Object.assign(Object.create(UniverseWorldStorage.prototype), {
+    active: { world: f.world, manifest: { id: f.world.metadata.id, revision: 7 }, lease }, writerConfirmed: true,
+    pendingVehicleCommit: null, completedVehicleCommit: null,
+    perform: async (_phase: string, _message: string, operation: () => Promise<unknown>) => ({ ok: true, value: await operation() }),
+    repository: { transitionVehicle: async (_id: string, _save: unknown, _destination: string, revision: number) => { revisions.push(revision); return loaded; } },
+  }) as UniverseWorldStorage;
+  const first = await facade.transitionVehicleLocation(f.destination.locationId, f.world.save, f.input);
+  const retry = await facade.transitionVehicleLocation(f.destination.locationId, f.world.save, f.input);
+  assert.deepEqual(retry, first); assert.deepEqual(revisions, [7], "hydration retry must not create a new storage attempt at revision8");
+  await assert.rejects(() => facade.transitionVehicleLocation(f.destination.locationId, f.world.save, { ...f.input, landingPosition: [1, 64, 0] }), /without changes/);
+  assert.deepEqual(revisions, [7]);
+});
 
 test("checkpoint completion cannot roll back a concurrent confirmed lease renewal", () => {
   const now = Date.now();

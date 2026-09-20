@@ -1,12 +1,13 @@
 import { PowerTopologyCache } from "./wayworks-network";
 import { createWorkshop, normalizeWorkshop, workshopRunning, type WorkshopState } from "./wayworks-stores";
 import { PRESSURE_CATALOG, type PressureMachineKind } from "./pressure-catalog";
+import { SPACEFLIGHT_CATALOG, type SpaceflightMachineKind } from "./spaceflight-catalog";
 
 /** Pure, versioned workshop power runtime. All energy is integer joules. */
 export type MachineKind = "hand-dynamo" | "sunplate-array" | "field-battery" | "charging-pedestal" | "grid-cable"
   | "heat-engine" | "wind-rotor" | "waterwheel-generator" | "biofuel-engine" | "grid-battery" | "ship-battery-bank"
   | "powered-crusher" | "enrichment-mill" | "electric-smelter" | "alloy-infuser" | "plate-press" | "precision-sawmill"
-  | "fluid-pump" | "fluid-tank" | "gas-tank" | PressureMachineKind;
+  | "fluid-pump" | "fluid-tank" | "gas-tank" | PressureMachineKind | SpaceflightMachineKind;
 export type LocalFace = "front" | "back" | "left" | "right" | "top" | "bottom";
 export type PortMode = "disabled" | "input" | "output" | "both" | "passive" | "pull" | "service";
 export type MachineStatus = "idle" | "disabled" | "generating" | "no-sun" | "buffer-full" | "transferring" | "disconnected" | "invalid-state"
@@ -41,6 +42,7 @@ export const MAX_POWER_STEP_MS = 1000;
 export const HAND_DYNAMO_CRANK_J = 2000;
 
 const CAPACITY: Record<MachineKind, number> = {
+  ...Object.fromEntries(Object.entries(SPACEFLIGHT_CATALOG).map(([kind, def]) => [kind, def.joules])) as Record<SpaceflightMachineKind, number>,
   "hand-dynamo": 8000, "sunplate-array": 12000, "field-battery": 120000,
   "charging-pedestal": 60000, "grid-cable": 0,
   "heat-engine": 24000, "wind-rotor": 18000, "waterwheel-generator": 32000, "biofuel-engine": 24000,
@@ -50,6 +52,7 @@ const CAPACITY: Record<MachineKind, number> = {
   ...Object.fromEntries(Object.entries(PRESSURE_CATALOG).map(([kind, def]) => [kind, def.joules])) as Record<PressureMachineKind, number>,
 };
 const RATE: Record<MachineKind, number> = {
+  ...Object.fromEntries(Object.entries(SPACEFLIGHT_CATALOG).map(([kind, def]) => [kind, def.watts])) as Record<SpaceflightMachineKind, number>,
   "hand-dynamo": 2000, "sunplate-array": 600, "field-battery": 4000,
   "charging-pedestal": 2000, "grid-cable": 4000,
   "heat-engine": 2400, "wind-rotor": 900, "waterwheel-generator": 1600, "biofuel-engine": 1800,

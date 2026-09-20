@@ -321,6 +321,15 @@ export class UniverseStorage {
       stamp: { locationId: manifest.currentLocationId, epoch: lease?.epoch ?? location.descriptor.generationEpoch, revision: location.descriptor.revision }, lease };
   }
 
+  /** Route quotes read the actual destination revision, never a client claim. */
+  async describeLocation(id: UniverseId, destination: LocationId): Promise<{ stamp: LocationStamp; spawn: { x: number; y: number; z: number } | null }> {
+    if (parseLocationId(destination).universeId !== id) throw new UniverseStorageError("invalid", "Destination belongs to another universe.");
+    const snapshot = await this.currentSnapshot(id, undefined, destination);
+    const target = snapshot.locations.find(entry => entry.descriptor.id === destination);
+    return { stamp: { locationId: destination, epoch: target?.descriptor.generationEpoch ?? 1, revision: target?.descriptor.revision ?? 0 },
+      spawn: target ? cloneUniverseJson(target.fields.spawn) as { x: number; y: number; z: number } : null };
+  }
+
   private async execute(id: UniverseId, transactionId: string, kind: UniverseJournal["kind"], expectedRevision: number | null, writes: readonly WriteRecord[], lease: UniverseLease | null, backups: readonly LegacyBackup[] = [], intentDigest?: string): Promise<number> {
     checkedId(transactionId);
     const digest = await universeSha256(canonicalJson(writes));

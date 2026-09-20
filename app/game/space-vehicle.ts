@@ -28,6 +28,10 @@ export type VehicleTrip = {
   passengerIds: string[];
 };
 export type VehicleReceipt = { actionId: string; kind: string; revision: number; transactionId: string | null };
+export type VehicleFlightControl = {
+  schema: 1; phaseTimeMs: number; throttlePermille: number; pitchPermille: number;
+  headingMilliRadians: number; originPosition: VehicleVector; progressPermille: number;
+};
 /** All public factory/validator/action results are detached and deeply frozen at runtime. */
 export type SpaceVehicleState = {
   vehicleId: string;
@@ -53,6 +57,9 @@ export type SpaceVehicleState = {
   access: VehicleAccess;
   trip: VehicleTrip | null;
   journal: VehicleReceipt[];
+  /** Host-simulated visual/interactive phase clock; no separate cargo authority. */
+  flight?: VehicleFlightControl;
+  cabinClockMs?: number;
 };
 export type SpacefleetSave = { schema: 1; vehicles: Record<string, SpaceVehicleState> };
 export type VehicleTransferSource = {
@@ -187,7 +194,16 @@ export function validateSpacefleetSave(value: unknown): SpacefleetSave {
   if (value.schema !== 1 || !isUniverseRecord(value.vehicles)) fail("unsupported spacefleet schema.");
   const passengers = new Set<string>(), cargoOwners = new Set<string>();
   for (const [key, raw] of Object.entries(value.vehicles)) {
-    exact(raw, ["vehicleId", "definitionId", "ownerId", "locationId", "revision", "transitionRevision", "phase", "transform", "velocity", "hull", ...VEHICLE_RESOURCES, "passengers", "cargo", "cargoOwnership", "modules", "trustedIds", "access", "trip", "journal"], "vehicle");
+    exact(raw, ["vehicleId", "definitionId", "ownerId", "locationId", "revision", "transitionRevision", "phase", "transform", "velocity", "hull", ...VEHICLE_RESOURCES, "passengers", "cargo", "cargoOwnership", "modules", "trustedIds", "access", "trip", "journal", ...(isUniverseRecord(raw) && Object.hasOwn(raw, "flight") ? ["flight"] : []), ...(isUniverseRecord(raw) && Object.hasOwn(raw, "cabinClockMs") ? ["cabinClockMs"] : [])], "vehicle");
+    if (raw.cabinClockMs !== undefined) integer(raw.cabinClockMs, "cabin clock", 999);
+    if (raw.flight !== undefined) {
+      exact(raw.flight, ["schema", "phaseTimeMs", "throttlePermille", "pitchPermille", "headingMilliRadians", "originPosition", "progressPermille"], "flight control");
+      if (raw.flight.schema !== 1 || raw.trip === null) fail("flight control requires an active trip.");
+      integer(raw.flight.phaseTimeMs, "flight clock", 600000); integer(raw.flight.throttlePermille, "throttle", 1000);
+      integer(raw.flight.pitchPermille, "pitch", 1000); integer(raw.flight.progressPermille, "flight progress", 1000);
+      if (!Number.isSafeInteger(raw.flight.headingMilliRadians) || Math.abs(Number(raw.flight.headingMilliRadians)) > 100000) fail("invalid heading.");
+      vector(raw.flight.originPosition);
+    }
     token(key, "vehicle ID"); token(raw.ownerId, "owner ID");
     if (raw.vehicleId !== key || raw.definitionId !== "survey-hopper") fail("vehicle identity mismatch.");
     parseLocationId(raw.locationId);
@@ -242,7 +258,8 @@ export function createSurveyHopper(id: string, ownerId: string, locationId: Loca
     vehicleId: id, definitionId: "survey-hopper", ownerId, locationId, revision: 0, transitionRevision: 0,
     phase: "parked", transform: { position: [...position], rotation: [0, 0, 0] }, velocity: [0, 0, 0], hull: 1000, ...zero(),
     passengers: [], cargo: Array.from({ length: 9 }, () => null), cargoOwnership: Array.from({ length: 9 }, () => null),
-    modules: ["engine", "avionics", "life-support"].map(kind => ({ id: `${id}:${kind}`, kind, integrity: 1000, metadata: {} })),
+    modules: ["engine", "avionics", "life-support"].map(kind => ({ id: `${id}:${kind}`, kind, integrity: 1000,
+      metadata: kind === "avionics" ? { homeBerth: { locationId, position: [...position] } } : {} })),
     trustedIds: [], access: Object.fromEntries(VEHICLE_PERMISSIONS.map(permission => [permission, "private"])) as VehicleAccess,
     trip: null, journal: [],
   };
@@ -291,6 +308,7 @@ function abort(vehicle: SpaceVehicleState): void {
   if (!vehicle.trip || vehicle.trip.status !== "reserved") fail("abort is only available during countdown.");
   vehicle.phase = vehicle.trip.departurePhase;
   vehicle.trip = null;
+  delete vehicle.flight;
   vehicle.transitionRevision++;
 }
 
@@ -414,8 +432,10 @@ export function commitVehicleArrival(vehicle: SpaceVehicleState, commit: {
   const next = cloneUniverseJson(vehicle);
   next.locationId = commit.destinationStamp.locationId;
   next.transform.position = [...commit.position];
+  next.velocity = [0, 0, 0];
   next.phase = parseLocationId(next.locationId).kind === "orbit" ? "orbit" : "landed";
   next.trip = null; next.transitionRevision++;
+  delete next.flight;
   record(next, commit.actionId, "arrival", commit.transactionId);
   return validateSpacefleetSave({ schema: 1, vehicles: { [next.vehicleId]: next } }).vehicles[next.vehicleId];
 }
@@ -438,6 +458,8 @@ export function remapSpacefleetUniverse(fleet: SpacefleetSave, from: UniverseId,
   const remap = (id: LocationId) => locationId({ ...parseLocationId(id), universeId: to });
   for (const vehicle of Object.values(next.vehicles)) {
     vehicle.locationId = remap(vehicle.locationId);
+    const berth = vehicle.modules.find(component => component.kind === "avionics")?.metadata.homeBerth;
+    if (isUniverseRecord(berth) && typeof berth.locationId === "string" && parseLocationId(berth.locationId).universeId === from) berth.locationId = remap(berth.locationId as LocationId);
     if (vehicle.trip) {
       vehicle.trip.origin = remap(vehicle.trip.origin); vehicle.trip.destination = remap(vehicle.trip.destination);
       vehicle.trip.originStamp = { ...vehicle.trip.originStamp, locationId: vehicle.trip.origin };

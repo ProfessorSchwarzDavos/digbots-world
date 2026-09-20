@@ -1,8 +1,10 @@
 import type { StructureMarker } from "./structures";
+import type { LocationStamp } from "./location-address";
 
 export type TerrainGenerationRequest = Readonly<{
   namespace: string;
   seedText: string;
+  locationScope?: LocationStamp;
   generationOptions: Readonly<Record<string, unknown>>;
   key: string;
   cx: number;

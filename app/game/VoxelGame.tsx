@@ -140,6 +140,7 @@ import { MinimapHud, NavigationHud, StatusEffectsHud } from "./NavigationHud";
 import { statusEffectViewsFromBuffs } from "./status-effects";
 import { WaygridCreaturePanel, WaygridItemPanel } from "./WaygridPanels";
 import { WayworksPanel } from "./WayworksPanel";
+import { SpaceflightPanel } from "./SpaceflightPanel";
 import { hasWayworksIcon, wayworksMetadataSummary, WayworksIcon } from "./wayworks-ui";
 import { CharacterStudio } from "./CharacterStudio";
 import { AquariumPanel } from "./AquariumPanel";
@@ -4425,6 +4426,11 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
           )}
 
           <LifeSupportDisplay state={hud.lifeSupport} eva={hud.eva} control={key => engineRef.current?.evaControl(key)} reel={held => engineRef.current?.setVirtualKey("KeyY", held)} />
+          {hud.spaceflight?.ship?.passengers.length ? <div className="spaceflight-cockpit" role="status">
+            <strong>Survey Hopper · {hud.spaceflight.status}</strong>
+            <span>Fuel {(hud.spaceflight.ship.fuelMl / 1000).toFixed(1)} L · O₂ {(hud.spaceflight.ship.oxygenMl / 1000).toFixed(1)} L · {(hud.spaceflight.ship.batteryJoules / 1000).toFixed(1)} kJ</span>
+            <small>W/S thrust · A/D heading · ↑/↓ pitch · P mission / abort</small>
+          </div> : null}
           <div className="bottom-hud">
             <div className="active-block-name">{selectedName}</div>
             {hud.mode === "survival" && (
@@ -4774,6 +4780,7 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
               <PixelButton className="gold-button" onClick={() => { setOverlay(null); engineRef.current?.activate(); }}>Back to Game</PixelButton>
               <PixelButton className="secondary-button" disabled={worldActionBusy || persistenceState.saving} onClick={saveAndQuit}>{worldActionBusy ? "Waiting for checkpoint…" : "Save & Quit to Title"}</PixelButton>
               <PixelButton onClick={() => engineRef.current?.openOverlay("map")}>Map <kbd>M</kbd></PixelButton>
+              {hud.spaceflight && <PixelButton onClick={() => engineRef.current?.openOverlay("spaceflight")}>Spacecraft Mission <kbd>P</kbd></PixelButton>}
               <PixelButton onClick={() => engineRef.current?.openOverlay("quests")}>Quest Journal <kbd>J</kbd></PixelButton>
               <PixelButton onClick={() => engineRef.current?.openOverlay("guilds")}>Guilds of Hearthroads</PixelButton>
               <PixelButton onClick={() => engineRef.current?.openCardforge()}>Cardforge TCG</PixelButton>
@@ -5126,8 +5133,15 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
       {overlay === "wayworks" && hud.activeWayworks && (
         <WayworksPanel key={hud.activeWayworks.workshop?.process?.installationId ?? hud.activeWayworks.kind} {...hud.activeWayworks} feedback={toast} onClose={resume}
           onInspectResource={resource => engineRef.current?.inspectWorkshopResource(resource)}
+          onFlightAction={action => { void engineRef.current?.spaceflightAction(action, hud.activeWayworks!.revision).then(ok => { if (ok && action.kind === "launch") resume(); }); }}
           onAction={action => engineRef.current?.workshopAction(action, hud.activeWayworks!.revision)} />
       )}
+      {overlay === "spaceflight" && hud.spaceflight && <div className="ww-overlay" onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape") resume(); }}>
+        <section className="ww-panel" role="dialog" aria-modal="true" aria-label="Spacecraft mission">
+          <header className="ww-header"><h2>Spacecraft mission</h2><button type="button" autoFocus onClick={resume}>Return to cockpit</button></header>
+          <div className="ww-body"><SpaceflightPanel mission={hud.spaceflight} onAction={action => { void engineRef.current?.spaceflightAction(action).then(ok => { if (ok && (action.kind === "launch" || action.kind === "leave")) resume(); }); }} /></div>
+        </section>
+      </div>}
       {overlay === "waygrid-items" && (
         <div onPointerMove={trackCursor}>
           <WaygridItemPanel

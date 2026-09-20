@@ -10,6 +10,8 @@ import type { MachineKind } from "./wayworks";
 import type { WorkshopAction } from "./wayworks-integration";
 import { PressurePanel } from "./PressurePanel";
 import type { PressureRuntime } from "./pressure-runtime";
+import { SpaceflightPanel } from "./SpaceflightPanel";
+import type { SpaceflightIntent, SpaceflightMission } from "./spaceflight-mission";
 
 export type WayworksFace = "front" | "back" | "left" | "right" | "top" | "bottom";
 export type WayworksPortMode = "disabled" | "input" | "output" | "both" | "passive" | "pull" | "service";
@@ -30,6 +32,8 @@ export type WayworksPanelProps = Readonly<{
   feedback?: string;
   workshop?: WorkshopState;
   pressure?: ReturnType<PressureRuntime["diagnosticsFor"]>;
+  flight?: SpaceflightMission;
+  onFlightAction?: (action: SpaceflightIntent) => void;
   network?: { id: string; count: number; energyJ: number; capacityJ: number; revision: number };
   onAction: (action: WayworksPanelAction) => void;
   onClose: () => void;
@@ -108,6 +112,7 @@ export function WayworksPanel(props: WayworksPanelProps) {
         {feedback && <p className="ww-feedback" role="status" aria-live="polite">{feedback}</p>}
 
         <div className="ww-body">
+          {props.flight && props.onFlightAction && <SpaceflightPanel mission={props.flight} onAction={props.onFlightAction} />}
           <div className="ww-state-line">
             <span className="ww-switch-state">{enabled ? "Enabled" : "Disabled"}</span>
             <span>Front faces {direction ?? "unknown"}</span>

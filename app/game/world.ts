@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import { homeLocation, locationId, universeId, locationStamp as validateLocationStamp, type LocationStamp } from "./location-address";
+import { homeLocation, locationId, parseLocationId, universeId, locationStamp as validateLocationStamp, type LocationStamp } from "./location-address";
+import { celestialTerrainSeed, createCelestialTerrain, MORROW_REGIONS, type CelestialTerrain } from "./celestial-terrain";
 import { ChunkMemoryCache, ChunkPersistentCache, type CachedChunkData } from "./chunk-cache";
 import { TerrainBufferPipeline, type TerrainMergedGeometry, type TerrainSectionGeometry } from "./terrain-buffer-pipeline";
 import { TerrainGenerationPipeline, type TerrainGenerationResult } from "./terrain-generation-pipeline";
@@ -228,6 +229,12 @@ export enum BiomeId {
   SugarplumVale = 21,
   Glimmerwood = 22,
   SnowcapRange = 23,
+  PaleRegolithSea = 24,
+  StarshadowCraters = 25,
+  MoonSlateHighlands = 26,
+  IceLanternRilles = 27,
+  BuriedWaystoneGalleries = 28,
+  OrbitalVoid = 29,
 }
 
 function aquaticSurfaceBiome(biome: BiomeId) {
@@ -263,6 +270,12 @@ export const BIOME_NAMES: Record<number, string> = {
   [BiomeId.SugarplumVale]: "Sugarplum Vale",
   [BiomeId.Glimmerwood]: "Glimmerwood",
   [BiomeId.SnowcapRange]: "Snowcap Range",
+  [BiomeId.PaleRegolithSea]: "Pale Regolith Sea",
+  [BiomeId.StarshadowCraters]: "Starshadow Craters",
+  [BiomeId.MoonSlateHighlands]: "Moon-Slate Highlands",
+  [BiomeId.IceLanternRilles]: "Ice-Lantern Rilles",
+  [BiomeId.BuriedWaystoneGalleries]: "Buried Waystone Galleries",
+  [BiomeId.OrbitalVoid]: "Orbital Void",
 };
 
 export function guildLodgeGuildsForBiome(biome: BiomeId): readonly GuildId[] {
@@ -2914,6 +2927,7 @@ export function createBlockAtlas() {
 }
 
 export class ChunkWorld {
+  celestialTerrain: CelestialTerrain | null = null;
   /** Local derived-system invalidation. Observers do not own or serialize blocks. */
   readonly blockEditObservers = new Set<(point: { x: number; y: number; z: number }) => void>();
   group = new THREE.Group();
@@ -3212,6 +3226,9 @@ export class ChunkWorld {
     this.blockFacings.clear();
     this.seedText = seedText || "WILDERNESS";
     this.seed = seedToInt(this.seedText);
+    const address = parseLocationId(this.locationScope.locationId);
+    this.celestialTerrain = createCelestialTerrain({ location: address, seed: celestialTerrainSeed(this.seedText) });
+    if (!this.celestialTerrain && !(address.bodyId === "blockwild" && address.kind === "surface")) throw Error("This destination has no supported terrain generator.");
     this.generationOptions = normalizeWorldGenerationOptions(generationOptions);
     this.chunkMemoryCache.clear();
     this.playerChunkX = Number.NaN;
@@ -4047,6 +4064,7 @@ export class ChunkWorld {
         if (this.chunks.has(key) || this.pendingWorkerGeneration.has(key)) continue;
         const request = {
           namespace: this.generationNamespace(key),
+          locationScope: this.locationScope,
           seedText: this.seedText,
           generationOptions: this.generationOptions as unknown as Readonly<Record<string, unknown>>,
           key,
@@ -4901,6 +4919,12 @@ export class ChunkWorld {
   }
 
   sampleColumn(x: number, z: number): ColumnSample {
+    if (this.celestialTerrain) {
+      const column = this.celestialTerrain.column(Math.floor(x), Math.floor(z));
+      return { height: column.height, waterline: column.waterline,
+        biome: column.region ? BiomeId.PaleRegolithSea + MORROW_REGIONS.findIndex(region => region.id === column.region) : BiomeId.OrbitalVoid,
+        temperature: 0, moisture: 0, continental: 1, river: 0, mountain: column.region === "moon-slate-highlands" ? 1 : 0 };
+    }
     const biomeScale = this.generationOptions.profile === "legacy-v14" ? 1 : this.generationOptions.biomeScale;
     const sampleX = x / biomeScale;
     const sampleZ = z / biomeScale;
@@ -5151,6 +5175,14 @@ export class ChunkWorld {
         const column = sample(gx, gz);
         chunk.heightmap[lx + lz * CHUNK_SIZE] = column.height;
         chunk.biomes[lx + lz * CHUNK_SIZE] = column.biome;
+        if (this.celestialTerrain) {
+          const celestial = this.celestialTerrain.column(gx, gz);
+          for (let y = Math.max(MIN_Y, this.celestialTerrain.bounds.minY); y <= Math.min(MAX_Y, celestial.maxY); y++) {
+            const type = this.celestialTerrain.block(gx, y, gz, celestial);
+            if (type !== BlockId.Air) chunk.blocks[blockIndex(lx, y, lz)] = type;
+          }
+          continue;
+        }
         const [top, filler] = this.surfaceBlocks(column.biome, column.height, column.temperature);
         const extraBedrock = 1 + Math.floor(hash2(gx, gz, this.seed ^ 0x4cf5ad43) * 4);
         const tunnelWarp = valueNoise2(gx / 76, gz / 76, this.seed ^ 0x91e10da5) * 4;
@@ -5256,12 +5288,12 @@ export class ChunkWorld {
       return undefined;
     }
     if (task.stage === "caves") {
-      if (this.generationOptions.profile === "world-below-v15") this.carveGraphCaves(task.chunk, task.sample);
+      if (!this.celestialTerrain && this.generationOptions.profile === "world-below-v15") this.carveGraphCaves(task.chunk, task.sample);
       task.stage = "features";
       return undefined;
     }
     if (task.stage === "features") {
-      this.generateFeatures(task.chunk, task.sample);
+      if (!this.celestialTerrain) this.generateFeatures(task.chunk, task.sample);
       task.stage = "finalize";
       return undefined;
     }

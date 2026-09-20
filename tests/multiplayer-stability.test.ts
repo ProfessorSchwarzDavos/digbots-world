@@ -526,7 +526,7 @@ test("generic facility protocol rejects opaque guest-authored machine replacemen
   const facilityId = "apiary:1,2,3";
   const responses: CreatureAction[] = [];
   Object.assign(engine, {
-    multiplayer: { role: "host", sendFacilityAction: (action: CreatureAction) => { responses.push(action); return 1; } },
+    multiplayer: { role: "host", identity: { id: "facility-host" }, sendFacilityAction: (action: CreatureAction) => { responses.push(action); return 1; } },
     remotePlayers: new Map([[player.playerId, { target: { x: 1, y: 2, z: 3 } }]]),
     world: { getBlock: () => BlockId.Apiary },
     apiaries: new Map([["1,2,3", createEmptyApiaryBlock()]]),

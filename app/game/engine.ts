@@ -3903,6 +3903,41 @@ function itemCanCreatePlacementBlock(item: ItemCode, block: BlockId) {
   return false;
 }
 
+/** One item authorizes one ordinary cell or one exact authored multipart object. */
+function validMultiplayerPlacementShape(item: ItemCode, edits: readonly BlockAction["edits"][number][]) {
+  const base = ITEMS[item]?.placeBlock;
+  if (base === undefined || !edits.length || !edits.every(edit => itemCanCreatePlacementBlock(item, edit.type as BlockId))) return false;
+  if (base === BlockId.BedNorthFoot) {
+    const [first, second] = edits;
+    const partner = first && bedCounterpart(first.type as BlockId, first.x, first.y, first.z);
+    return edits.length === 2 && !!partner && second.type === partner.type && second.x === partner.x && second.y === partner.y && second.z === partner.z;
+  }
+  if (doorState(base) || pressureDoorUpper(base)) {
+    if (edits.length !== 2) return false;
+    const [lower, upper] = [...edits].sort((a, b) => a.y - b.y);
+    const door = doorState(lower.type as BlockId);
+    const upperType = door ? doorBlocks(door.family, false, door.xAxis).upper : pressureDoorUpper(lower.type as BlockId);
+    return lower.x === upper.x && lower.z === upper.z && lower.y + 1 === upper.y
+      && upperType === upper.type && (!door || !door.upper && !door.open) && (lower.facing ?? 0) === (upper.facing ?? 0);
+  }
+  return edits.length === 1;
+}
+
+/** Non-consuming edits must be an exact, resource-neutral door/gate toggle.
+ * Other transformations need a typed host transaction, not an arbitrary after-image. */
+function validMultiplayerBlockToggle(edits: readonly BlockAction["edits"][number][], read: (x: number, y: number, z: number) => BlockId | undefined) {
+  if (edits.length === 1) {
+    const edit = edits[0], before = read(edit.x, edit.y, edit.z);
+    return before !== undefined && toggleFenceGate(before) === edit.type;
+  }
+  if (edits.length !== 2) return false;
+  const [lower, upper] = [...edits].sort((a, b) => a.y - b.y);
+  const before = doorState(read(lower.x, lower.y, lower.z));
+  if (!before || before.upper || lower.x !== upper.x || lower.z !== upper.z || lower.y + 1 !== upper.y) return false;
+  const current = doorBlocks(before.family, before.open, before.xAxis), next = doorBlocks(before.family, !before.open, before.xAxis);
+  return read(upper.x, upper.y, upper.z) === current.upper && lower.type === next.lower && upper.type === next.upper;
+}
+
 /** Host-authoritative inventory cost for an optimistic guest block placement. */
 export function consumeMultiplayerPlacementItem(
   state: PlayerSessionSnapshot,
@@ -3912,8 +3947,7 @@ export function consumeMultiplayerPlacementItem(
   if (consumedItem === undefined) return { valid: true, consumed: false, state };
   if (!ITEMS[consumedItem as ItemCode]) return { valid: false, consumed: false, state };
   const item = consumedItem as ItemCode;
-  const placed = edits.filter((edit) => edit.type !== BlockId.Air);
-  if (!placed.length || !placed.every((edit) => itemCanCreatePlacementBlock(item, edit.type as BlockId))) {
+  if (!validMultiplayerPlacementShape(item, edits)) {
     return { valid: false, consumed: false, state };
   }
   const inventory = state.inventory.map(inventorySlotFromNetwork);
@@ -10082,16 +10116,31 @@ export class VoxelEngine {
         // Selection is intent; the matching stack remains the host-owned pack
         // image. Carrying it on the reliable edit avoids pose-lane reordering.
         playerState = { ...playerState, selected: action.selectedSlot };
-        this.multiplayerPlayerStates.set(playerState.playerId, playerState);
       }
       const placement = playerState && this.mode === "survival"
         ? consumeMultiplayerPlacementItem(playerState, action.consumedItem, action.edits)
         : { valid: action.consumedItem === undefined || this.mode === "builder", consumed: false, state: playerState };
       const playerPoses = [this.localNetworkPose(), ...[...this.remotePlayers.values()].map((player) => player.target)]
         .filter((pose): pose is PlayerPose => Boolean(pose));
-      const valid = Boolean(remote) && placement.valid && validPressureDoorEdits(action.edits, point => this.world.getBlock(point.x, point.y, point.z)) && action.edits.length > 0 && action.edits.length <= 2_048 && action.edits.every((edit) => {
+      const toggle = action.consumedItem === undefined && !action.effect && validMultiplayerBlockToggle(action.edits, (x, y, z) => this.world.getBlock(x, y, z));
+      const rotation = action.consumedItem === undefined && !action.effect && action.edits.length === 1
+        && playerState?.inventory[playerState.selected]?.item === Item.FieldWrench
+        && action.edits[0].facing !== undefined && isDirectionallyPlacedBlock(action.edits[0].type as BlockId)
+        && this.world.getBlock(action.edits[0].x, action.edits[0].y, action.edits[0].z) === action.edits[0].type;
+      const uniqueCells = new Set(action.edits.map(edit => blockKey(edit.x, edit.y, edit.z))).size === action.edits.length;
+      const valid = Boolean(remote) && action.actorId === peer.identity?.id && uniqueCells && placement.valid
+        && (!action.effect || action.edits.every(edit => edit.type === BlockId.Air))
+        && validPressureDoorEdits(action.edits, point => this.world.getBlock(point.x, point.y, point.z)) && action.edits.length > 0 && action.edits.length <= 2_048 && action.edits.every((edit) => {
         if (!peer.identity || !this.stationActorAccess(peer.identity.id, edit.x, edit.y, edit.z, edit.type === BlockId.Air ? "extract" : "build") || this.stationStructurePinned(edit.x, edit.y, edit.z)) return false;
         const existing = this.world.getBlock(edit.x, edit.y, edit.z), incomingMachine = machineKindForBlock(edit.type), existingMachine = machineKindForBlock(existing);
+        // Placement is not a mining/overwrite command. All cells are preflighted
+        // before any terrain observer, inventory debit, drop or metadata teardown.
+        if (existing === undefined) return false;
+        if (edit.type !== BlockId.Air && !toggle && !rotation) {
+          if (existing !== BlockId.Air && !BLOCKS[existing]?.replaceable) return false;
+          if (existing !== BlockId.Air && !this.stationActorAccess(peer.identity.id, edit.x, edit.y, edit.z, "extract")) return false;
+          if (this.mode === "survival" && !placement.consumed) return false;
+        }
         if (incomingMachine || existingMachine) {
           const pairedDoor = !!pressureDoorUpper(edit.type as BlockId) || existing !== undefined && !!pressureDoorUpper(existing);
           if (!peer.identity || !playerState || action.edits.length !== (pairedDoor ? 2 : 1) || action.effect) return false;
@@ -10127,6 +10176,7 @@ export class VoxelEngine {
           reason: "The host rejected an out-of-range, occupied, or invalid block edit.",
         };
       if (valid) {
+        if (playerState && !placement.consumed) this.multiplayerPlayerStates.set(playerState.playerId, playerState);
         if (action.effect?.kind === "tree-fell") this.animateNetworkTreeFell(action, this.mode === "survival");
         const held = playerState ? inventorySlotFromNetwork(playerState.inventory[playerState.selected]) : null;
         const brokenBlocks = action.edits.flatMap((edit) => {

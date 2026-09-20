@@ -12,6 +12,16 @@ overlapping an asteroid is an additional gate. Multiblock edits require access
 to all affected cells. Machine contents still use their existing, separate owner
 and sealed-pickup rules. Normal mining tools, drops and item debits are unchanged.
 
+Peer block placement is a clear-cell operation, not a solid-rock overwrite. The
+host preflights every cell before changing terrain, metadata or inventory, including
+extraction access for replaced foliage/other replaceable contents. One paid item
+authorizes one ordinary block or one exact bed/door pair, not an arbitrary batch.
+Omitted payment, duplicate cells, spoofed actors and partially occupied pairs reject
+atomically. Existing gate/door toggles and wrench-facing rotation are resource-neutral.
+Other non-consuming guest after-images (soil, seed, bucket or bookshelf changes)
+require typed host transactions and fail closed in this generic block channel;
+their complete guest adapters remain part of the unfinished integration matrix.
+
 ## Persistence
 
 `WorldSave.asteroidFields` belongs to the universe partition. Each body/orbit-band

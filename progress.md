@@ -2,6 +2,18 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Director review held asteroid acceptance for a concrete host-peer overwrite
+  gap. New actual-handler red r1 reproduced build-only rock overwrite, mixed
+  cells, missing material intent and rejected selection mutation (2PASS/4FAIL).
+  Bounded engine correction preflights every cell, exact one-item object shape,
+  authenticated actor and duplicate cells before any resource mutation.
+- Peer r5 134PASS; static51 PASS. Native door/gate toggles, real-wrench window
+  rotation, normal one-item bed/door placement and typed machine/pressure paths
+  retained. Raw unfunded soil/seed/bucket/bookshelf after-images now fail closed;
+  their typed guest adapters remain unfinished full-integration work. Earlier
+  missing-host-identity/bed-stack/type-only fixture failures retained. Final
+  lint/committed build/official smoke pending. Generation routing's three expected
+  red tests are preserved separately; no runtime generation changes yet.
 - Connected geometry checkpoint9b236bf/runtime3c5c95b/build18 is frozen and
   director accepted; evidence remains unchanged in CF6/r14-connected-geometry.
 - New universe-owned asteroid fields migrate ordinary orbit edits and project

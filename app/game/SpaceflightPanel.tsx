@@ -1,12 +1,33 @@
 "use client";
+import { type KeyboardEvent } from "react";
 import { itemName } from "./data";
 import { FIRST_FLIGHT_ROUTES, SPACE_RESOURCE_LABELS, type SpaceflightIntent, type SpaceflightMission } from "./spaceflight-mission";
 import { SURVEY_HOPPER_CAPACITY, VEHICLE_RESOURCES } from "./space-vehicle";
 
+export function SpaceflightDialog({ mission, onAction, onClose, feedback }: { mission: SpaceflightMission;
+  onAction: (action: SpaceflightIntent) => void; onClose: () => void; feedback?: string }) {
+  function keys(event: KeyboardEvent<HTMLElement>) {
+    event.stopPropagation();
+    if (event.key === "Escape") { event.preventDefault(); onClose(); }
+    if (event.key !== "Tab") return;
+    const controls = [...event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled), select:not(:disabled), summary")]
+      .filter(element => element.checkVisibility());
+    const first = controls[0], last = controls[controls.length - 1];
+    if (event.shiftKey && event.target === first) { event.preventDefault(); last?.focus(); }
+    else if (!event.shiftKey && event.target === last) { event.preventDefault(); first?.focus(); }
+  }
+  return <div className="ww-overlay" onPointerDown={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()}>
+    <section className="ww-panel" role="dialog" aria-modal="true" aria-label="Spacecraft mission" onKeyDown={keys}>
+      <header className="ww-header"><h2>Spacecraft mission</h2><button type="button" autoFocus onClick={onClose}>Return to cockpit</button></header>
+      <div className="ww-body">{feedback && <p role="status">{feedback}</p>}<SpaceflightPanel mission={mission} onAction={onAction} /></div>
+    </section>
+  </div>;
+}
+
 export function SpaceflightPanel({ mission, onAction }: { mission: SpaceflightMission; onAction: (action: SpaceflightIntent) => void }) {
   const ship = mission.ship;
   const named = { "home-orbit": "Blockwild · low orbit", "home-surface": "Blockwild · home pad", "morrow-orbit": "Morrow · low orbit", "morrow-surface": "Morrow · surface approach" };
-  return <section className="ww-materials" aria-label="Spacecraft mission">
+  return <section className="ww-materials spaceflight-mission" aria-label="Spacecraft mission">
     <h3>{ship ? "Survey Hopper · mission" : "First spacecraft"}</h3>
     {!ship ? <><p>Form a 3 × 3 pad with solid foundations and twelve blocks of clear sky. Select your crafted Hopper.</p>
       <button type="button" onClick={() => onAction({ kind: "deploy" })}>Deploy selected Hopper</button></> : <>

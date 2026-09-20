@@ -140,7 +140,7 @@ import { MinimapHud, NavigationHud, StatusEffectsHud } from "./NavigationHud";
 import { statusEffectViewsFromBuffs } from "./status-effects";
 import { WaygridCreaturePanel, WaygridItemPanel } from "./WaygridPanels";
 import { WayworksPanel } from "./WayworksPanel";
-import { SpaceflightPanel } from "./SpaceflightPanel";
+import { SpaceflightDialog } from "./SpaceflightPanel";
 import { hasWayworksIcon, wayworksMetadataSummary, WayworksIcon } from "./wayworks-ui";
 import { CharacterStudio } from "./CharacterStudio";
 import { AquariumPanel } from "./AquariumPanel";
@@ -5136,12 +5136,8 @@ export default function VoxelGame({ agentMode = false }: Readonly<{ agentMode?: 
           onFlightAction={action => { void engineRef.current?.spaceflightAction(action, hud.activeWayworks!.revision).then(ok => { if (ok && action.kind === "launch") resume(); }); }}
           onAction={action => engineRef.current?.workshopAction(action, hud.activeWayworks!.revision)} />
       )}
-      {overlay === "spaceflight" && hud.spaceflight && <div className="ww-overlay" onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape") resume(); }}>
-        <section className="ww-panel" role="dialog" aria-modal="true" aria-label="Spacecraft mission">
-          <header className="ww-header"><h2>Spacecraft mission</h2><button type="button" autoFocus onClick={resume}>Return to cockpit</button></header>
-          <div className="ww-body"><SpaceflightPanel mission={hud.spaceflight} onAction={action => { void engineRef.current?.spaceflightAction(action).then(ok => { if (ok && (action.kind === "launch" || action.kind === "leave")) resume(); }); }} /></div>
-        </section>
-      </div>}
+      {overlay === "spaceflight" && hud.spaceflight && <SpaceflightDialog mission={hud.spaceflight} feedback={toast} onClose={resume}
+        onAction={action => { void engineRef.current?.spaceflightAction(action).then(ok => { if (ok && (action.kind === "launch" || action.kind === "leave")) resume(); }); }} />}
       {overlay === "waygrid-items" && (
         <div onPointerMove={trackCursor}>
           <WaygridItemPanel

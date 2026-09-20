@@ -62,6 +62,15 @@ test("failed origin checkpoint never requests destination or retires origin", as
   assert.equal(engine.running, true); assert.equal(engine.paused, false);
 });
 
+test("arrival fails closed before saving or retiring an occupied shared origin", async () => {
+  const { engine, calls, initial } = engineFixture();
+  Object.assign(engine, { multiplayer: { role: "host" }, remotePlayers: new Map([["guest", {}]]) });
+  assert.deepEqual(await engine.commitSpaceVehicleLocation("hopper-1", initial), { ok: false, code: "vehicle_origin_occupied" });
+  assert.deepEqual(calls, []);
+  assert.equal(engine.running, true);
+  assert.equal(Reflect.get(engine, "pendingSpaceArrival"), null);
+});
+
 test("destination runtime failure after commit stays paused and can retry load without paying again", async () => {
   const { engine, calls, initial } = engineFixture();
   let failure = true;

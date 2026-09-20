@@ -7,6 +7,8 @@ export const SPACEFLIGHT_MODEL_KINDS = [
 export type SpaceflightModelKind = typeof SPACEFLIGHT_MODEL_KINDS[number];
 export type SpaceflightModelState = Readonly<{
   time?: number; active?: boolean; thrust?: number; landingGear?: number; fill?: number; yaw?: number;
+  /** Local pilot view only. External observers retain the complete capsule. */
+  cockpit?: boolean;
 }>;
 export const isSpaceflightModelKind = (kind: unknown): kind is SpaceflightModelKind =>
   typeof kind === "string" && (SPACEFLIGHT_MODEL_KINDS as readonly string[]).includes(kind);
@@ -16,6 +18,7 @@ type Rig = {
   lamp?: THREE.MeshStandardMaterial; flame?: THREE.Group; legs: THREE.Group[];
   arm?: THREE.Group; radar?: THREE.Group; hook?: THREE.Group; cable?: THREE.Mesh;
   columns: { object: THREE.Mesh; base: number; height: number }[];
+  interior?: THREE.Group; exterior?: THREE.Object3D[];
 };
 const rigs = new WeakMap<THREE.Group, Rig>();
 const TAU = Math.PI * 2;
@@ -252,6 +255,23 @@ export function createSpaceflightModel(kind: SpaceflightModelKind, state: Spacef
       status(.28, .19, -.33); break;
     }
   }
+  if (kind === "survey-hopper") {
+    rig.exterior = [...root.children];
+    const interior = group(root, "pilot-cockpit-interior"); rig.interior = interior;
+    // An open forward sightline is intentional: glass tint belongs outside,
+    // while the pilot sees the real terrain through the pressure windshield.
+    box(interior, "pilot-dashboard", 1.45, .13, .28, "dark", 0, 2.65, -.78);
+    for (const x of [-.67, .67]) {
+      beam(interior, "pilot-window-jamb", [x, 2.65, -.86], [x * .82, 3.62, -.72], .055, "copper");
+      box(interior, "pilot-armrest", .14, .16, .55, "ivory", x, 2.25, -.08);
+    }
+    box(interior, "pilot-window-header", 1.12, .06, .07, "copper", 0, 3.62, -.72);
+    for (const [x, surface] of [[-.36, "fuel"], [0, "oxygen"], [.36, "lamp"]] as const) {
+      box(interior, "pilot-instrument-face", .22, .14, .035, surface, x, 2.76, -.68);
+      box(interior, "pilot-instrument-mark", .025, .09, .04, "dark", x, 2.76, -.655);
+    }
+    interior.visible = false;
+  }
   updateSpaceflightModel(root, state);
   return root;
 }
@@ -262,6 +282,11 @@ export function createSpaceflightModel(kind: SpaceflightModelKind, state: Spacef
  * is 0 stowed / 1 deployed. Thrust is explicit and independent of activity. */
 export function updateSpaceflightModel(root: THREE.Group, state: SpaceflightModelState): void {
   const rig = rigs.get(root); if (!rig) return;
+  if (state.cockpit !== undefined && rig.interior && rig.exterior) {
+    rig.interior.visible = state.cockpit;
+    for (const part of rig.exterior) part.visible = !state.cockpit;
+    root.userData.spaceflightCockpit = state.cockpit;
+  }
   if (state.active !== undefined) rig.active = state.active;
   if (state.thrust !== undefined) rig.thrust = unit(state.thrust);
   if (state.landingGear !== undefined) rig.landingGear = unit(state.landingGear);
@@ -269,7 +294,7 @@ export function updateSpaceflightModel(root: THREE.Group, state: SpaceflightMode
   if (state.yaw !== undefined) root.rotation.y = Number.isFinite(state.yaw) ? state.yaw % TAU : 0;
   const time = Number.isFinite(state.time) ? state.time! : 0;
   if (rig.flame) {
-    rig.flame.visible = rig.thrust > 0;
+    rig.flame.visible = rig.thrust > 0 && !root.userData.spaceflightCockpit;
     const flutter = Math.sin(time % TAU * 19) * .035 + Math.sin(time % TAU * 31) * .025;
     rig.flame.scale.set(.65 + .35 * rig.thrust, (.3 + rig.thrust * .7) * (1 + flutter), .65 + .35 * rig.thrust);
   }

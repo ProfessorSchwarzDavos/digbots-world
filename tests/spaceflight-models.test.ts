@@ -107,6 +107,21 @@ test("throttle plume varies with thrust and time without overriding independent 
   updateSpaceflightModel(root, { thrust: 0 }); assert.equal(exhaust.visible, false);
 });
 
+test("pilot interior replaces the occluding shell without changing the external capsule", () => {
+  const root = createSpaceflightModel("survey-hopper"), exterior = visibleBounds(root);
+  const hull = root.getObjectByName("riveted-pressure-hull")!, interior = root.getObjectByName("pilot-cockpit-interior")!;
+  assert.equal(interior.visible, false);
+  updateSpaceflightModel(root, { cockpit: true, thrust: 1 });
+  assert.equal(hull.visible, false); assert.equal(interior.visible, true);
+  assert.equal(root.getObjectByName("throttle-exhaust")!.visible, false);
+  root.updateMatrixWorld(true);
+  const ray = new THREE.Raycaster(new THREE.Vector3(0, 3.17, -.15), new THREE.Vector3(0, 0, -1));
+  assert.equal(ray.intersectObjects(interior.children, true).length, 0, "forward pilot sightline stays clear");
+  updateSpaceflightModel(root, { cockpit: false, thrust: 0 });
+  assert.equal(hull.visible, true); assert.equal(interior.visible, false);
+  assert.ok(visibleBounds(root).equals(exterior));
+});
+
 test("gantry retracts, radar sweeps and crane cable tracks hook; inactive and zero-time poses are stable", () => {
   const gantry = createSpaceflightModel("fuel-gantry"), arm = gantry.getObjectByName("retractable-service-arm")!;
   const stowed = arm.rotation.x;

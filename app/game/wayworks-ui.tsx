@@ -5,8 +5,9 @@ import { machineKindForBlock } from "./wayworks-integration";
 import { isWayworksItem } from "./wayworks-item-models";
 import { portableResource } from "./wayworks-machines";
 import { hasPressureIcon, PressureIcon } from "./pressure-icons";
+import { hasSpaceflightIcon, SpaceflightIcon } from "./spaceflight-icons";
 
-export const hasWayworksIcon = (item: ItemCode) => item === Item.FieldWrench || !!machineKindForBlock(item) || isWayworksItem(item) || hasPressureIcon(item);
+export const hasWayworksIcon = (item: ItemCode) => item === Item.FieldWrench || !!machineKindForBlock(item) || isWayworksItem(item) || hasPressureIcon(item) || hasSpaceflightIcon(item);
 
 export function wayworksMetadataSummary(slot: InventorySlot): string | null {
   if (slot.item === Item.FluidCanister || slot.item === Item.GasCylinder) {
@@ -19,6 +20,7 @@ export function wayworksMetadataSummary(slot: InventorySlot): string | null {
 
 /** Compact silhouettes share the brass/ceramic language of the world models. */
 export function WayworksIcon({ item, small = false }: { item: ItemCode; small?: boolean }) {
+  if (hasSpaceflightIcon(item)) return <SpaceflightIcon item={item} small={small} />;
   if (hasPressureIcon(item)) return <PressureIcon item={item} small={small} />;
   const kind = machineKindForBlock(item), isModule = item >= Item.SpeedModule && item <= Item.ThermalModule;
   const tank = item === Item.FluidCanister || item === Item.GasCylinder || kind === "fluid-tank" || kind === "gas-tank";

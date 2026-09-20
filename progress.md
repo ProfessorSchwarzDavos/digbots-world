@@ -2,6 +2,20 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — revision12, first transaction checkpoint
 
+- First normal synthetic-profile craft/deploy/load/board/consent/abort/relaunch,
+  piloted ascent and actual orbit arrival observed at582f994. Midflight
+  SaveQuit/page reload retained identity, exact metadata-bearing cargo and paid
+  costs. Evidence CF6/browser/browser-r1; final orbit checkpoint103-storage.json.
+  The unchanged official client passed its execution but reproduced real hull
+  occlusion. Visual review found first-person shell, tight chase framing,
+  fallback Hopper icon and mobile gauge wrapping. Corrected source adds local
+  cockpit interior,8.2-block chase,11 icons,2-column gauges, modal focus/feedback,
+  accurate orbit HUD label and a temporary fail-closed occupied-origin guard.
+  focused-r6 22/22; focused-r7 27/27; static-r11/lint-r4 PASS. static-r10 caught
+  private-field access in the new test; corrected using reflection. Fresh build
+  and normal visual recheck pending. Four Morrow rigs helper7/7/lintPASS, not yet
+  live species/ecology. Full station/asteroid/Morrow/maps/return scope remains.
+
 - CF6-B/C source checkpoint: distinct hardware/Hopper crafts, real bio-oil and
   refined rocket fuel recipes, paired finite gantry debits, normal host mission
   deploy/cargo/board/consent/abort/relaunch controls and persisted pilot timing.

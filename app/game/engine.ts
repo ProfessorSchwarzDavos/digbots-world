@@ -6623,6 +6623,10 @@ export class VoxelEngine {
    * no origin renderer/worker/inventory is retired before the IDB commit. */
   async commitSpaceVehicleLocation(vehicleId: string, initialDestinationSave?: WorldSave, landingPosition?: [number, number, number]) {
     if (!this.persistent || !this.activeWorldId || this.multiplayer?.role === "guest" || this.locationTransitioning) return { ok: false as const, code: "vehicle_authority_denied" };
+    if (this.multiplayer?.role === "host" && this.remotePlayers.size) {
+      this.events.onToast("Arrival held: another participant occupies the origin. End the shared session, then retry this checkpoint.");
+      return { ok: false as const, code: "vehicle_origin_occupied" };
+    }
     const vehicle = (this.pendingSpaceArrival?.save.spacefleet ?? this.spacefleet).vehicles[vehicleId];
     if (!vehicle?.trip || vehicle.trip.status !== "commit-ready" || !vehicle.passengers.some(p => p.actorId === "local")) return { ok: false as const, code: "vehicle_arrival_not_ready" };
     if (this.pendingSpaceArrival && this.pendingSpaceArrival.input.vehicleId !== vehicleId) return { ok: false as const, code: "another_arrival_pending" };
@@ -13058,7 +13062,11 @@ export class VoxelEngine {
 
   private spaceflightMission(): SpaceflightMission {
     const ship = this.nearbySpaceVehicle();
-    return inspectSpaceflightMission(ship, this.world.locationScope, this.spaceflightRoute, this.launchPadFor(ship), this.weather === "clear");
+    const mission = inspectSpaceflightMission(ship, this.world.locationScope, this.spaceflightRoute, this.launchPadFor(ship), this.weather === "clear");
+    // Temporary safe admission boundary while multi-location hosts are completed.
+    // Never silently retire a live origin that still has another participant.
+    if (this.multiplayer?.role === "host" && this.remotePlayers.size) mission.blockers.push("Other participants still occupy this location. End the shared session before this flight.");
+    return mission;
   }
 
   /** Human mission requests share the pure host authority and one save owner. */
@@ -13131,6 +13139,7 @@ export class VoxelEngine {
           const result = applySpaceVehicleAction(this.spacefleet, actor, action.kind === "consent" ? { ...base, type: "consent", consent: true }
             : { ...base, type: action.kind });
           this.spacefleet = result.fleet;
+          if (action.kind === "board") { this.yaw = ship.transform.rotation[1]; this.pitch = 0; }
           if (action.kind === "leave") { this.position.set(ship.transform.position[0] + 2.5, ship.transform.position[1] + .5, ship.transform.position[2]); this.velocity.set(0, 0, 0); }
         }
       }
@@ -13184,11 +13193,17 @@ export class VoxelEngine {
     for (const [id, model] of this.spaceflightModels) if (!visible.some(value => value.vehicleId === id)) { model.removeFromParent(); this.disposeObject(model); this.spaceflightModels.delete(id); }
     for (const vehicle of visible) {
       let model = this.spaceflightModels.get(vehicle.vehicleId);
-      if (!model) { model = createSpaceflightModel("survey-hopper"); this.scene.add(model); this.spaceflightModels.set(vehicle.vehicleId, model); }
+      if (!model) { model = createSpaceflightModel("survey-hopper"); model.rotation.set(...vehicle.transform.rotation); this.scene.add(model); this.spaceflightModels.set(vehicle.vehicleId, model); }
+      const piloting = vehicle.passengers.some(passenger => passenger.actorId === "local");
+      if (piloting) this.yaw += vehicle.transform.rotation[1] - model.rotation.y;
       model.position.set(...vehicle.transform.position); model.rotation.set(...vehicle.transform.rotation);
       updateSpaceflightModel(model, { time: this.universeTimeSeconds, active: !!vehicle.trip, thrust: vehicle.phase === "ascent" ? (vehicle.flight?.throttlePermille ?? 700) / 1000 : 0,
-        landingGear: ["parked", "landed", "countdown", "descent"].includes(vehicle.phase) ? 1 : 0, fill: vehicle.fuelMl / SURVEY_HOPPER_CAPACITY.fuelMl });
-      if (vehicle.passengers.some(passenger => passenger.actorId === "local")) { this.position.set(vehicle.transform.position[0], vehicle.transform.position[1] + 1.15, vehicle.transform.position[2] - .3); this.velocity.set(0, 0, 0); }
+        landingGear: ["parked", "landed", "countdown", "descent"].includes(vehicle.phase) ? 1 : 0, fill: vehicle.fuelMl / SURVEY_HOPPER_CAPACITY.fuelMl,
+        cockpit: piloting && this.cameraMode === "first" });
+      if (piloting) {
+        const seat = new THREE.Vector3(0, 1.55, -.15).applyEuler(model.rotation).add(model.position);
+        this.position.copy(seat); this.velocity.set(0, 0, 0);
+      }
     }
   }
 
@@ -32746,23 +32761,25 @@ export class VoxelEngine {
       this.camera.updateProjectionMatrix();
     }
     const playerRace = this.activeCharacterProfile?.appearance.race ?? "wayfarer";
+    const seatedVehicle = Object.values(this.spacefleet?.vehicles ?? {}).find(ship => ship.locationId === this.world.locationScope.locationId
+      && ship.passengers.some(passenger => passenger.actorId === "local"));
     const targetEye = playerEyeHeightForVariant(this.playerVariant, this.crouching, playerRace);
     this.cameraEyeHeight += (targetEye - this.cameraEyeHeight) * (1 - Math.exp(-dt * 16));
     if (this.cameraMode === "first") {
       this.camera.position.set(this.position.x, this.position.y + this.cameraEyeHeight, this.position.z);
       this.camera.rotation.set(this.pitch, this.yaw, this.evaRoll);
-      this.heldRoot.visible = true;
-      this.offhandRoot.visible = true;
+      this.heldRoot.visible = !seatedVehicle;
+      this.offhandRoot.visible = !seatedVehicle;
       return;
     }
     this.heldRoot.visible = false;
     this.offhandRoot.visible = false;
     updateThirdPersonCamera(this.camera, this.position, this.yaw, {
       view: this.cameraMode === "third-front" ? "front" : "rear",
-      distance: 4.35,
+      distance: seatedVehicle ? 8.2 : 4.35,
       targetHeight: (this.crouching ? 1.08 : 1.34) * playerModelHeightScale(this.playerVariant, playerRace),
       pitch: clamp(-this.pitch * 0.72, -0.78, 0.78),
-      shoulderOffset: this.cameraMode === "third-front" ? 0 : 0.22,
+      shoulderOffset: seatedVehicle || this.cameraMode === "third-front" ? 0 : 0.22,
       collisionRadius: 0.18,
       collisionPadding: 0.16,
       minDistance: 0.28,
@@ -33274,6 +33291,8 @@ export class VoxelEngine {
   };
 
   depthName() {
+    const location = parseLocationId(this.world.locationScope.locationId);
+    if (location.kind !== "surface") return `${location.instanceId.replaceAll("-", " ")} ${location.kind}`;
     if (this.position.y > 28) return "Surface";
     if (this.position.y > 0) return "Stoneways";
     if (this.position.y > -28) return "Deepstone Caves";

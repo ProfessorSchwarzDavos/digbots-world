@@ -10,6 +10,7 @@ export const AIRZONE_GAS_ML_PER_MMOL = 24;
 export const AIRZONE_MAX_GAS = 1_000_000_000_000;
 export const AIRZONE_MAX_ENERGY = 1_000_000_000_000_000;
 export const AIRZONE_MAX_TICK_INPUT = 1_000_000;
+export const AIRZONE_MAX_CO2_PPM = 5_000;
 export const AIR_FACES = ["+x", "-x", "+y", "-y", "+z", "-z"] as const;
 export type AirFace = typeof AIR_FACES[number];
 export type AirPoint = Readonly<{ x: number; y: number; z: number }>;
@@ -256,7 +257,7 @@ export function airZoneDiagnostics(state: AirZoneState, oxygenConsumptionMilliMo
   if (state.status !== "sealed") reasons.push(state.status);
   if (state.pressureMilliKPa < 60_000 || state.pressureMilliKPa > 120_000) reasons.push("unsafe-pressure");
   if (oxygenPartialPressureMilliKPa < 16_000 || oxygenPartialPressureMilliKPa > 30_000) reasons.push("unsafe-oxygen");
-  if (co2PartsPerMillion > 5_000) reasons.push("high-co2");
+  if (co2PartsPerMillion > AIRZONE_MAX_CO2_PPM) reasons.push("high-co2");
   if (state.temperatureMilliC < 0 || state.temperatureMilliC > 45_000) reasons.push("unsafe-temperature");
   // Reserve ends at the 16 kPa O2 threshold, assuming fixed current temperature.
   const minimumOxygen = state.temperatureMilliC > -273_150 ? Number((BigInt(16_000) * BigInt(1_000_000_000) * BigInt(state.cellCount) + BigInt(8314) * BigInt(state.temperatureMilliC + 273_150) - BigInt(1)) / (BigInt(8314) * BigInt(state.temperatureMilliC + 273_150))) : AIRZONE_MAX_GAS;

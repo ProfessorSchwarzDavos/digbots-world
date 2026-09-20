@@ -1,5 +1,6 @@
 import { Item, ITEMS, cloneSlot, type EquipmentSlot, type InventorySlot } from "./data";
 import type { BodyEnvironment } from "./celestial-environment";
+import { AIRZONE_MAX_CO2_PPM } from "./airzone";
 
 export type PersonalEquipment = Partial<Record<EquipmentSlot, InventorySlot | null>>;
 export type LifeSupportStore = { schema: 1; oxygenMl: number; energyJ: number; scrubberSeconds: number; leak: number; sockets: Array<InventorySlot | null> };
@@ -130,6 +131,12 @@ export function stepLifeSupport(equipment: PersonalEquipment, previous: LifeSupp
   input: { submerged?: boolean; effort?: number; immune?: boolean; consume?: boolean; swapSeconds?: number } = {}) {
   dt = bounded(dt, 1); const state = { ...previous }, back = equipment.back, kind = back ? ITEMS[back.item]?.lifeSupportKind : undefined;
   const needsAir = !environment.breathable || Boolean(input.submerged);
+  // Keep the saved exposure timer and damage arithmetic unchanged, but do not
+  // label an oxygen-rich, unscrubbed habitat as oxygen deprivation. The host's
+  // breathable flag remains authoritative; this only explains a denied breath.
+  const oxygenKPa = environment.pressureKPa * environment.oxygenFraction;
+  const co2Exposure = !environment.breathable && !input.submerged && oxygenKPa >= 16 && oxygenKPa <= 30
+    && Math.floor(environment.co2Fraction * 1_000_000) > AIRZONE_MAX_CO2_PPM;
   const helmet = equipment.head?.item === Item.FieldBreatherHelmet && (equipment.head.durability ?? 1) > 0;
   const compatible = ["tank", "harness", "rig", "spell-rig", "dive"].includes(kind ?? "") && !(environment.pressureKPa < 35 && kind === "dive");
   const store = back ? lifeSupportStore(back) : null;
@@ -158,7 +165,7 @@ export function stepLifeSupport(equipment: PersonalEquipment, previous: LifeSupp
   state.radiationDose += Math.max(0, environment.radiation - 1) * dt * (1 - weave * .9) / 30;
   for (const key of Object.keys(state) as Array<keyof LifeSupportState>) state[key] = bounded(state[key], 86400);
   const hazards: string[] = [];
-  if (state.hypoxiaSeconds > 12) hazards.push("HYPOXIA");
+  if (state.hypoxiaSeconds > 12) hazards.push(co2Exposure ? "CO2" : "HYPOXIA");
   if (state.pressureSeconds > (sealed ? 60 : 12)) hazards.push("PRESSURE");
   if (state.thermalDose > 90) hazards.push("TEMPERATURE");
   if (state.corrosionDose > 45) hazards.push("CORROSION");
@@ -176,7 +183,8 @@ export function stepLifeSupport(equipment: PersonalEquipment, previous: LifeSupp
   const hud: LifeSupportHud = { relevant: needsAir || Boolean(back && kind) || hazards.length > 0, source: back ? ITEMS[back.item].name : "No back source",
     oxygenLiters: remaining.amount / 1000, capacityLiters: remaining.capacity / 1000, secondsRemaining, sealed, breathing,
     scrubber: hasScrubber ? `${Math.ceil(store!.scrubberSeconds)}s` : "open cycle", leak, level,
-    status: swapping ? "SWAPPING - SEAL OPEN" : needsAir && !helmet ? "SEALED HELMET REQUIRED" : needsAir && !compatible ? "COMPATIBLE BACK SOURCE REQUIRED" : needsAir && source.amount <= 0 ? "OXYGEN EMPTY"
+    status: swapping ? "SWAPPING - SEAL OPEN" : co2Exposure && !breathing ? "CO2 HIGH - SCRUB OR USE SEALED O2"
+      : needsAir && !helmet ? "SEALED HELMET REQUIRED" : needsAir && !compatible ? "COMPATIBLE BACK SOURCE REQUIRED" : needsAir && source.amount <= 0 ? "OXYGEN EMPTY"
       : pressureUnprotected ? "PRESSURE SUIT INCOMPLETE" : hazards.length ? `${hazards[0]} EXPOSURE` : breathing ? "BREATHING" : "HOLDING BREATH",
     hazards, energyJ: store?.energyJ ?? 0, swapSeconds: input.swapSeconds ?? 0 };
   return { equipment: nextEquipment, state, hud, damage, impairment: !input.immune && state.hypoxiaSeconds > 6 ? .55 : 1 };

@@ -2,6 +2,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — revision12, first transaction checkpoint
 
+- b4d529d build-r9/official-r9 and normal cabin-r4/r5 interaction custody PASS:
+  old east window rotated, upper-door inspection and nearby habitat refresh,
+  exact facing/link persistence, original fleet/inventory/gas/heat retained.
+  Late unscrubbed CO2 crossed the breathing limit; not sustainable habitat.
+  Repeated pause-menu hit-test diagnosis found aligned desktop/mobile targets;
+  normal mobile SaveQuit twice succeeded, including scrolled return. Earlier
+  transition/pointer failure retained; no unsupported layout patch. The actual
+  oxygen-rich CO2 failure was mislabeled HYPOXIA; small warning-only correction
+  keeps exposure/damage/custody unchanged and explains CO2 removal or sealed O2.
+  Focused-r32 61PASS/static-r27/lint-r16 PASS; fresh build/browser pending.
 - Exact851b875 build-r8/official-r8 PASS. Cabin-r3 normal battery attachment,
   door entry/closure, controller enable and suit-free breathing PASS. Save335/
   cold344/save347 strict browser-cabin-pressure-custody-r1 PASS:99.311kPa,

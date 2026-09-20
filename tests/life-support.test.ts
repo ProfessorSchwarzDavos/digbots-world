@@ -172,6 +172,27 @@ test("scrubber cuts oxygen draw until its finite charge expires", () => {
   assert.equal(lifeSupportStore(equipment.back!).scrubberSeconds, 0);
 });
 
+test("unscrubbed habitat warns about CO2 without changing finite exposure or damage", () => {
+  const room = { ...home, pressureKPa: 99.311, oxygenFraction: 24100 / 122242, co2Fraction: 900 / 122242,
+    inertFraction: 97242 / 122242, breathable: false, temperatureC: [20, 20] as const } satisfies BodyEnvironment;
+  const prior = { ...EMPTY_LIFE_SUPPORT, hypoxiaSeconds: 14, damageAccumulator: .75 };
+  const result = stepLifeSupport({}, prior, room, 1);
+  assert.equal(result.hud.breathing, false); assert.equal(result.hud.level, "danger");
+  assert.deepEqual(result.hud.hazards, ["CO2"]); assert.equal(result.hud.status, "CO2 HIGH - SCRUB OR USE SEALED O2");
+  const depleted = stepLifeSupport({}, prior, { ...room, oxygenFraction: .1, co2Fraction: 0 }, 1);
+  assert.deepEqual(depleted.hud.hazards, ["HYPOXIA"]);
+  assert.deepEqual(result.state, depleted.state); assert.equal(result.damage, depleted.damage);
+  assert.deepEqual(stepLifeSupport({}, prior, room, 1, { submerged: true }).hud.hazards, ["HYPOXIA"]);
+  assert.deepEqual(stepLifeSupport({}, prior, { ...room, co2Fraction: .005 }, 1).hud.hazards, ["HYPOXIA"]);
+  const fresh = stepLifeSupport({}, { ...EMPTY_LIFE_SUPPORT }, room, 0);
+  assert.deepEqual(fresh.hud.hazards, []); assert.equal(fresh.hud.status, "CO2 HIGH - SCRUB OR USE SEALED O2");
+  const gear = { head: slot(Item.FieldBreatherHelmet), back: stocked(Item.LightOxygenTank, { oxygenMl: 10000 }) };
+  const protectedResult = stepLifeSupport(gear, { ...EMPTY_LIFE_SUPPORT }, room, 1);
+  assert.equal(protectedResult.hud.breathing, true); assert.equal(protectedResult.hud.status, "BREATHING");
+  assert.equal(sourceOxygen(protectedResult.equipment.back).amount, 9000);
+  assert.equal(sourceOxygen(gear.back).amount, 10000, "input vessel remains unchanged");
+});
+
 test("EVA impulse depletes finite gas and energy; ordinary tanks never propel", () => {
   let rig = stocked(Item.EvaManeuverRig, { sockets: [stocked(Item.LightOxygenTank, { oxygenMl: 400 }), null], energyJ: 150 });
   const first = maneuverImpulse(rig, 1);

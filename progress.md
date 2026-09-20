@@ -12,11 +12,20 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
   pressure and world suite passes 196 cases. Three old world fixtures now specify
   Home-only biomes, an actual Home context, and non-player-facing paired door
   uppers; failed receipts remain available. Static-r34 caught a test-only Item
-  type annotation, corrected to ItemCode; fresh static/build/browser pending.
+  type annotation, corrected to ItemCode. Static-r35/lint-r22 and exact b2d2404
+  build-r14 (SfYIsDbP4KPDiBT0XfR4h) plus unchanged official-r14 pass.
 - Previous station67284ba build-r13/lint-r21/official-r13 passed. Normal desktop
   and390px UI, name/icon/association/grants, physical collar registration and
-  duplicate/unplaced rejections passed, but strict browser custody remains open
-  until the correction is rebuilt and replayed on the unchanged synthetic input.
+  duplicate/unplaced rejections passed. Fresh normal-input browser-r2 (75 actions)
+  and custody-r3 now pass on the unchanged synthetic input: rejected placement
+  leaves exact original inventory/edits/facings/room gas/heat, then normal window
+  removal/collar placement spends one collar and one pickaxe durability, retains
+  the drifting window drop, and preserves registry14/two collars through cold074.
+  Fleet/Home exact; health10, finite suit oxygen/scrubber. Custody-r2's incomplete
+  gas equation omitted the controller's existing66.192L inert and paid16171J
+  heating; retained failed oracle/receipt, corrected full-system balance passes.
+  Desktop/mobile/cold images personally reviewed; all owned preview/browser jobs
+  drained and4338/4339 absent. Exact handoff: CF6/r13-stations/HANDOFF.md.
   No fullCF6, sustainable habitat, crafting, clear docking approach or real-peer
   acceptance claim. All browser/preview jobs from that first replay are drained.
 

@@ -36,8 +36,8 @@ test("machine carry/reload retains charge and partitions location authority", ()
   assert.equal(restoreWorkshop(saved, "L2", "O", () => BlockId.Air).size, 0);
   assert.equal(WORLD_SAVE_OWNERS.wayworks, "location");
 });
-test("all forty-four workshop blocks and wrench have real recipes and creative entries", () => {
-  assert.equal(Object.keys(WAYWORKS_BLOCKS).length, 44);
+test("all fifty-four workshop and flight blocks plus wrench have real recipes and creative entries", () => {
+  assert.equal(Object.keys(WAYWORKS_BLOCKS).length, 54);
   for (const item of [...Object.keys(WAYWORKS_BLOCKS).map(Number), Item.FieldWrench]) {
     assert.ok(ITEMS[item]); assert.ok(CREATIVE_ITEMS.includes(item)); assert.ok(RECIPES.some(recipe => recipe.output.item === item));
   }

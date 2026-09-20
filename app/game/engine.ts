@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { advancePowerGrid, localFaceForWorldDirection, machineCapacity, machineRate, normalizeMachine, type MachineState } from "./wayworks";
+import { advancePowerGrid, createMachine, localFaceForWorldDirection, machineCapacity, machineRate, normalizeMachine, type MachineState } from "./wayworks";
 import { applyWorkshopAction, machineKindForBlock, parseWorkshopAction, placedWorkshopMachine, restoreWorkshop, WAYWORKS_BLOCKS, type WorkshopAction, type WorkshopClipboard } from "./wayworks-integration";
 import { PowerTopologyCache } from "./wayworks-network";
 import { advanceMachine, portableResource } from "./wayworks-machines";
@@ -793,6 +793,8 @@ import { validateAgentCustody, type AgentCustodySave } from "./agent-custody";
 import { resetLocationTransients, validateLocationPlayerState, validLocationVelocity, type LocationPlayerState } from "./location-manager";
 import { applySpaceVehicleAction, createSurveyHopper, SURVEY_HOPPER_CAPACITY, validateSpacefleetSave, type SpacefleetSave, type SpaceVehicleState, type VehicleVector } from "./space-vehicle";
 import { firstFlightDestination, inspectSpaceflightMission, type FirstFlightRoute, type SpaceflightIntent, type SpaceflightMission } from "./spaceflight-mission";
+import { applyStationAction, createStationRegistry, stationAllows, stationAt, validateStationRegistrySave, type StationPermission, type StationRegistrySave } from "./orbital-station";
+import { planStationFoundation, planStationDock, shipDock, validateStationFleetCustody } from "./station-runtime";
 import { inspectLaunchPad, supplyVehicleFromMachine, type LaunchPadCheck } from "./spaceflight-infrastructure";
 import { spaceflightMachineKind } from "./spaceflight-catalog";
 import { advanceSpaceCabin, advanceSpaceflight } from "./spaceflight-flight";
@@ -1582,6 +1584,7 @@ export type WorldSave = {
   pressure?: PressureSave;
   /** One universe-owned table; ships never live in both departing/arriving shards. */
   spacefleet?: SpacefleetSave;
+  orbitalStations?: StationRegistrySave;
   chests: Record<string, ChestState>;
   contextualLoot?: ContextualLootWorldState;
   roadEvents?: Record<string, RoadEventState>;
@@ -4287,6 +4290,7 @@ export class VoxelEngine {
   wayworksMaterialTopology = new MaterialTopologyCache();
   pressureRuntime: PressureRuntime | null = null;
   spacefleet: SpacefleetSave = { schema: 1, vehicles: {} };
+  orbitalStations: StationRegistrySave | null = null;
   spaceflightRoute: FirstFlightRoute = "home-orbit";
   spaceflightModels = new Map<string, THREE.Group>();
   private spaceflightBusy = false;
@@ -5307,6 +5311,7 @@ export class VoxelEngine {
    * nonpersistent guest/preview). Persisted state is restored separately. */
   private resetLocationRuntime() {
     resetLocationTransients(this);
+    this.orbitalStations = null;
     this.basicWorldRenderer.resetLocation();
     this.clearInput();
     this.hideChestModel(true);
@@ -5412,6 +5417,7 @@ export class VoxelEngine {
     this.selected = 0;
     this.inventory = initialInventoryForMode(mode);
     this.spacefleet = { schema: 1, vehicles: {} };
+    this.orbitalStations = null;
     this.pendingSpaceArrival = null;
     this.equipment = blankEquipment();
     this.offhand = null;
@@ -6054,11 +6060,14 @@ export class VoxelEngine {
 
   loadWorld(save: WorldSave, options: Partial<WorldOptions> = save.options ?? {}, worldId: string | null = this.worldStorage.activeWorldId) {
     const spacefleet = validateSpacefleetSave(save.spacefleet);
+    const stations = save.orbitalStations === undefined ? null : validateStationRegistrySave(save.orbitalStations, this.worldStorage.currentStamp?.locationId);
+    if (stations) validateStationFleetCustody(stations, spacefleet);
     const agentCustody = validateAgentCustody(save.agentCustody);
     const locationPlayer = validateLocationPlayerState(save.locationPlayerState);
     const extensions = splitUniverseSave(save).extensions;
     this.resetLocationRuntime();
     this.spacefleet = spacefleet;
+    this.orbitalStations = stations;
     this.saveExtensions = { ...extensions };
     for (const [id, record] of Object.entries(agentCustody.agents)) {
       this.agentInventories.set(id, record.inventory.map(cloneSlot));
@@ -9021,6 +9030,9 @@ export class VoxelEngine {
         return;
       }
       const currentState = this.sharedFacilityState(parts.kind, parts.key, true);
+      if (!this.stationActorAccess(peer.identity.id, coords[0], coords[1], coords[2], "container")) {
+        this.rejectFacilityAction(action, peer.identity.id, "Station container access is private."); return;
+      }
       if (!currentState) { this.rejectFacilityAction(action, peer.identity.id, "That facility has no shared inventory yet."); return; }
       if (parts.kind === "wayworks" && !this.workshopActorAccess(this.wayworks.get(parts.key)!, peer.identity.id)) {
         this.rejectFacilityAction(action, peer.identity.id, "The owner has not opened this machine for public service."); return;
@@ -10035,6 +10047,7 @@ export class VoxelEngine {
       const playerPoses = [this.localNetworkPose(), ...[...this.remotePlayers.values()].map((player) => player.target)]
         .filter((pose): pose is PlayerPose => Boolean(pose));
       const valid = Boolean(remote) && placement.valid && validPressureDoorEdits(action.edits, point => this.world.getBlock(point.x, point.y, point.z)) && action.edits.length > 0 && action.edits.length <= 2_048 && action.edits.every((edit) => {
+        if (!peer.identity || !this.stationActorAccess(peer.identity.id, edit.x, edit.y, edit.z, "build") || this.stationStructurePinned(edit.x, edit.y, edit.z)) return false;
         const existing = this.world.getBlock(edit.x, edit.y, edit.z), incomingMachine = machineKindForBlock(edit.type), existingMachine = machineKindForBlock(existing);
         if (incomingMachine || existingMachine) {
           const pairedDoor = !!pressureDoorUpper(edit.type as BlockId) || existing !== undefined && !!pressureDoorUpper(existing);
@@ -13076,7 +13089,24 @@ export class VoxelEngine {
     // Temporary safe admission boundary while multi-location hosts are completed.
     // Never silently retire a live origin that still has another participant.
     if (this.multiplayer?.role === "host" && this.remotePlayers.size) mission.blockers.push("Other participants still occupy this location. End the shared session before this flight.");
+    mission.stations = parseLocationId(this.world.locationScope.locationId).kind === "orbit"
+      ? this.orbitalStations ?? createStationRegistry(this.world.locationScope.locationId) : null;
+    if (ship && shipDock(ship)) mission.status = "docked";
     return mission;
+  }
+
+  /** Host-resolved station gates also apply to typed guest/drone mutations. */
+  private stationActorAccess(actorId: string, x: number, y: number, z: number, permission: StationPermission): boolean {
+    const station = stationAt(this.orbitalStations, [x, y, z]);
+    if (!station) return true;
+    const local = actorId === "local" || actorId === this.multiplayer?.identity.id && this.multiplayer?.role === "host";
+    // Faction/guild grants stay fail-closed until the host binds authenticated membership.
+    return stationAllows(station, { actorId: local ? "local" : actorId, factionIds: [], guildIds: [] }, permission);
+  }
+
+  private stationStructurePinned(x: number, y: number, z: number): boolean {
+    return Object.values(this.orbitalStations?.stations ?? {}).some(station =>
+      [station.corePosition, ...Object.values(station.docks).map(dock => dock.position)].some(point => point[0] === x && point[1] === y && point[2] === z));
   }
 
   /** Human mission requests share the pure host authority and one save owner. */
@@ -13107,6 +13137,44 @@ export class VoxelEngine {
         if (!ship || ship.revision !== action.vehicleRevision) return fail("The spacecraft changed. Inspect the current mission again.");
         const actor = { actorId: "local", locationId: this.world.locationScope.locationId, expectedVehicleRevision: ship.revision };
         const base = { vehicleId: ship.vehicleId, actionId: crypto.randomUUID() };
+        if (action.kind === "station-found" || action.kind === "station-dock" || action.kind === "station-access" || action.kind === "station-name" || action.kind === "station-habitat") {
+          const registry = this.orbitalStations ?? createStationRegistry(actor.locationId);
+          if (registry.revision !== action.registryRevision || ship.trip) return fail("The station or mission changed. Inspect it again.");
+          const principal = { actorId: "local", factionIds: [], guildIds: [] };
+          if (action.kind === "station-found") {
+            if (!aboard || this.wayworks.size + 10 > 256) return fail("Board your orbital ship and leave capacity for ten starter blocks.");
+            const plan = planStationFoundation({ registry, actor: principal, ship, inventory: this.inventory, name: action.name,
+              actionId: base.actionId, stationId: crypto.randomUUID(), blockAt: (x, y, z) => this.world.getBlock(x, y, z),
+              blocked: ([x, y, z]) => y < MIN_Y || y > MAX_Y || blockEditIntersectsPlayer({ x, y, z, type: BlockId.StationTruss }, this.position, this.currentPlayerHeight())
+                || [...this.remotePlayers.values()].some(remote => blockEditIntersectsPlayer({ x, y, z, type: BlockId.StationTruss }, remote.target, PLAYER_HEIGHT)) });
+            const machines = plan.blocks.map(block => [blockKey(block.x, block.y, block.z), createMachine(machineKindForBlock(block.type)!, actor.locationId, "local")] as const);
+            this.world.setBlocksBatch(plan.blocks, true, true);
+            this.inventory = plan.inventory; this.orbitalStations = plan.registry;
+            for (const [key, state] of machines) this.wayworks.set(key, state);
+            this.publishBlockEdits(plan.blocks, "batch");
+            this.events.onToast("Station deck founded. It contains no air or power; build and supply a sealed habitat before leaving EVA protection.");
+          } else if (action.kind === "station-dock") {
+            if (!aboard) return fail("Board the pilot seat before docking or undocking.");
+            const plan = planStationDock({ registry, fleet: this.spacefleet, actor: principal, vehicleId: ship.vehicleId,
+              stationId: action.stationId, dockId: action.dockId, expectedRegistryRevision: action.registryRevision,
+              expectedVehicleRevision: action.vehicleRevision, actionId: base.actionId, undock: action.undock,
+              blockAt: (x, y, z) => this.world.getBlock(x, y, z),
+              blocked: ([x, y, z]) => [...this.remotePlayers.values()].some(remote => blockEditIntersectsPlayer({ x, y, z, type: BlockId.StationTruss }, remote.target, PLAYER_HEIGHT)) });
+            this.spacefleet = plan.fleet; this.orbitalStations = plan.registry;
+          } else {
+            const station = registry.stations[action.stationId];
+            if (!station || this.position.distanceTo(new THREE.Vector3(...station.corePosition)) > 8
+              || this.world.getBlock(...station.corePosition) !== BlockId.StationCore) return fail("Approach the station's intact claim core.");
+            const context = { actor: principal, locationId: actor.locationId, expectedRevision: registry.revision };
+            const command = action.kind === "station-access" ? { type: "access" as const, memberIds: action.memberIds, association: action.association, access: action.access }
+              : action.kind === "station-name" ? { type: "rename" as const, name: action.name.trim(), icon: station.icon }
+                : { type: "habitat" as const, pressureZoneIds: (this.pressureRuntime?.snapshot().zones ?? []).filter(zone => zone.cellKeys.some(key => {
+                  const point = key.split(",").map(Number) as VehicleVector; return stationAt(registry, point)?.id === station.id;
+                })).map(zone => zone.zoneId), wayanchorLeases: station.wayanchorLeases };
+            this.orbitalStations = applyStationAction(registry, context, { ...command, actionId: base.actionId, stationId: station.id }).registry;
+          }
+          this.saveSoon(); this.emitHud(true); return true;
+        }
         if (action.kind === "retry-arrival") {
           if (this.pendingSpaceArrival) return (await this.commitSpaceVehicleLocation(ship.vehicleId)).ok;
           return this.arriveSpaceVehicle(ship);
@@ -13239,6 +13307,9 @@ export class VoxelEngine {
 
   private workshopActorAccess(state: MachineState, actor: string, action?: WorkshopAction) {
     if (!state || state.locationId !== (this.world.locationScope?.locationId ?? "home-preview")) return false;
+    const key = [...this.wayworks].find(([, candidate]) => candidate === state)?.[0];
+    const permission = action?.kind === "pressure" ? /door|airlock|hangar/.test(state.kind) ? "airlock" : "life-support" : "container";
+    if (key && !this.stationActorAccess(actor, ...key.split(",").map(Number) as VehicleVector, permission)) return false;
     const owner = state.ownerId === actor || state.ownerId === "local" && (actor === "local" || actor === this.multiplayer?.identity.id);
     if (owner || state.workshop.trusted.includes(actor)) return true;
     if (!workshopAuthorized(state.workshop, state.ownerId, actor)) return false;
@@ -13255,6 +13326,7 @@ export class VoxelEngine {
     // durable save owner. Guest edits are denied until typed admission exists.
     if (!key || !state || this.multiplayer?.role === "guest" || state.ownerId !== "local") return fail("Only the workshop owner can operate this machine.");
     const [x, y, z] = key.split(",").map(Number);
+    if (!this.workshopActorAccess(state, "local", action)) return fail("The station has not granted this operation.");
     if (Math.hypot(x - this.position.x, y - this.position.y, z - this.position.z) > 6 || machineKindForBlock(this.world.getBlock(x, y, z)) !== state.kind || state.locationId !== (this.world.locationScope?.locationId ?? "home-preview")) return fail("Machine is out of reach or no longer present.");
     if ((action.kind === "crank" || action.kind === "charge") && performance.now() < this.wayworksActionReadyAt) return fail("Wait for this transfer to settle.");
     if (action.kind === "pressure") {
@@ -16455,6 +16527,7 @@ export class VoxelEngine {
   }
 
   toggleDoor(x: number, y: number, z: number, type: BlockId, source: "player" | "sentient" = "player") {
+    if (!this.stationActorAccess(source === "player" ? "local" : "station-sentient", x, y, z, "airlock")) return false;
     const lowerY = this.doorLowerY(type, y);
     const open = this.doorIsOpen(type);
     const xAxis = this.doorUsesXAxis(type);
@@ -16485,6 +16558,7 @@ export class VoxelEngine {
   }
 
   toggleFenceGateAt(x: number, y: number, z: number, type: BlockId, source: "player" | "sentient" = "player") {
+    if (!this.stationActorAccess(source === "player" ? "local" : "station-sentient", x, y, z, "airlock")) return false;
     const next = toggleFenceGate(type);
     if (next === null) return false;
     const closing = type === BlockId.FenceGateNorthSouthOpen || type === BlockId.FenceGateEastWestOpen;
@@ -20084,6 +20158,7 @@ export class VoxelEngine {
     const x = replacesTarget ? this.target.x : this.target.placeX;
     const y = replacesTarget ? this.target.y : this.target.placeY;
     const z = replacesTarget ? this.target.z : this.target.placeZ;
+    if (!this.stationActorAccess("local", x, y, z, "build")) { this.events.onToast("Station building permission is required."); return; }
     if (y < MIN_Y || y > MAX_Y) return;
     const current = this.world.getBlock(x, y, z);
     let replacedUpper: BlockId | undefined;
@@ -20606,6 +20681,9 @@ export class VoxelEngine {
       this.target = { ...this.target, y: this.target.y - 1, type: lower };
     }
     const { x, y, z, type } = this.target;
+    if (!this.stationActorAccess("local", x, y, z, "build") || this.stationStructurePinned(x, y, z)) {
+      this.events.onToast("Station building permission is required; registered cores and docking collars remain anchored."); return;
+    }
     if (type === BlockId.LaunchPad && Object.values(this.spacefleet.vehicles).some(ship => ship.locationId === this.world.locationScope.locationId
       && Math.abs(ship.transform.position[0] - x) <= 1.5 && Math.abs(ship.transform.position[2] - z) <= 1.5 && Math.abs(ship.transform.position[1] - y) < 3)) {
       this.events.onToast("Move or recover the spacecraft before removing its launch pad."); return;
@@ -33825,6 +33903,7 @@ export class VoxelEngine {
       if (!target || ![target.x, target.y, target.z].every(Number.isSafeInteger) || target.y < MIN_Y || target.y > MAX_Y
         || Math.hypot(target.x - pose.x, target.y - pose.y, target.z - pose.z) > 5.5) return blocked("workshop_out_of_reach", "Use an integer loaded cell within 5.5 blocks.");
       const key = blockKey(target.x, target.y, target.z), current = this.world.getBlock(target.x, target.y, target.z);
+      if (!this.stationActorAccess(command.agentId, target.x, target.y, target.z, "build") || this.stationStructurePinned(target.x, target.y, target.z)) return blocked("station_build_denied", "Station construction permission is required; registered anchors cannot be removed.");
       if (current === undefined) return blocked("workshop_chunk_unloaded", "The machine cell is not loaded.");
       if (command.kind === "workshop_place") {
         const slot = inventory[index], kind = slot ? machineKindForBlock(slot.item) : undefined;
@@ -33928,6 +34007,7 @@ export class VoxelEngine {
       const targetPosition = blockPositionFromKey(targetId);
       if (!targetPosition || Math.hypot(targetPosition.x - pose.x, targetPosition.y - pose.y, targetPosition.z - pose.z) > 5.5) return blocked("target_out_of_reach", "The requested world target is missing or outside the drone's physical interaction reach.");
       const type = this.world.getBlock(targetPosition.x, targetPosition.y, targetPosition.z);
+      if (!this.stationActorAccess(command.agentId, targetPosition.x, targetPosition.y, targetPosition.z, command.kind === "interact" ? "airlock" : "container")) return blocked("station_access_denied", "The station has not granted this interaction.");
       if (command.kind === "interact" && type !== undefined && this.isDoor(type)) return this.toggleDoor(targetPosition.x, targetPosition.y, targetPosition.z, type) ? completed("door_toggled", "The door was used.") : blocked("door_occupied", "The door could not move because its passage is occupied.");
       if (command.kind === "interact" && type !== undefined && toggleFenceGate(type) !== null) return this.toggleFenceGateAt(targetPosition.x, targetPosition.y, targetPosition.z, type) ? completed("gate_toggled", "The fence gate was used.") : blocked("gate_occupied", "The gate could not move because its passage is occupied.");
       const chest = this.chests.get(targetId);
@@ -33995,7 +34075,7 @@ export class VoxelEngine {
           const type = this.world.getBlock(x, y, z);
           if (!isMatureCultivatedPlant(type)) continue;
           const result = harvestPlant(type, false, Math.abs(Math.sin(x * 12.9898 + z * 78.233 + this.day)), true);
-          if (result) candidates.push({ x, y, z, type, result });
+          if (result && this.stationActorAccess(command.agentId, x, y, z, "build")) candidates.push({ x, y, z, type, result });
         }
       }
       if (!candidates.length) return completed("nothing_mature", "No mature cultivated crops or orchard fruit were found in the bounded area.", { harvested: 0 });
@@ -34035,7 +34115,8 @@ export class VoxelEngine {
       const targets: Array<{ x: number; y: number; z: number; type: BlockId }> = [];
       for (let x = Math.floor(pose.x - radius); x <= Math.ceil(pose.x + radius) && targets.length < 128; x += 1) for (let z = Math.floor(pose.z - radius); z <= Math.ceil(pose.z + radius) && targets.length < 128; z += 1) for (let y = Math.floor(pose.y - radius); y <= Math.ceil(pose.y + radius); y += 1) {
         const type = this.world.getBlock(x, y, z);
-        if (type !== undefined && requested.has(type) && !isMatureCultivatedPlant(type) && !machineKindForBlock(type) && !pressureDoorLower(type)) targets.push({ x, y, z, type });
+        if (type !== undefined && requested.has(type) && !isMatureCultivatedPlant(type) && !machineKindForBlock(type) && !pressureDoorLower(type)
+          && this.stationActorAccess(command.agentId, x, y, z, "build")) targets.push({ x, y, z, type });
       }
       if (!targets.length) return completed("resource_not_found", "No matching resource blocks were found inside the bounded loaded area.", { gathered: 0 });
       const first = targets[0];
@@ -34072,6 +34153,7 @@ export class VoxelEngine {
       const removals = Array.isArray(args.removals) ? (args.removals as Array<{ x: number; y: number; z: number }>).map((cell) => ({ ...cell })) : [];
       const duplicate = new Set<string>();
       const warnings: string[] = [];
+      if ([...placements, ...removals].some(point => !this.stationActorAccess(command.agentId, point.x, point.y, point.z, "build") || this.stationStructurePinned(point.x, point.y, point.z))) return blocked("station_build_denied", "The station has not granted this build.");
       if (removals.some(cell => { const type = this.world.getBlock(cell.x, cell.y, cell.z); return machineKindForBlock(type) || type !== undefined && pressureDoorLower(type); })) return blocked("workshop_typed_pickup_required", "Use workshop_pickup to preserve machine contents.");
       for (const placement of placements) {
         const cellKey = blockKey(placement.x, placement.y, placement.z);
@@ -34255,6 +34337,7 @@ export class VoxelEngine {
       while (steps < 8 && performance.now() - frameStartedAt < 1.25) {
         if (job.removalIndex < job.preview.removals.length) {
           const cell = job.preview.removals[job.removalIndex++];
+          if (!this.stationActorAccess(agentId, cell.x, cell.y, cell.z, "build") || this.stationStructurePinned(cell.x, cell.y, cell.z)) { this.cancelAgentBuild(agentId, "station_access_changed", "Station permission changed; unplaced materials were returned."); break; }
           const current = this.world.getBlock(cell.x, cell.y, cell.z);
           if (machineKindForBlock(current)) { this.cancelAgentBuild(agentId, "workshop_site_changed", "A machine entered the build site. Use typed sealed pickup first."); break; }
           if (current === undefined) { this.cancelAgentBuild(agentId, "build_chunk_unloaded", `The build stopped before ${blockKey(cell.x, cell.y, cell.z)} because its chunk unloaded.`); break; }
@@ -34269,6 +34352,7 @@ export class VoxelEngine {
         }
         if (job.placementIndex < job.preview.placements.length) {
           const cell = job.preview.placements[job.placementIndex];
+          if (!this.stationActorAccess(agentId, cell.x, cell.y, cell.z, "build") || this.stationStructurePinned(cell.x, cell.y, cell.z)) { this.cancelAgentBuild(agentId, "station_access_changed", "Station permission changed; unplaced materials were returned."); break; }
           const current = this.world.getBlock(cell.x, cell.y, cell.z);
           if (machineKindForBlock(current) || machineKindForBlock(cell.block)) { this.cancelAgentBuild(agentId, "workshop_site_changed", "Use typed workshop placement for machines."); break; }
           if (current === undefined || (current !== BlockId.Air && !BLOCKS[current]?.replaceable && cell.replace !== true)) {
@@ -35081,6 +35165,7 @@ export class VoxelEngine {
       wayworks: Object.fromEntries(this.wayworks),
       pressure: this.pressureRuntime?.snapshot(),
       spacefleet: validateSpacefleetSave(this.spacefleet),
+      ...(this.orbitalStations ? { orbitalStations: validateStationRegistrySave(this.orbitalStations, this.world.locationScope.locationId) } : {}),
       digitalCreatureArchive: normalizeDigitalCreatureArchive(this.digitalCreatureArchive),
       golemForges: Object.fromEntries([...this.golemForges.entries()].map(([key, value]) => [key, normalizeGolemForgeState(value)])),
       alchemyStands: Object.fromEntries(this.alchemyStands.entries()),

@@ -287,6 +287,7 @@ export function planSpaceVehicleTravel(input: SpaceVehicleState, originStamp: Lo
   const vehicle = validateSpacefleetSave({ schema: 1, vehicles: { [input.vehicleId]: input } }).vehicles[input.vehicleId];
   token(transactionId, "transaction ID");
   const source = locationStamp(originStamp), target = locationStamp(destinationStamp);
+  if (vehicle.modules.some(module => module.kind === "avionics" && module.metadata.stationDock !== undefined)) fail("undock from the station before reserving a route.");
   if (source.locationId !== vehicle.locationId || vehicle.trip || !["parked", "landed", "orbit"].includes(vehicle.phase)) fail("vehicle cannot reserve this route.");
   if (vehicle.hull === 0 || ["engine", "avionics", "life-support"].some(kind => !vehicle.modules.some(module => module.kind === kind && module.integrity > 0))) fail("hull/modules not flight-ready.");
   if (!vehicle.passengers.length || vehicle.passengers.some(p => !p.consent || !p.connected)) fail("all passengers must be connected and consent.");
@@ -460,6 +461,8 @@ export function remapSpacefleetUniverse(fleet: SpacefleetSave, from: UniverseId,
     vehicle.locationId = remap(vehicle.locationId);
     const berth = vehicle.modules.find(component => component.kind === "avionics")?.metadata.homeBerth;
     if (isUniverseRecord(berth) && typeof berth.locationId === "string" && parseLocationId(berth.locationId).universeId === from) berth.locationId = remap(berth.locationId as LocationId);
+    const dock = vehicle.modules.find(component => component.kind === "avionics")?.metadata.stationDock;
+    if (isUniverseRecord(dock) && typeof dock.locationId === "string" && parseLocationId(dock.locationId).universeId === from) dock.locationId = remap(dock.locationId as LocationId);
     if (vehicle.trip) {
       vehicle.trip.origin = remap(vehicle.trip.origin); vehicle.trip.destination = remap(vehicle.trip.destination);
       vehicle.trip.originStamp = { ...vehicle.trip.originStamp, locationId: vehicle.trip.origin };

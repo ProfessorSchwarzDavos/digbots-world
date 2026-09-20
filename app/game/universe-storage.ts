@@ -5,6 +5,8 @@ import { homeLocation, locationId, parseLocationId, universeId, type LocationId,
 import { assertExactKeys, canonicalJson, cloneUniverseJson, isUniverseRecord, universeSha256 } from "./universe-json";
 import { composeUniverseSave, splitUniverseSave, type SaveFields } from "./universe-save";
 import { assertVehicleCommitReady, commitVehicleArrival, remapSpacefleetUniverse, validateSpacefleetSave, validateSpacefleetUniverse } from "./space-vehicle";
+import { remapStationRegistry, validateStationRegistrySave } from "./orbital-station";
+import { validateStationFleetCustody } from "./station-runtime";
 import { generationOptionsFromWorldOptions, LEGACY_WORLD_KEY, normalizeWorldOptions, WORLD_CATALOG_KEY, WORLD_DATA_PREFIX, type StoredWorld, type WorldMetadata, type WorldOptions } from "./world-storage";
 
 export const UNIVERSE_DATABASE = `${TYPESCRIPT_STORAGE_PREFIX}-universe-v1`;
@@ -258,6 +260,7 @@ export class UniverseStorage {
         || !integer(descriptor.generator.sourceVersion, 1) || typeof descriptor.generator.seed !== "string" || !isUniverseRecord(descriptor.generator.options)) throw new UniverseStorageError("corrupt", "Invalid location descriptor.");
       catalogBody(catalog, address);
       const fields = await verify(dataRows.find((row) => row.id === descriptor.id), descriptor.id, id);
+      if (fields.orbitalStations !== undefined) validateStationFleetCustody(validateStationRegistrySave(fields.orbitalStations, descriptor.id), validateSpacefleetSave(universe.fields.spacefleet));
       if (fields.seed !== descriptor.generator.seed || fields.generatorVersion !== descriptor.generator.version || (fields.generatorProfile ?? "world-below-v15") !== descriptor.generator.profile) throw new UniverseStorageError("corrupt", "Location data differs from captured generator contract.");
       return { descriptor, fields };
     }));
@@ -385,6 +388,7 @@ export class UniverseStorage {
     const catalog = createWaystarCatalog(world.options.dayLengthMinutes), parts = splitUniverseSave(world.save);
     composeUniverseSave(parts);
     if (world.save.spacefleet !== undefined) validateSpacefleetUniverse(world.save.spacefleet, id);
+    if (world.save.orbitalStations !== undefined) validateStationRegistrySave(world.save.orbitalStations, home);
     const catalogRecord = await checked(id, id, catalog);
     const backups = await Promise.all((input.backups ?? []).map(async ({ sourceKey, raw }): Promise<LegacyBackup> => {
       if (!legacyKey(sourceKey) || typeof raw !== "string") throw new UniverseStorageError("invalid", "Only explicit TypeScript legacy world source strings may be migrated.");
@@ -420,6 +424,7 @@ export class UniverseStorage {
     if (save.seed !== location.descriptor.generator.seed || save.generatorVersion !== location.descriptor.generator.version || (save.generatorProfile ?? "world-below-v15") !== location.descriptor.generator.profile) throw new UniverseStorageError("invalid", "A checkpoint cannot change the captured terrain generator.");
     const parts = splitUniverseSave(save); composeUniverseSave(parts);
     if (save.spacefleet !== undefined) validateSpacefleetUniverse(save.spacefleet, id);
+    if (save.orbitalStations !== undefined) validateStationRegistrySave(save.orbitalStations, manifest.currentLocationId);
     const metadata = cloneUniverseJson(input.metadata ?? manifest.metadata), options = cloneUniverseJson(input.options ?? manifest.options);
     if (metadata.id !== id) throw new UniverseStorageError("invalid", "Metadata cannot change universe identity.");
     const profile = location.descriptor.generator.profile as WorldSave["generatorProfile"];
@@ -467,10 +472,12 @@ export class UniverseStorage {
     if (originSave.seed !== origin.descriptor.generator.seed || originSave.generatorVersion !== origin.descriptor.generator.version || (originSave.generatorProfile ?? "world-below-v15") !== origin.descriptor.generator.profile) throw new UniverseStorageError("invalid", "Origin generator changed.");
     const parts = splitUniverseSave(originSave); composeUniverseSave(parts);
     if (originSave.spacefleet !== undefined) validateSpacefleetUniverse(originSave.spacefleet, id);
+    if (originSave.orbitalStations !== undefined) validateStationRegistrySave(originSave.orbitalStations, manifest.currentLocationId);
     let target = snapshot.locations.find((entry) => entry.descriptor.id === destination);
     if (!target) {
       if (!input.initialSyntheticSave) throw new UniverseStorageError("not-found", "Destination checkpoint does not exist.");
       const initial = input.initialSyntheticSave, initialParts = splitUniverseSave(initial); composeUniverseSave(initialParts);
+      if (initial.orbitalStations !== undefined) validateStationRegistrySave(initial.orbitalStations, destination);
       target = { descriptor: { id: destination, universeId: id, revision: 0, generationEpoch: 1, ...(!vehicleCommit ? { synthetic: true as const } : {}),
         generator: { seed: initial.seed, version: initial.generatorVersion, sourceVersion: initial.generatorVersion, profile: initial.generatorProfile ?? "world-below-v15", options: cloneUniverseJson(manifest.options) } }, fields: initialParts.location };
     }
@@ -567,7 +574,18 @@ export class UniverseStorage {
     const writes: WriteRecord[] = [{ store: "manifests", value: manifest }, { store: "catalogs", value: catalogRecord }, { store: "universeRecords", value: await checked(newId, newId, importedUniverse) }];
     for (const { descriptor, fields } of snapshot.locations) {
       const id = remap(descriptor.id);
-      writes.push({ store: "locations", value: { ...descriptor, id, universeId: newId } }, { store: "locationRecords", value: await checked(id, newId, fields) });
+      const imported = cloneUniverseJson(fields) as Record<string, unknown>;
+      if (fields.orbitalStations !== undefined) imported.orbitalStations = remapStationRegistry(validateStationRegistrySave(fields.orbitalStations, descriptor.id), newId);
+      // Finite vessels move with the shard rather than becoming empty on a new location identity.
+      if (isUniverseRecord(imported.wayworks)) for (const machine of Object.values(imported.wayworks)) {
+        if (!isUniverseRecord(machine) || machine.locationId !== descriptor.id) throw new UniverseStorageError("corrupt", "Machine location mismatch during import.");
+        machine.locationId = id;
+      }
+      if (isUniverseRecord(imported.pressure) && Array.isArray(imported.pressure.zones)) for (const zone of imported.pressure.zones) {
+        if (!isUniverseRecord(zone) || zone.locationId !== descriptor.id || typeof zone.zoneId !== "string" || !zone.zoneId.startsWith(`${descriptor.id}:air:`)) throw new UniverseStorageError("corrupt", "Pressure location mismatch during import.");
+        zone.locationId = id; zone.zoneId = id + zone.zoneId.slice(descriptor.id.length);
+      }
+      writes.push({ store: "locations", value: { ...descriptor, id, universeId: newId } }, { store: "locationRecords", value: await checked(id, newId, imported) });
     }
     for (const player of snapshot.players) writes.push({ store: "players", value: await checked(recordId(newId, "player", player.playerId), newId, { ...player, locationId: remap(player.locationId), ...(player.positions ? { positions: Object.fromEntries(Object.entries(player.positions).map(([id, pose]) => [remap(id as LocationId), pose])) } : {}) }) });
     // Exact source strings remain unchanged, including their historical source keys.

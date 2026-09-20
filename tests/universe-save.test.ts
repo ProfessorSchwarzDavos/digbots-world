@@ -13,7 +13,7 @@ test("every WorldSave field has exactly one explicit owner, checked against sour
   assert.ok(type && ts.isTypeLiteralNode(type.type));
   const fields = type.type.members.map((member) => member.name!.getText(source)).sort();
   assert.deepEqual(Object.keys(WORLD_SAVE_OWNERS).sort(), fields);
-  assert.equal(fields.length, 94); // CF6 universe-owned singular ship custody.
+  assert.equal(fields.length, 95); // CF6 singular ships and location-owned stations.
 });
 
 test("all optional fields, absent/null/empty and unknown metadata survive partition round trips", () => {
@@ -21,6 +21,7 @@ test("all optional fields, absent/null/empty and unknown metadata survive partit
   for (const key of Object.keys(WORLD_SAVE_OWNERS)) if (!Object.hasOwn(save, key)) save[key] = { syntheticField: key, nested: [null, [], { unicode: "雪", negative: -16 }] };
   save.agentCustody = { schema: 1, agents: {} };
   save.spacefleet = { schema: 1, vehicles: {} };
+  delete save.orbitalStations; // This strict optional field requires a real orbital address.
   save.universeTimeSeconds = 1234.5;
   save.locationPlayerState = { schema: 1, creativeFlying: false, boatId: null, creatureId: null, creatureSeat: null };
   save.multiplayerProgressions = {};

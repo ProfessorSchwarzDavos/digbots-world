@@ -2,6 +2,21 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — revision12, first transaction checkpoint
 
+- Station foundation/docking checkpoint now consumes the real finite kit,
+  places ten physical blocks, persists a location-owned claim, moves the original
+  ship into a registered collar and blocks launch until undocked. UI exposes
+  name/member/independent grants/measured habitat links. Focused-r20 44/44 and
+  static-r22/lint-r11 PASS; broader focused-r22 99/99 PASS after updating the
+  explicit hardware recipe roster (failed-r21 retained). Real IDB station-storage-r1 passes all seven injected
+  checkpoint boundaries plus docked archive remapping; gas/machines remain bound
+  to the imported location. Corrected r2 encodes negative-z chunk boundaries and
+  repeats all eight PASS; focused-r23 42/42 includes exact dock pose/zero drift.
+  Browser station construction/pressure still pending.
+- Asteroid helper revised the pure contract to bounded schema2 pages covering
+  every maximum-field voxel, lossless schema1 migration, expansion with retained
+  depletion/claims and an indexed read snapshot;14tests/strict/lint PASS. It is
+  not yet the terrain/save/edit authority. No live shared-view extraction claim.
+
 - Exact8f44fc8 build-r5/official-r5 PASS. Normal browser-return-r2 rebuilt the
   Morrow pad from all nine carried tiles, boarded without a console, piloted
   ascent, reached Morrow orbit/Home orbit/Home surface and disembarked healthy.

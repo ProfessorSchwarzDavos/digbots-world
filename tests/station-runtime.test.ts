@@ -1,0 +1,117 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import * as THREE from "three";
+import { BlockId, Item } from "../app/game/data";
+import { VoxelEngine } from "../app/game/engine";
+import { homeLocation, locationId, universeId } from "../app/game/location-address";
+import { createStationRegistry, remapStationRegistry, validateStationRegistrySave } from "../app/game/orbital-station";
+import { createSurveyHopper, planSpaceVehicleTravel, remapSpacefleetUniverse } from "../app/game/space-vehicle";
+import { planStationFoundation, planStationDock, shipDock, validateStationFleetCustody, type StationBlock } from "../app/game/station-runtime";
+import { composeUniverseSave, splitUniverseSave } from "../app/game/universe-save";
+import { flightFixture } from "./spaceflight-fixtures";
+
+const universe = universeId("station-runtime"), orbit = locationId({ ...homeLocation(universe), kind: "orbit", instanceId: "low" });
+const actor = { actorId: "local", factionIds: [], guildIds: [] };
+function fixture() {
+  const ship = structuredClone(createSurveyHopper("hopper", "local", orbit, [0, 32.51, 0]));
+  ship.phase = "orbit"; ship.fuelMl = 60000; ship.oxidizerMl = 90000; ship.oxygenMl = 20000; ship.batteryJoules = 60000;
+  ship.passengers = [{ actorId: "local", seat: 0, consent: true, connected: true }];
+  ship.cargo[0] = { item: Item.Berry, count: 7, metadata: { note: "station exact custody" } }; ship.cargoOwnership[0] = "cargo-owner";
+  const cells = new Map<string, BlockId>();
+  const blockAt = (x: number, y: number, z: number) => cells.get(`${x},${y},${z}`) ?? BlockId.Air;
+  const inventory = [{ item: BlockId.StationCore, count: 1 }, { item: BlockId.OrbitalDock, count: 1 }, { item: BlockId.StationTruss, count: 8 }];
+  const registry = createStationRegistry(orbit);
+  const plan = () => planStationFoundation({ registry, actor, ship, inventory, name: "Home Observatory", actionId: "found", stationId: "station", blockAt, blocked: () => false });
+  return { ship, cells, blockAt, inventory, registry, plan };
+}
+function founded() {
+  const f = fixture(), plan = f.plan();
+  for (const block of plan.blocks) f.cells.set(`${block.x},${block.y},${block.z}`, block.type);
+  return { ...f, registry: plan.registry, inventory: plan.inventory, blocks: plan.blocks };
+}
+
+test("finite starter deck consumes exactly the empty kit and never makes gas, energy or a new ship", () => {
+  const f = fixture(), shipBefore = structuredClone(f.ship), plan = f.plan();
+  assert.deepEqual(plan.inventory, [null, null, null]); assert.equal(plan.blocks.length, 10);
+  assert.equal(plan.blocks.filter(block => block.type === BlockId.StationTruss).length, 8);
+  assert.deepEqual(f.ship, shipBefore); assert.equal(f.inventory[2].count, 8);
+  assert.equal(plan.registry.stations.station.pressureZoneIds.length, 0);
+  f.inventory[2].count = 7; assert.throws(f.plan, /Carry/); assert.equal(f.registry.revision, 0);
+});
+
+test("foundation rejects blocked cells, foreign ships, sealed kits and intersecting claims without mutation", () => {
+  const f = fixture(); f.cells.set("4,32,0", BlockId.Stone); assert.throws(f.plan, /empty/); f.cells.clear();
+  f.ship.ownerId = "other"; assert.throws(f.plan, /your stationary/); f.ship.ownerId = "local";
+  Object.assign(f.inventory[0], { metadata: { wayworks: { energyJ: 900 } } }); assert.throws(f.plan, /Carry/);
+  const g = founded();
+  assert.throws(() => planStationFoundation({ ...g, actor, name: "Overlap", actionId: "second", stationId: "other", blocked: () => false }), /existing station claim/);
+});
+
+test("dock and undock jointly preserve exact finite custody, block launch and remap safely", () => {
+  const f = founded(), original = structuredClone(f.ship);
+  const input = { registry: f.registry, fleet: { schema: 1 as const, vehicles: { hopper: f.ship } }, actor, vehicleId: "hopper", stationId: "station", dockId: "station:dock",
+    expectedRegistryRevision: 1, expectedVehicleRevision: 0, actionId: "dock", undock: false, blockAt: f.blockAt };
+  const docked = planStationDock(input), ship = docked.fleet.vehicles.hopper;
+  assert.deepEqual(ship.transform.position, [4, 32.51, 0]); assert.equal(shipDock(ship)?.stationId, "station");
+  const moved = structuredClone(docked.fleet); moved.vehicles.hopper.transform.position[0]++;
+  assert.throws(() => validateStationFleetCustody(docked.registry, moved), /custody/);
+  const drifting = structuredClone(docked.fleet); drifting.vehicles.hopper.velocity[1] = .1;
+  assert.throws(() => validateStationFleetCustody(docked.registry, drifting), /custody/);
+  for (const key of ["cargo", "cargoOwnership", "hull", "fuelMl", "oxidizerMl", "oxygenMl", "batteryJoules", "passengers"] as const) assert.deepEqual(ship[key], original[key]);
+  const stamp = { locationId: orbit, epoch: 1, revision: 1 };
+  assert.throws(() => planSpaceVehicleTravel(ship, stamp, { ...stamp, locationId: locationId(homeLocation(universe)) }, "trip"), /undock/);
+  assert.throws(() => planStationDock({ ...input, registry: docked.registry, fleet: docked.fleet }), /Inspect/);
+  const importedId = universeId("imported-station"), importedRegistry = remapStationRegistry(docked.registry, importedId);
+  const importedFleet = remapSpacefleetUniverse(docked.fleet, universe, importedId);
+  validateStationFleetCustody(importedRegistry, importedFleet);
+  assert.equal(importedRegistry.revision, 0); assert.deepEqual(importedRegistry.journal, []);
+  assert.equal(shipDock(importedFleet.vehicles.hopper)?.locationId, importedRegistry.locationId);
+  const freed = planStationDock({ ...input, registry: docked.registry, fleet: docked.fleet, expectedRegistryRevision: 2, expectedVehicleRevision: 1, actionId: "undock", undock: true });
+  assert.equal(shipDock(freed.fleet.vehicles.hopper), null); assert.equal(freed.registry.stations.station.docks["station:dock"].occupant, null);
+  assert.deepEqual(freed.fleet.vehicles.hopper.cargo, original.cargo);
+});
+
+test("docking checks actual core/collar, loaded approach, occupants, reach and owner", () => {
+  const f = founded();
+  const input = { registry: f.registry, fleet: { schema: 1 as const, vehicles: { hopper: f.ship } }, actor, vehicleId: "hopper", stationId: "station", dockId: "station:dock",
+    expectedRegistryRevision: 1, expectedVehicleRevision: 0, actionId: "dock", undock: false, blockAt: f.blockAt };
+  f.cells.set("4,33,0", BlockId.Stone); assert.throws(() => planStationDock(input), /Clear/); f.cells.delete("4,33,0");
+  assert.throws(() => planStationDock({ ...input, blocked: () => true }), /Clear/);
+  assert.throws(() => planStationDock({ ...input, actor: { ...actor, actorId: "guest" } }), /owner/);
+  f.ship.transform.position[0] = 50; assert.throws(() => planStationDock(input), /eight blocks/); f.ship.transform.position[0] = 0;
+  f.cells.delete("6,32,0"); assert.throws(() => planStationDock(input), /Repair/);
+});
+
+test("station save is location-owned, rejects foreign binding and mismatched ship ownership", () => {
+  const f = founded(), save = flightFixture("station-save").initial;
+  save.orbitalStations = f.registry; save.spacefleet = { schema: 1, vehicles: { hopper: f.ship } };
+  const parts = splitUniverseSave(save);
+  assert.equal(parts.universe.orbitalStations, undefined); assert.deepEqual(composeUniverseSave(parts).orbitalStations, f.registry);
+  assert.throws(() => validateStationRegistrySave(f.registry, locationId(homeLocation(universe))), /location mismatch/);
+  const corrupt = structuredClone(f.registry); corrupt.stations.station.docks["station:dock"].occupant = { vehicleId: "missing", ownerId: "local", vehicleRevision: 0 };
+  assert.throws(() => validateStationFleetCustody(corrupt, save.spacefleet!), /custody/);
+});
+
+test("actual engine founders consume physical kit, dock, deny stale/guest edits and retain location-bound grants", async () => {
+  const f = fixture(), messages: string[] = [];
+  const engine = Object.assign(Object.create(VoxelEngine.prototype), {
+    persistent: true, activeWorldId: "station-runtime", locationTransitioning: false, spaceflightBusy: false, pendingSpaceArrival: null,
+    multiplayer: null, remotePlayers: new Map(), spacefleet: { schema: 1, vehicles: { hopper: f.ship } }, orbitalStations: null,
+    activeWayworksKey: null, wayworks: new Map(), inventory: f.inventory, position: new THREE.Vector3(0, 32.51, 0),
+    world: { locationScope: { locationId: orbit, epoch: 1, revision: 1 }, getBlock: f.blockAt,
+      setBlocksBatch: (blocks: StationBlock[]) => blocks.forEach(block => f.cells.set(`${block.x},${block.y},${block.z}`, block.type)) },
+    currentPlayerHeight: () => 1.8, publishBlockEdits: () => {}, events: { onToast: (message: string) => messages.push(message) }, emitHud: () => {}, saveSoon: () => {},
+  }) as VoxelEngine;
+  const found = { kind: "station-found" as const, name: "Actual station", registryRevision: 0, vehicleRevision: 0 };
+  Reflect.set(engine, "multiplayer", { role: "guest" }); assert.equal(await engine.spaceflightAction(found), false); Reflect.set(engine, "multiplayer", null);
+  assert.equal(await engine.spaceflightAction(found), true, messages.at(-1)); assert.equal(engine.wayworks.size, 10);
+  assert.ok([...engine.wayworks.values()].every(machine => machine.energyJ === 0 && !machine.workshop.fluid && !machine.workshop.chemical));
+  assert.deepEqual(engine.inventory, [null, null, null]); assert.equal(await engine.spaceflightAction(found), false);
+  const station = Object.values(engine.orbitalStations!.stations)[0], dock = Object.values(station.docks)[0];
+  assert.equal(await engine.spaceflightAction({ kind: "station-dock", stationId: station.id, dockId: dock.id, undock: false, registryRevision: 1, vehicleRevision: 0 }), true, messages.at(-1));
+  const allowed = (id: string, permission: string) => Reflect.get(engine, "stationActorAccess").call(engine, id, ...station.corePosition, permission);
+  assert.equal(allowed("local", "build"), true); assert.equal(allowed("guest", "build"), false);
+  assert.equal(await engine.spaceflightAction({ kind: "station-access", stationId: station.id, memberIds: ["guest"], association: null,
+    access: { ...station.access, build: "trusted" }, registryRevision: 2, vehicleRevision: 1 }), true, messages.at(-1));
+  assert.equal(allowed("guest", "build"), true); assert.equal(allowed("guest", "container"), false);
+});

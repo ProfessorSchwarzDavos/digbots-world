@@ -1,5 +1,5 @@
 import type { OrbitBand } from "./celestial-terrain";
-import { parseLocationId, type LocationId, type UniverseId } from "./location-address";
+import { locationId, parseLocationId, type LocationId, type UniverseId } from "./location-address";
 import { assertExactKeys, canonicalJson, cloneUniverseJson, freezeUniverseJson, isUniverseRecord } from "./universe-json";
 
 export const STATION_PERMISSIONS = ["build", "container", "airlock", "dock", "waylink", "life-support", "administer"] as const;
@@ -176,6 +176,26 @@ export function validateStationRegistrySave(value: unknown, expectedLocationId?:
 
 export function createStationRegistry(locationId: LocationId): StationRegistrySave {
   return validateStationRegistrySave({ schema: 1, universeId: parseLocationId(locationId).universeId, locationId, revision: 0, stations: {}, journal: [] });
+}
+
+/** Imported worlds start a new action history; physical references retain their local identity. */
+export function remapStationRegistry(input: StationRegistrySave, destinationUniverse: UniverseId): StationRegistrySave {
+  const registry = cloneUniverseJson(validateStationRegistrySave(input));
+  const oldLocation = registry.locationId;
+  registry.locationId = locationId({ ...parseLocationId(oldLocation), universeId: destinationUniverse });
+  if (registry.locationId === oldLocation) fail("import requires a different universe.");
+  registry.universeId = destinationUniverse; registry.revision = 0; registry.journal = [];
+  for (const entry of Object.values(registry.stations)) {
+    entry.universeId = destinationUniverse; entry.locationId = registry.locationId; entry.revision = 0;
+    entry.pressureZoneIds = entry.pressureZoneIds.map(id => registry.locationId + id.slice(oldLocation.length));
+    entry.wayanchorLeases = entry.wayanchorLeases.map(lease => ({ ...lease, locationId: registry.locationId }));
+  }
+  return validateStationRegistrySave(registry);
+}
+
+export const STATION_CLAIM_RADIUS = 24;
+export function stationAt(registry: StationRegistrySave | null | undefined, point: StationPosition): OrbitalStation | null {
+  return Object.values(registry?.stations ?? {}).find(entry => entry.corePosition.every((value, axis) => Math.abs(value - point[axis]) <= STATION_CLAIM_RADIUS)) ?? null;
 }
 /** Fail closed for malformed actors, records and permission names; grants are independent. */
 export function stationAllows(value: OrbitalStation, principal: StationActor, permission: StationPermission): boolean {

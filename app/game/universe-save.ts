@@ -3,6 +3,8 @@ import { cloneUniverseJson, isUniverseRecord } from "./universe-json";
 import { validateAgentCustody } from "./agent-custody";
 import { validateLocationPlayerState } from "./location-manager";
 import { validateSpacefleetSave } from "./space-vehicle";
+import { validateStationRegistrySave } from "./orbital-station";
+import { validateStationFleetCustody } from "./station-runtime";
 
 export type SaveOwner = "universe" | "location" | "player";
 /** Exhaustiveness is intentional: adding a WorldSave field requires an owner. */
@@ -12,7 +14,7 @@ export const WORLD_SAVE_OWNERS = Object.freeze({
   startingSettlementId: "location", inventory: "player", cursor: "player", trash: "player", craftGrid: "player",
   equipment: "player", lifeSupport: "player", offhand: "player", bestiary: "player", saplings: "location", veinRegrowth: "location",
   selected: "player", health: "player", hunger: "player", xp: "player", level: "player", time: "universe", day: "universe", universeTimeSeconds: "universe",
-  weather: "location", furnaces: "location", wheatMills: "location", wayworks: "location", pressure: "location", spacefleet: "universe", chests: "location", contextualLoot: "location",
+  weather: "location", furnaces: "location", wheatMills: "location", wayworks: "location", pressure: "location", spacefleet: "universe", orbitalStations: "location", chests: "location", contextualLoot: "location",
   roadEvents: "location", surfaceRoadGraph: "location", apiaries: "location", morphLooms: "location", orbRacks: "location",
   healingStations: "location", aquariums: "location", fieldPerches: "location", summonContracts: "player", guildBook: "player",
   legendaryEncounters: "location", primeEncounters: "location", digitalItemVault: "universe", digitalCreatureArchive: "universe",
@@ -100,5 +102,6 @@ export function composeUniverseSave(parts: UniverseSavePartitions): WorldSave {
   if (output.universeTimeSeconds !== undefined && (typeof output.universeTimeSeconds !== "number" || !Number.isFinite(output.universeTimeSeconds) || output.universeTimeSeconds < 0)) throw new Error("Invalid universe clock.");
   validateLocationPlayerState(output.locationPlayerState);
   if (output.spacefleet !== undefined) validateSpacefleetSave(output.spacefleet);
+  if (output.orbitalStations !== undefined) validateStationFleetCustody(validateStationRegistrySave(output.orbitalStations), validateSpacefleetSave(output.spacefleet));
   return cloneUniverseJson(output) as unknown as WorldSave;
 }

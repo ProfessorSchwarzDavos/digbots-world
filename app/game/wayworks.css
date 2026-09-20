@@ -42,6 +42,12 @@
 .ww-readings dd span { font-size: 12px; font-weight: 400; white-space: nowrap; }
 .spaceflight-mission .ww-readings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .spaceflight-mission .ww-readings dd { white-space: nowrap; }
+.spaceflight-mission label { display: grid; gap: 5px; margin: 10px 0; min-width: 0; }
+.spaceflight-mission input { width: 100%; min-width: 0; min-height: 40px; padding: 8px; border: 1px solid #998059; border-radius: 0; background: #f3e8cb; color: #2d261d; font: inherit; }
+.spaceflight-mission input:focus-visible { outline: 3px solid #73501c; outline-offset: 3px; }
+.spaceflight-mission details { margin-top: 16px; }
+.spaceflight-mission summary { cursor: pointer; min-height: 40px; padding: 9px 0; font-weight: 700; }
+.spaceflight-mission h4 { margin: 20px 0 8px; padding-top: 14px; border-top: 1px solid #ab966d; }
 .ww-gauge { height: 12px; border: 1px solid #655238; background: #c2b08a; overflow: hidden; }
 .ww-gauge-fill { display: block; height: 100%; background: #8b632c; transition: width 160ms ease-out; }
 .ww-ports { min-width: 0; margin: 22px 0 0; padding: 0; border: 0; }

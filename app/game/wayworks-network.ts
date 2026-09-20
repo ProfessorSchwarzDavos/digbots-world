@@ -3,6 +3,11 @@ import { PRESSURE_CATALOG, type PressureMachineKind } from "./pressure-catalog";
 import { SPACEFLIGHT_CATALOG, type SpaceflightMachineKind } from "./spaceflight-catalog";
 export type PowerTopologyFace = "front" | "back" | "left" | "right" | "top" | "bottom";
 export type PowerTopologyPort = "disabled" | "input" | "output" | "both" | "passive" | "pull" | "service";
+/** Shared directed compatibility for transport and its physical presentation. */
+export function portAllowsTransfer(output: PowerTopologyPort, input: PowerTopologyPort): boolean {
+  return (output === "output" || output === "both" || (output === "passive" && input === "pull"))
+    && (input === "input" || input === "both" || input === "pull");
+}
 const MACHINE_KINDS = [
   "hand-dynamo", "sunplate-array", "field-battery", "charging-pedestal", "grid-cable",
   "heat-engine", "wind-rotor", "waterwheel-generator", "biofuel-engine", "grid-battery",
@@ -137,7 +142,7 @@ export class PowerTopologyCache {
         if (!other?.enabled || node.ownerId !== other.ownerId || (node.channel ?? "") !== (other.channel ?? "")) continue;
         const output = node.ports[face(node.facing, dx, dy, dz)];
         const input = other.ports[face(other.facing, -dx, -dy, -dz)];
-        if ((output === "output" || output === "both" || (output === "passive" && input === "pull")) && (input === "input" || input === "both" || input === "pull")) {
+        if (portAllowsTransfer(output, input)) {
           neighbors.push(other.key);
           undirected.get(node.key)!.add(other.key);
           undirected.get(other.key)!.add(node.key);

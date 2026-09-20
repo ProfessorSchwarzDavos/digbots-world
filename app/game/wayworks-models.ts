@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { PowerTopologyFace } from "./wayworks-network";
 
 export type WayworksModelKind =
   | "hand-dynamo" | "sunplate-array" | "field-battery" | "charging-pedestal" | "grid-cable"
@@ -8,6 +9,7 @@ export type WayworksModelKind =
   | "fluid-pump" | "fluid-tank" | "gas-tank";
 export type WayworksModelState = Readonly<{
   fill?: number; active?: boolean; time?: number; progress?: number; fluidFill?: number;
+  connected?: Readonly<Partial<Record<PowerTopologyFace, boolean>>>;
 }>;
 
 type Motion = { object: THREE.Object3D; axis: "x" | "y" | "z"; speed: number; base: number; stroke?: number };
@@ -28,6 +30,7 @@ type ModelParts = {
   progress: number;
   fluidFill?: number;
   progressNeedle?: THREE.Group;
+  connections?: Partial<Record<PowerTopologyFace, THREE.Object3D[]>>;
 };
 
 // No global GPU resources: every model can be removed and disposed independently.
@@ -91,6 +94,7 @@ export function createWayworksModel(kind: WayworksModelKind, options: Omit<Waywo
     insulator.rotation.x = Math.PI / 2;
     box(port, `${face}-socket-contact`, 0.045, 0.027, 0.018, teal, 0, 0, -0.018);
     box(port, `${face}-socket-notch`, 0.024, 0.03, 0.025, brass, 0, 0.062, -0.005);
+    return port;
   };
   const manifold = (height: number, top: number, topX = 0, topZ = 0) => {
     // Raised feet leave the underside socket exposed instead of buried inside
@@ -506,22 +510,23 @@ export function createWayworksModel(kind: WayworksModelKind, options: Omit<Waywo
       box(root, "fluid-drain-lever", .14, .02, .035, brass, .19, .39, -.28);
     }
   } else {
-    // Six conductors meet in an insulated junction; directional connection state
-    // remains kernel-owned, so this does not guess which neighbors are powered.
+    // Six independently visible half-arms meet in an insulated junction.
     const junction = cylinder(root, "cable-junction", 0.16, 0.16, 0.25, iron, 0, 0.5, 0, 8);
     junction.rotation.z = Math.PI / 2;
-    for (const axis of ["x", "y", "z"] as const) {
-      const insulation = cylinder(root, `${axis}-cable-insulation`, 0.083, 0.083, 0.8, dark, 0, 0.5, 0, 8);
-      const conductor = cylinder(root, `${axis}-copper-conductor`, 0.045, 0.045, 0.92, copper, 0, 0.5, 0, 8);
-      if (axis === "x") { insulation.rotation.z = Math.PI / 2; conductor.rotation.z = Math.PI / 2; }
-      if (axis === "z") { insulation.rotation.x = Math.PI / 2; conductor.rotation.x = Math.PI / 2; }
+    parts.connections = {};
+    for (const [face, dx, dy, dz, rx, ry] of [
+      ["front", 0, 0, -1, 0, 0], ["back", 0, 0, 1, 0, Math.PI],
+      ["left", -1, 0, 0, 0, Math.PI / 2], ["right", 1, 0, 0, 0, -Math.PI / 2],
+      ["top", 0, 1, 0, Math.PI / 2, 0], ["bottom", 0, -1, 0, -Math.PI / 2, 0],
+    ] as const) {
+      const arm = group(root, `connected-${face}`, 0, .5, 0); arm.rotation.set(rx, ry, 0);
+      const axis = dx ? "x" : dy ? "y" : "z";
+      const insulation = cylinder(arm, `${axis}-cable-insulation`, .083, .083, .34, dark, 0, 0, -.29, 8);
+      const conductor = cylinder(arm, `${axis}-copper-conductor`, .045, .045, .3998, copper, 0, 0, -.3, 8);
+      insulation.rotation.x = conductor.rotation.x = Math.PI / 2;
+      const port = socket(face, dx * .47, .5 + dy * .47, dz * .47, rx, ry);
+      parts.connections[face] = [arm, port]; arm.visible = port.visible = face === "front" || face === "back";
     }
-    socket("front", 0, 0.5, -0.45);
-    socket("back", 0, 0.5, 0.45, 0, Math.PI);
-    socket("left", -0.45, 0.5, 0, 0, Math.PI / 2);
-    socket("right", 0.45, 0.5, 0, 0, -Math.PI / 2);
-    socket("top", 0, 0.95, 0, Math.PI / 2);
-    socket("bottom", 0, 0.05, 0, -Math.PI / 2);
     box(root, "cable-status-band", 0.19, 0.038, 0.19, lamp, 0, 0.64, 0);
   }
   updateWayworksModel(root, options);
@@ -540,6 +545,9 @@ export function updateWayworksModel(group: THREE.Group, state: WayworksModelStat
   if (state.active !== undefined) parts.active = state.active;
   if (state.progress !== undefined) parts.progress = clampFill(state.progress);
   if (state.fluidFill !== undefined) parts.fluidFill = clampFill(state.fluidFill);
+  if (state.connected) for (const [face, objects] of Object.entries(parts.connections ?? {})) {
+    if (state.connected[face as PowerTopologyFace] !== undefined) for (const object of objects) object.visible = !!state.connected[face as PowerTopologyFace];
+  }
   const time = Number.isFinite(state.time) ? state.time! : 0;
   if (parts.rotor) parts.rotor.rotation.z = parts.active ? -(time % TAU) * 2 : 0;
   if (parts.needle) parts.needle.rotation.z = Math.PI * 0.7 - (parts.needleFluid ? parts.fluidFill ?? parts.fill : parts.fill) * Math.PI * 1.4;

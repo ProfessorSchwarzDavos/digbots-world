@@ -17,7 +17,7 @@ const chartCss = `
 .celestial-chart h4 { font-size:14px; }
 .celestial-chart header,.celestial-chart-controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; }
 .celestial-chart-controls { justify-content:flex-start; margin:12px 0; }
-.celestial-chart button { font:inherit; white-space:normal; min-height:44px; max-width:100%; padding:9px 13px; border:1px solid #58766e; border-radius:4px; background:#f7f1df; color:#245c50; cursor:pointer; transition:background-color 120ms ease; }
+.celestial-chart button { font:inherit; white-space:normal; min-height:44px; max-width:100%; padding:9px 13px; border:1px solid #58766e; border-radius:4px; background:#f7f1df; color:#245c50; cursor:pointer; transition:none; }
 .celestial-chart button:hover:not(:disabled) { background:#dedbc4; color:#245c50; }
 .celestial-chart button[aria-pressed=true] { background:#245c50; color:#fff8e6; }
 .celestial-chart button[aria-pressed=true]:hover:not(:disabled) { background:#1b493e; color:#fff8e6; }

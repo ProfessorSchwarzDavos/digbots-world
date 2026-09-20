@@ -12,7 +12,8 @@ import { isPressurePart } from "./pressure-item-models";
 import { chemistryAtmosphere } from "./pressure-chemistry";
 import { updateWayworksPortOverlay } from "./wayworks-models";
 import { createWorkshopModel as createWayworksModel, updateWorkshopModel as updateWayworksModel } from "./workshop-models";
-import { createPressureModel, updatePressureModel, type PressureModelFace } from "./pressure-models";
+import { createPressureModel, updatePressureModel } from "./pressure-models";
+import { transportConnections, windowLayout } from "./connected-geometry";
 import { createPressureOverlay, disposePressureOverlay } from "./pressure-overlay";
 import { buildPressurePresentation, acceptPressurePresentation, pressurePresentationOpenDoorAt, pressurePresentationClosedGateAt,
   pressurePresentationEnvironmentAt, type PressurePresentation } from "./pressure-presentation";
@@ -13616,7 +13617,8 @@ export class VoxelEngine {
     const wrench = this.selectedSlot()?.item === Item.FieldWrench;
     for (const [key, state] of this.wayworks) {
       const [x, y, z] = key.split(",").map(Number), distance = Math.hypot(x - this.position.x, y - this.position.y, z - this.position.z);
-      if (distance > radius || machineKindForBlock(this.world.getBlock(x, y, z)) !== state.kind) continue;
+      if (distance > radius || state.locationId !== (this.world.locationScope?.locationId ?? "home-preview")
+        || machineKindForBlock(this.world.getBlock(x, y, z)) !== state.kind) continue;
       visible.add(key);
       let model = this.wayworksModels.get(key);
       if (model && model.userData.wayworksKind !== state.kind) { this.clearWayworksModels(key); model = undefined; }
@@ -13624,16 +13626,8 @@ export class VoxelEngine {
       model.visible = true; model.position.set(x, y - .5, z); model.rotation.y = blockFacingYaw(normalizeBlockFacing(state.facing));
       const fluidCapacity = workshopFluidCapacity(state.kind, state.workshop), gasCapacity = workshopGasCapacity(state.kind, state.workshop);
       const device = this.pressureRuntime?.devices.get(key) ?? this.guestPressure?.doors.find(door => door.key === key);
-      const connected: Partial<Record<PressureModelFace, boolean>> = {};
-      for (const [dx, dy, dz] of [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0], [0, 1, 0], [0, -1, 0]]) {
-        const neighbor = this.wayworks.get(blockKey(x + dx, y + dy, z + dz));
-        const face = localFaceForWorldDirection(state.facing, dx, dy, dz);
-        const resource = state.kind === "liquid-pipe" ? "fluid" : state.kind === "gasline" ? "chemical" : state.kind === "heat-conduit" ? "heat" : null;
-        connected[face] = !!neighbor && !!resource && this.world.getBlock(x + dx, y + dy, z + dz) !== undefined
-          && neighbor.ownerId === state.ownerId && neighbor.workshop.channel === state.workshop.channel
-          && !["disabled", "service"].includes(state.workshop.resourcePorts[resource][face])
-          && !["disabled", "service"].includes(neighbor.workshop.resourcePorts[resource][localFaceForWorldDirection(neighbor.facing, -dx, -dy, -dz)]);
-      }
+      const connected = transportConnections(state, x, y, z, this.world.locationScope?.locationId ?? "home-preview",
+        (a, b, c) => this.world.getBlock(a, b, c), (a, b, c) => this.wayworks.get(blockKey(a, b, c)));
       updateWayworksModel(model, { fill: state.energyJ / Math.max(1, machineCapacity(state.kind, state.workshop)),
         progress: state.workshop.cycle ? state.workshop.cycle.progressMs / state.workshop.cycle.durationMs : 0,
         fluidFill: gasCapacity ? workshopStoredTotal(state.workshop, "chemical") / gasCapacity : fluidCapacity ? workshopStoredTotal(state.workshop, "fluid") / fluidCapacity : 0,
@@ -13652,7 +13646,12 @@ export class VoxelEngine {
       if (!model) { model = structure ? createSpaceflightModel(structure) : createPressureModel(kind); this.wayworksModels.set(modelKey, model); this.scene.add(model); }
       visible.add(modelKey); model.position.set(x, y - .5, z); model.rotation.y = blockFacingYaw(this.worldBlockFacing(x, y, z));
       if (structure) updateSpaceflightModel(model, { time: performance.now() / 1000 });
-      else updatePressureModel(model, { time: performance.now() / 1000 });
+      else if (type === BlockId.ReinforcedWindow) {
+        // Window layout is world-axis geometry; saved facing is only the isolated-pane hint.
+        model.rotation.set(0, 0, 0);
+        updatePressureModel(model, { windowLayout: windowLayout(x, y, z, this.worldBlockFacing(x, y, z),
+          (a, b, c) => this.world.getBlock(a, b, c)), time: performance.now() / 1000 });
+      } else updatePressureModel(model, { time: performance.now() / 1000 });
     }
     for (const [key] of this.wayworksModels) if (!visible.has(key)) this.clearWayworksModels(key);
     const focused = wrench && this.pressureRuntime ? this.activeWayworksKey ?? [...this.pressureRuntime.devices.keys()].find(key => {

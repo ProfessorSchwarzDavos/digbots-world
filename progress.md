@@ -2,6 +2,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — station kit integration
 
+- Habitat b96771f/build16 checkpoint frozen separately: actual natural eclipse,
+  second normally crafted tray recovery, CO2-limited conversion and exact cold
+  gas/heat/material custody. Manifest9d0fa4f records28 Git-blob sources/188 evidence
+  files and4 preserved roots. All earlier failed receipts retained, no fullCF6.
+- Revision14 connected geometry in development: neighbor-derived Reinforced
+  Window roof/wall/corner panes, six-face resource-compatible pipe/cable arms,
+  chart immediate-selection transition removed. Initial48 focused tests PASS;
+  cable envelope red and test-only reader typing failure retained. Build/browser
+  visual verification and normal edits/cold reconstruction pending.
+
 - Browser-r1 crafted/placed all four parts from finite raw inputs, measured a
   breathable142m3 room, exhausted/recharged a paid observatory, and transferred
   the radiator's finite40kJ into the room. Disable retained33650J; reenable

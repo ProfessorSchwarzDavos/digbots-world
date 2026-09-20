@@ -25,6 +25,7 @@ test("SSR chart exposes named native keyboard controls and accessible chart/list
   assert.match(html, /focus-visible/);
   assert.match(html, /minmax\(min\(100%,230px\),1fr\)/);
   assert.match(html, /button\[aria-pressed=true\]:hover:not\(:disabled\) \{ background:#1b493e; color:#fff8e6;/);
+  assert.match(html, /cursor:pointer; transition:none;/, "selection changes ink and background together without a low-contrast transition frame");
   assert.match(html, /max-width:480px/);
 });
 

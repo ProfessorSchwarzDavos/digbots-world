@@ -74,6 +74,20 @@ catalog. It does not authorize travel, discover new worlds or estimate routes.
 
 ## Current boundaries
 
+Reinforced Windows now derive their visible shape from loaded neighbors: glazed
+roof sheets lie flat, walls stay upright on either axis, and corner/T wall runs
+meet at a mullion. Shared glass borders disappear; exposed ends retain a frame.
+Isolated ambiguous panes use the saved wrench-facing as a stable orientation
+hint. This applies to Reinforced Windows, not structural Hangar Frames. Collision
+and pressure sealing still use the existing voxel authority, not the thin visual.
+
+Liquid Pipe, Gasline, Heat Conduit and Grid Cable arms follow configured compatible
+ports on all six sides. Wrong resource, owner, channel, location, unloaded/stale
+blocks, disabled machines/control and disabled/service ports do not draw joints.
+Empty buffers still show a configured joint. Material backflow rules remain in
+force; existing saved port settings are not rewritten. Placement, removal,
+rotation and port edits rederive presentation without changing any resource store.
+
 Habitation benches use the ordinary non-solid seating policy: the seated pose
 occupies the furniture cell without trapping a standing player or colliding on
 reload. A bench is not a pressure wall. Radiator thermal limits describe boundary

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { WindowArm, WindowLayout } from "./connected-geometry";
 
 export const PRESSURE_MODEL_KINDS = [
   "liquid-pipe", "gasline", "heat-conduit", "atmospheric-condenser", "electrolyzer",
@@ -13,6 +14,7 @@ export type PressureModelState = Readonly<{
   fill?: number; fluidFill?: number; progress?: number; active?: boolean; time?: number;
   open?: number; alarm?: boolean; locked?: boolean;
   connected?: Readonly<Partial<Record<PressureModelFace, boolean>>>;
+  windowLayout?: WindowLayout;
   gateWidth?: number; gateHeight?: number;
 }>;
 export const isPressureModelKind = (kind: unknown): kind is PressureModelKind =>
@@ -28,6 +30,8 @@ type Rig = {
   dropPanels: { object: THREE.Group; closedY: number; packedY: number; height: number }[];
   latches: THREE.Group[]; flags: THREE.Group[];
   connections: Partial<Record<PressureModelFace, THREE.Object3D[]>>;
+  window?: { flat: THREE.Group; borders: Record<WindowArm, THREE.Object3D>; mullion: THREE.Object3D;
+    arms: Record<WindowArm, { group: THREE.Group; end: THREE.Object3D; top: THREE.Object3D; bottom: THREE.Object3D }> };
   gate?: { width: number; height: number; posts: THREE.Mesh[]; header: THREE.Mesh; sill: THREE.Mesh; shutters: THREE.Group[]; locks: THREE.Group[] };
 };
 const rigs = new WeakMap<THREE.Group, Rig>();
@@ -166,11 +170,11 @@ export function createPressureModel(kind: PressureModelKind, state: PressureMode
       if (face === "right") arm.rotation.y = -Math.PI / 2;
       if (face === "top") arm.rotation.x = Math.PI / 2;
       if (face === "bottom") arm.rotation.x = -Math.PI / 2;
-      horizontal(arm, "pressure-line-tube", .062, .35, surface, 0, 0, -.28);
+      horizontal(arm, "pressure-line-tube", .062, .4, surface, 0, 0, -.3);
       for (const z of [-.18, -.35]) ring(arm, kind === "heat-conduit" ? "ceramic-thermal-break" : "compression-collar", .071, .016, kind === "heat-conduit" ? "ceramic" : "brass", 0, 0, z);
       if (kind === "gasline") box(arm, "gas-direction-chevron", .034, .012, .085, "ceramic", 0, .071, -.27);
       if (kind === "liquid-pipe") box(arm, "liquid-inspection-strip", .04, .013, .1, "water", 0, .071, -.26);
-      const vector = new THREE.Vector3(0, 0, -.45).applyEuler(arm.rotation);
+      const vector = new THREE.Vector3(0, 0, -.485).applyEuler(arm.rotation);
       const port = socket(face, vector.x, .5 + vector.y, vector.z); rig.connections[face] = [arm, port];
       arm.visible = port.visible = face === "front" || face === "back";
     }
@@ -228,20 +232,38 @@ export function createPressureModel(kind: PressureModelKind, state: PressureMode
     });
     rig.gate = { width: 3, height: 3, posts, header, sill, shutters, locks };
     status(0, .15, -.3); sockets();
-  } else if (kind === "reinforced-window" || kind === "hangar-frame") {
-    const glass = kind === "reinforced-window";
-    if (glass) {
-      box(root, "thick-laminated-glass", .88, .88, .12, "glass", 0, .5, 0);
-      for (const z of [-.071, .071]) box(root, "glass-upper-etch", .57, .014, .008, "ceramic", 0, .84, z);
-    } else {
-      box(root, "hangar-frame-web", .48, 1, .28, "iron", 0, .5, 0);
-      for (const y of [.2, .5, .8]) box(root, "hangar-gusset-rib", .64, .045, .38, "brass", 0, y, 0);
+  } else if (kind === "reinforced-window") {
+    const flat = group(root, "flat-ceiling-pane", 0, .5, 0); flat.visible = false;
+    box(flat, "thick-laminated-glass", 1, .12, 1, "glass");
+    const borders = {} as Record<WindowArm, THREE.Object3D>;
+    const arms = {} as NonNullable<Rig["window"]>["arms"];
+    for (const face of ["left", "right", "front", "back"] as const) {
+      const xEdge = face === "left" || face === "right";
+      borders[face] = box(flat, `ceiling-border-${face}`, xEdge ? .1 : 1, .2, xEdge ? 1 : .1, "iron",
+        face === "left" ? -.45 : face === "right" ? .45 : 0, 0, face === "front" ? -.45 : face === "back" ? .45 : 0);
+      const arm = group(root, `window-arm-${face}`, 0, .5, 0);
+      arm.rotation.y = face === "left" ? Math.PI : face === "front" ? Math.PI / 2 : face === "back" ? -Math.PI / 2 : 0;
+      arm.visible = xEdge;
+      box(arm, "wall-laminated-glass", .5, 1, .12, "glass", .25, 0, 0);
+      const end = box(arm, `connected-border-${face}`, .1, 1, .2, "iron", .45, 0, 0);
+      const top = box(arm, "wall-border-top", .5, .1, .2, "iron", .25, .45, 0);
+      const bottom = box(arm, "wall-border-bottom", .5, .1, .2, "iron", .25, -.45, 0);
+      for (const dy of [-.45, .45]) horizontal(end, "frame-through-bolt", .025, .23, "brass", 0, dy, 0);
+      arms[face] = { group: arm, end, top, bottom }; rig.connections[face] = [end];
     }
+    rig.connections.top = Object.values(arms).map(arm => arm.top);
+    rig.connections.bottom = Object.values(arms).map(arm => arm.bottom);
+    const mullion = box(root, "window-corner-mullion", .1, 1, .1, "iron", 0, .5, 0); mullion.visible = false;
+    // Keep the authored lamp material reachable by ordinary GPU disposal.
+    box(mullion, "window-rating-stud", .026, .026, .026, "lamp", 0, 0, -.056);
+    rig.window = { flat, borders, arms, mullion };
+  } else if (kind === "hangar-frame") {
+    box(root, "hangar-frame-web", .48, 1, .28, "iron", 0, .5, 0);
+    for (const y of [.2, .5, .8]) box(root, "hangar-gusset-rib", .64, .045, .38, "brass", 0, y, 0);
     for (const face of ["left", "right", "top", "bottom"] as const) {
       const vertical = face === "left" || face === "right";
-      const border = box(root, `connected-border-${face}`, vertical ? .1 : 1, vertical ? 1 : .1, .25, "iron",
+      box(root, `connected-border-${face}`, vertical ? .1 : 1, vertical ? 1 : .1, .25, "iron",
         vertical ? (face === "left" ? -.45 : .45) : 0, vertical ? .5 : face === "top" ? .95 : .05, 0);
-      if (glass) rig.connections[face] = [border];
     }
     for (const x of [-.45, .45]) for (const y of [.05, .95]) horizontal(root, "frame-through-bolt", .025, .28, "brass", x, y, 0);
     status(.3, .1, -.155);
@@ -435,6 +457,20 @@ export function updatePressureModel(root: THREE.Group, state: PressureModelState
     // for actual connected faces. Structural hangar frame remains a full block.
     const invert = root.userData.pressureKind === "reinforced-window";
     for (const object of rig.connections[face] ?? []) object.visible = invert ? !state.connected[face] : !!state.connected[face];
+  }
+  if (rig.window && state.windowLayout) {
+    const layout = state.windowLayout, window = rig.window;
+    window.flat.visible = layout.flat;
+    const bend = (layout.arms.left || layout.arms.right) && (layout.arms.front || layout.arms.back);
+    window.mullion.visible = !layout.flat && bend;
+    for (const face of ["left", "right", "front", "back"] as const) {
+      const arm = window.arms[face];
+      arm.group.visible = !layout.flat && layout.arms[face];
+      arm.end.visible = !layout.joined[face];
+      arm.top.visible = !layout.upper[face]; arm.bottom.visible = !layout.lower[face];
+      window.borders[face].visible = !layout.joined[face];
+    }
+    root.userData.windowLayout = layout;
   }
   if (rig.gate) {
     const gate = rig.gate;

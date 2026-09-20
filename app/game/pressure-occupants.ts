@@ -1,12 +1,13 @@
 import type { AirZoneState } from "./airzone";
 import type { MobDefinition } from "./mobs";
+import { isSealedMorrowNative } from "./morrow-ecology";
 
 /** Loaded habitat occupants only. Planetary and aquatic physiology remain separate. */
 export const HABITAT_EXPOSURE_GRACE_SECONDS = 15;
 type Biology = Pick<MobDefinition, "kind" | "family" | "movement">;
 
 export function habitatOccupantBreathes(definition: Biology): boolean {
-  return definition.movement !== "aquatic"
+  return !isSealedMorrowNative(definition.kind) && definition.movement !== "aquatic"
     && definition.family !== "undead" && definition.family !== "construct"
     && definition.family !== "summon"
     // Legacy Rattlekin predates families; its authored body is animated stone.

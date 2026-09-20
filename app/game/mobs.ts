@@ -1,4 +1,5 @@
 import { Item, type ItemCode } from "./data";
+import { MORROW_MOB_DEFS, MORROW_MOB_KINDS, type MorrowMobKind } from "./morrow-ecology";
 
 export type ButterflyKind = "meadowwing" | "azure-skippers" | "embertip" | "frostveil" | "bloom-monarch" | "fen-lantern" | "bonbonwing" | "moonveil-wing";
 export type LegacyMobKind = "mossling" | "ridgeback" | "woolhorn" | "glowmoth" | "shadecrawler" | "caveblob" | "rattlekin" | "zombie";
@@ -192,6 +193,7 @@ export type LegendaryCreatureKind =
   | MythicFrontierCreatureKind;
 export type SummonedCreatureKind = "asterjaw" | "vellum-warden" | "choir-of-one" | "glasswake-stag";
 export type CoreMobKind =
+  | MorrowMobKind
   | LegacyMobKind
   | MosslingVariantKind
   | SurfaceMobKind
@@ -957,6 +959,7 @@ export const SUMMONED_CREATURE_MOBS: Record<SummonedCreatureKind, MobDefinition>
 };
 
 export const MOB_DEFS: Record<MobKind, MobDefinition> = {
+  ...MORROW_MOB_DEFS,
   ...V1_SENTIENT_MOBS,
   ...V1_CREATURE_MOBS,
   ...LIVING_ROSTER_MOBS,
@@ -2736,6 +2739,7 @@ export const LEGENDARY_CREATURE_ORDER: LegendaryCreatureKind[] = [
 ];
 export const SUMMONED_CREATURE_ORDER: SummonedCreatureKind[] = ["asterjaw", "vellum-warden", "choir-of-one", "glasswake-stag"];
 export const CORE_MOB_ORDER: CoreMobKind[] = [
+  ...MORROW_MOB_KINDS,
   ...LEGACY_MOB_ORDER,
   ...MOSSLING_VARIANT_ORDER,
   ...SURFACE_MOB_ORDER,

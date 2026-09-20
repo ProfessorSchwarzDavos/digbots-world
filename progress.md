@@ -2,6 +2,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — revision12, first transaction checkpoint
 
+- Rebuilt9d812ae normal browser-r3 now reaches Morrow orbit/surface and EVA;
+  SaveQuit082-storage retained. Cockpit/third-person/mobile/focus fixes personally
+  reviewed, official-r2 PASS. No new resource/ship state staged after first craft.
+- New Morrow ecology integrates all four authored rigs and bestiary portraits,
+  regional budgeted spawns, sealed native bodies, persisted finite Owl veil and
+  roost flights, real non-destructive regolith movement, crafted pressure-only
+  specimen jars with exact identity. focused-r11 41/41 and lint-r5/static-r14 PASS;
+  fresh build and ordinary ecology/capture/return browser remain next. Station,
+  asteroid custody, rescue, maps/agent/multilocation authority still open.
+
 - First normal synthetic-profile craft/deploy/load/board/consent/abort/relaunch,
   piloted ascent and actual orbit arrival observed at582f994. Midflight
   SaveQuit/page reload retained identity, exact metadata-bearing cargo and paid

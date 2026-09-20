@@ -235,7 +235,7 @@ export function createMorrowCreatureVisual(kind: MorrowVisualKind, id: number): 
  * root or the visual anchor. Alert burrow is cosmetic; physics owns real depth.
  * A live factory-created visual (or its group) is required; clones return false.
  */
-export function applyMorrowCreaturePose(visual: THREE.Object3D, kind: MorrowVisualKind, time: number, travel: number, alert: number): boolean {
+export function applyMorrowCreaturePose(visual: THREE.Object3D, kind: MorrowVisualKind, time: number, travel: number, alert: number, veilActive?: boolean): boolean {
   const b = rigs.get(visual);
   if (!b || b.kind !== kind) return false;
   // Bound even adversarial finite inputs before multiplying wave frequencies.
@@ -302,7 +302,8 @@ export function applyMorrowCreaturePose(visual: THREE.Object3D, kind: MorrowVisu
     for (const side of ["left", "right"]) node(`${side}-eye`).scale.y = blink < .12 ? .16 + .84 * Math.abs(blink / .06 - 1) : 1;
     // A short, rare crossing envelope: at most 1.1 seconds in each 15 seconds.
     const veilClock = ((t + phase * 2) % 15 + 15) % 15;
-    const veilPulse = move > .15 && veilClock < 1.1 ? Math.sin(veilClock / 1.1 * Math.PI) : 0;
+    const veilPulse = veilActive === undefined ? move > .15 && veilClock < 1.1 ? Math.sin(veilClock / 1.1 * Math.PI) : 0
+      : veilActive ? .8 + Math.sin(t * 2) * .12 : 0;
     node("dream-veil").visible = veilPulse > .001;
     b.mats.veil.opacity = veilPulse * .38;
     node("dream-veil").scale.setScalar(1 + veilPulse * .08);

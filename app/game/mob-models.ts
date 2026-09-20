@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { sharedBoxGeometry } from "./shared-model-geometry";
+import { createMorrowCreatureVisual, MORROW_VISUAL_KINDS, type MorrowVisualKind } from "./morrow-creature-models";
 import { applyAdventureMobPose, createAdventureMobVisual } from "./adventure-models";
 import { applyLivingBestiaryPose, createLivingBestiaryMobVisual, LIVING_BESTIARY_VISUAL_KINDS, type LivingBestiaryVisualKind } from "./living-bestiary-models";
 import {
@@ -503,6 +504,7 @@ export function createSentientLodVisual(kind: MobKind, id: number, bounds: THREE
  */
 export function createMobVisual(kind: MobKind, id: number): MobVisual {
   if (!CORE_MOB_ORDER.includes(kind as CoreMobKind)) throw new Error(`'${kind}' is not a world mob visual.`);
+  if ((MORROW_VISUAL_KINDS as readonly string[]).includes(kind)) return createMorrowCreatureVisual(kind as MorrowVisualKind, id);
   if (kind === "embercarapace-beetle") return createEmbercarapaceBeetleVisual(id);
   if (ADVENTURE_MOB_ORDER.includes(kind as AdventureMobKind)) return createAdventureMobVisual(kind as AdventureMobKind, id);
   if ((LIVING_BESTIARY_VISUAL_KINDS as readonly MobKind[]).includes(kind)) return createLivingBestiaryMobVisual(kind as LivingBestiaryVisualKind, id);

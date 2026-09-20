@@ -17,7 +17,10 @@ import { createPressureOverlay, disposePressureOverlay } from "./pressure-overla
 import { buildPressurePresentation, acceptPressurePresentation, pressurePresentationOpenDoorAt, pressurePresentationClosedGateAt,
   pressurePresentationEnvironmentAt, type PressurePresentation } from "./pressure-presentation";
 import { PressureRuntime, type PressureSave, type PressureOccupant } from "./pressure-runtime";
-import { habitatOccupantOxygenDemand, normalizeHabitatExposure, stepHabitatOccupantExposure } from "./pressure-occupants";
+import { habitatOccupantBreathes, habitatOccupantOxygenDemand, normalizeHabitatExposure, stepHabitatOccupantExposure } from "./pressure-occupants";
+import { applyMorrowCreaturePose } from "./morrow-creature-models";
+import { isMorrowMobKind, safeLanternJar, pickMorrowSpawn, morrowBreathableZone, normalizeMorrowExposure, stepMorrowExposure, MORROW_OWL_VEIL_SECONDS, type MorrowExposureState } from "./morrow-ecology";
+import { captureLanternJar, readLanternJar } from "./lantern-jar";
 import { buildPressureInspector, acceptPressureInspector, pressureInspectorMatches, type PressureInspector } from "./pressure-inspector";
 import { pressureDoorUpper, pressureDoorLower, pressurePoint, validPressureDoorEdits } from "./pressure-devices";
 import { createWaystarCatalog, validateCelestialCatalog, type CelestialCatalogSnapshot, type CelestialBodyDefinition } from "./celestial-catalog";
@@ -794,7 +797,7 @@ import { inspectLaunchPad, supplyVehicleFromMachine, type LaunchPadCheck } from 
 import { spaceflightMachineKind } from "./spaceflight-catalog";
 import { advanceSpaceCabin, advanceSpaceflight } from "./spaceflight-flight";
 import { createSpaceflightModel, updateSpaceflightModel } from "./spaceflight-models";
-import { celestialTerrainSeed, createCelestialTerrain } from "./celestial-terrain";
+import { celestialTerrainSeed, createCelestialTerrain, morrowRegionAt } from "./celestial-terrain";
 import type { VehicleLocationCommit } from "./universe-storage";
 import {
   TYPESCRIPT_AGENT_ID_KEY,
@@ -1407,6 +1410,8 @@ export type SavedCreature = {
   id: number;
   /** Host habitat dose survives save, sleep and location transfer. */
   habitatExposureSeconds?: number;
+  morrowExposure?: MorrowExposureState;
+  morrowRoost?: { x: number; y: number; z: number };
   celestialVelocity?: [number, number, number];
   /** Stable across capture, release, growth replacement, sleep, and reconnect. */
   specimenId?: string;
@@ -1734,6 +1739,8 @@ type VoxelHit = {
 type MobEntity = {
   id: number;
   habitatExposureSeconds?: number;
+  morrowExposure?: MorrowExposureState;
+  morrowRoost?: { x: number; y: number; z: number };
   specimenId: string;
   kind: MobKind;
   name: string;
@@ -16667,6 +16674,9 @@ export class VoxelEngine {
       settlementId: mob.settlementId,
       aligned: mob.aligned,
       custom: JSON.parse(JSON.stringify({
+        ...(mob.habitatExposureSeconds ? { habitatExposureSeconds: normalizeHabitatExposure(mob.habitatExposureSeconds) } : {}),
+        ...(mob.morrowExposure ? { morrowExposure: normalizeMorrowExposure(mob.morrowExposure) } : {}),
+        ...(mob.morrowRoost ? { morrowRoost: mob.morrowRoost } : {}),
         ...(mob.petState ? { petState: mob.petState } : {}),
         ...(mob.careState ? { careState: mob.careState } : {}),
         ...(mob.shadeState ? { shadeState: mob.shadeState } : {}),
@@ -17290,6 +17300,7 @@ export class VoxelEngine {
       missingKnown: Object.freeze([]),
     });
     const relationshipPolicy = creatureRelationshipPolicy(mob.kind);
+    if (mob.kind === "vacuum-lantern") return blocked("Pressure-enclosure specimen", "Use a Sealed Specimen Jar while you and the Lantern share a safely pressurized enclosure.");
     const ownerId = mob.creatureOwnerId ?? mob.petState?.ownerId ?? mob.shadeState?.ownerId
       ?? mob.reedstriderBond?.ownerId ?? mob.courserBond?.ownerId ?? mob.leviathanGrowth?.ownerId
       ?? mob.apiaryBee?.ownerId ?? mob.hiredByPlayerId ?? null;
@@ -17476,6 +17487,10 @@ export class VoxelEngine {
       this.removeMob(this.mobs.indexOf(mob));
       return null;
     }
+    if (metadata.custom.morrowExposure) mob.morrowExposure = normalizeMorrowExposure(metadata.custom.morrowExposure as Partial<MorrowExposureState>);
+    mob.habitatExposureSeconds = normalizeHabitatExposure(metadata.custom.habitatExposureSeconds);
+    const roost = metadata.custom.morrowRoost as { x?: unknown; y?: unknown; z?: unknown } | undefined;
+    if (roost && [roost.x, roost.y, roost.z].every(Number.isFinite)) mob.morrowRoost = roost as { x: number; y: number; z: number };
     if (mob.legendaryEncounterId && mob.legendarySiteId) {
       const state = this.legendaryEncounters.get(mob.legendarySiteId);
       if (state?.outcome === "capture" && state.custodyEntityId) {
@@ -17508,6 +17523,45 @@ export class VoxelEngine {
     heldSlot.count -= 1;
     this.inventory[emptyIndex] = filled;
     return true;
+  }
+
+  /** Jar custody is exchanged synchronously with a successful live specimen operation. */
+  useLanternJar() {
+    const held = this.selectedSlot();
+    if (!held || held.item !== Item.SpecimenJar && held.item !== Item.VacuumLanternJar) return false;
+    const fail = (message: string) => { this.events.onToast(message); return true; };
+    if (this.multiplayer?.role === "guest") return fail("Specimen jars currently require the host keeper; no local guest custody was changed.");
+    if (held.count !== 1) return fail("One sealed jar holds exactly one specimen.");
+    if (held.item === Item.SpecimenJar) {
+      const mob = this.targetMob;
+      if (!mob || mob.kind !== "vacuum-lantern" || mob.health <= 0 || mob.group.position.distanceTo(this.position) > 5)
+        return fail("Aim at a nearby living Vacuum Lantern inside a safely pressurized enclosure.");
+      const zoneAt = (point: THREE.Vector3) => this.pressureRuntime?.zoneAt({ x: Math.floor(point.x + .5), y: Math.floor(point.y + 1), z: Math.floor(point.z + .5) });
+      if (!safeLanternJar(zoneAt(this.position), zoneAt(mob.group.position))) return fail("Keeper and Lantern must share the same sealed room with safe pressure and breathable gas. Unknown or empty rooms do not count.");
+      const prior = mob.progression;
+      mob.progression = recordCreatureCaptureHistory(prior, { capturedAt: Date.now(), captorId: this.localPlayerId(), methodId: "sealed-specimen-jar" });
+      const filled = captureLanternJar(held, this.creatureMetadataForMob(mob), crypto.randomUUID(), Date.now());
+      if (!filled) { mob.progression = prior; return fail("The specimen could not enter the jar; its custody is unchanged."); }
+      this.inventory[this.selected] = filled;
+      const entry = normalizeLivingBestiaryEntry(this.bestiary[mob.kind]);
+      recordSpeciesCapture(entry, Date.now(), mob.specimenId); this.bestiary[mob.kind] = entry;
+      this.grantCardforgeCapture(this.localPlayerId(), mob.kind);
+      this.dispatchGuildEvent("captureCreature", 1, `capture:${mob.specimenId}`, { creatureKind: mob.kind });
+      this.removeMob(this.mobs.indexOf(mob));
+      this.events.onToast("Vacuum Lantern sealed in its specimen jar. Its identity and condition are preserved.");
+    } else {
+      const metadata = readLanternJar(held);
+      if (!metadata) return fail("This jar has no valid living specimen record; it was left unchanged.");
+      if (this.mobs.some(mob => mob.specimenId === metadata.entityId) || this.sleepingCreatures.some(mob => mob.specimenId === metadata.entityId))
+        return fail("This specimen already exists in the location; duplicate release was refused.");
+      const direction = new THREE.Vector3(); this.camera.getWorldDirection(direction);
+      const point = this.target ? new THREE.Vector3(this.target.placeX, this.target.placeY, this.target.placeZ)
+        : this.camera.position.clone().add(direction.multiplyScalar(1.5));
+      if (!this.spawnCreatureMetadata(metadata, point)) return fail("The Lantern needs a clear supported space before leaving the jar.");
+      this.inventory[this.selected] = { item: Item.SpecimenJar, count: 1 };
+      this.events.onToast("The same Vacuum Lantern leaves the jar; the empty sealed jar is retained.");
+    }
+    this.heldItemCode = -1; this.placeCooldown = .4; this.saveSoon(); this.emitHud(true); return true;
   }
 
   /**
@@ -18570,6 +18624,7 @@ export class VoxelEngine {
     // World creatures are host-owned in multiplayer. Capture Orbs have their
     // dedicated transaction above; every other feed/tame/saddle/breed/mount
     // use is resolved against the host's mob and player-state images.
+    if (this.useLanternJar()) return;
     if (this.multiplayer?.role === "guest" && this.targetMob) {
       this.requestNetworkCreatureAction({ kind: "interact", targetId: this.targetMob.id, crouching: this.crouching });
       return;
@@ -27411,6 +27466,8 @@ export class VoxelEngine {
     return {
       id: mob.id,
       ...(normalizeHabitatExposure(mob.habitatExposureSeconds) > 0 ? { habitatExposureSeconds: normalizeHabitatExposure(mob.habitatExposureSeconds) } : {}),
+      ...(mob.morrowExposure ? { morrowExposure: normalizeMorrowExposure(mob.morrowExposure) } : {}),
+      ...(mob.morrowRoost ? { morrowRoost: { ...mob.morrowRoost } } : {}),
       ...(this.celestialCreatureVelocity?.has(mob.id) ? { celestialVelocity: this.celestialCreatureVelocity.get(mob.id)!.toArray() as [number, number, number] } : {}),
       specimenId: mob.specimenId,
       kind: mob.kind,
@@ -27567,6 +27624,8 @@ export class VoxelEngine {
       creatureTamed: Boolean(migrated.creatureTamed),
     });
     if (restored) restored.habitatExposureSeconds = normalizeHabitatExposure(migrated.habitatExposureSeconds);
+    if (restored && migrated.morrowExposure) restored.morrowExposure = normalizeMorrowExposure(migrated.morrowExposure);
+    if (restored && migrated.morrowRoost && [migrated.morrowRoost.x, migrated.morrowRoost.y, migrated.morrowRoost.z].every(Number.isFinite)) restored.morrowRoost = { ...migrated.morrowRoost };
     return restored;
   }
 
@@ -28025,7 +28084,48 @@ export class VoxelEngine {
     return undefined;
   }
 
+  private trySpawnMorrowMob(requestedFocus?: SimulationInterestPoint) {
+    if (this.multiplayer?.role === "guest" || this.worldOptions.mobDensity <= 0) return;
+    const interests = this.simulationInterestPoints(), focus = requestedFocus ?? selectSimulationInterest(interests, this.naturalSpawnInterestCursor++);
+    if (!focus) return;
+    const budgets = naturalPoolBudgets(this.touchMode, this.worldOptions.mobDensity), records = this.naturalPopulationRecords();
+    const local = naturalPopulationSnapshot(records, focus, 64), global = naturalPopulationSnapshot(records);
+    const ceiling = globalNaturalCostCeiling(this.touchMode, this.worldOptions.mobDensity, interests.length);
+    this.ecologyDiagnostics.attempts += 1;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const angle = Math.random() * Math.PI * 2, radius = 24 + Math.random() * 32;
+      let x = Math.round(focus.x + Math.cos(angle) * radius), z = Math.round(focus.z + Math.sin(angle) * radius);
+      const kind = pickMorrowSpawn(morrowRegionAt(x, z), this.worldTime % 1, Math.random());
+      if (!kind) continue;
+      this.world.generateChunk(Math.floor(x / CHUNK_SIZE), Math.floor(z / CHUNK_SIZE));
+      let ground = this.world.surfaceAt(x, z);
+      if (kind === "morrow-owl") {
+        const site = this.world.celestialTerrain?.sites.find(site => site.kind === "waystone-gallery" && Math.hypot(site.center.x - focus.x, site.center.z - focus.z) <= 64);
+        if (!site || this.mobs.some(mob => mob.kind === kind && mob.group.position.distanceTo(new THREE.Vector3(site.center.x, site.center.y, site.center.z)) < 32)) continue;
+        let found = false;
+        for (let dx = -5; dx <= 5 && !found; dx++) for (let dz = -5; dz <= 5 && !found; dz++) for (let dy = 8; dy >= -8; dy--) {
+          const rx = Math.round(site.center.x + dx), rz = Math.round(site.center.z + dz), ry = Math.round(site.center.y + dy);
+          this.world.generateChunk(Math.floor(rx / CHUNK_SIZE), Math.floor(rz / CHUNK_SIZE));
+          if (this.world.getBlock(rx, ry, rz) !== BlockId.RuneStone || !this.world.isWalkThrough(this.world.getBlock(rx, ry + 1, rz)) || !this.world.isWalkThrough(this.world.getBlock(rx, ry + 2, rz))) continue;
+          x = rx; z = rz; ground = ry; found = true; break;
+        }
+        if (!found) continue;
+      }
+      const definition = MOB_DEFS[kind], pool: NaturalPopulationPool = "surface-animal", cost = naturalPopulationCost(definition);
+      if (local.byPool[pool].cost + cost > budgets[pool].target || global.totalCost + cost > ceiling) return;
+      if (!this.ecologyAllowsSpecies(kind, x, z) || this.naturalSpawnVisibleToPlayer(x, ground, z, 48)) continue;
+      const y = ground + definition.footOffset;
+      if (!BLOCKS[this.world.getBlock(x, ground, z) ?? BlockId.Air]?.solid || !this.world.isWalkThrough(this.world.getBlock(x, ground + 1, z)) || !this.world.isWalkThrough(this.world.getBlock(x, ground + 2, z))) continue;
+      const mob = this.spawnMob(kind, new THREE.Vector3(x, y, z), { naturalSpawned: true, naturalPool: pool, persistentPoiResident: false });
+      mob.morrowExposure = { exposureSeconds: 0, veilSeconds: kind === "morrow-owl" ? MORROW_OWL_VEIL_SECONDS : 0 };
+      if (kind === "morrow-owl") mob.morrowRoost = { x, y, z };
+      this.ecologyDiagnostics.successes += 1; this.ecologyDiagnostics.lastSuccess = { kind, pool, playerId: focus.id, x, z }; return;
+    }
+    this.noteEcologyRejection("morrow-bounded-placement");
+  }
+
   trySpawnMob(intent: "passive" | "hostile" = "passive", requestedFocus?: SimulationInterestPoint) {
+    if (this.world.celestialTerrain?.kind === "morrow") { if (intent === "passive") this.trySpawnMorrowMob(requestedFocus); return; }
     if (!this.bodyContext().home) return; // Destination ecology is authored in CF4, not Home fauna in vacuum.
     const interests = this.simulationInterestPoints();
     const focus = requestedFocus ?? selectSimulationInterest(interests, this.naturalSpawnInterestCursor++);
@@ -28265,6 +28365,13 @@ export class VoxelEngine {
     // avoid walking every hidden authored hierarchy merely to mutate transforms
     // the renderer will not submit.
     if (!mob.definition.sentient && mob.renderTier && mob.renderTier !== "hero") return;
+    if (isMorrowMobKind(mob.kind)) {
+      applyMorrowCreaturePose(mob.visual, mob.kind, mob.age, Math.min(1, moved * 4), mob.state === "flee" || mob.hurtTimer > 0 ? 1 : 0,
+        mob.kind === "morrow-owl" ? moved > .001 && (mob.morrowExposure?.veilSeconds ?? 0) > 0 : undefined);
+      this.applyMobScale(mob, this.mobBaseScale(mob));
+      updateCreatureRarityVisual(mob.visual, mob.age);
+      return;
+    }
     if (mob.dragonState) {
       const attack = mob.dragonAttackAnimation;
       const surface = this.world.surfaceAt(Math.round(mob.group.position.x), Math.round(mob.group.position.z));
@@ -30209,7 +30316,7 @@ export class VoxelEngine {
     for (const id of this.celestialCreatureVelocity.keys()) if (!live.has(id)) this.celestialCreatureVelocity.delete(id);
     for (const mob of this.mobs) {
       if (mob.id === this.mountedCreatureId || mob.dragonState?.onShoulder) continue;
-      if (!zeroG && (mob.definition.aquatic || mob.definition.flying && environment.pressureKPa > 0)) continue;
+      if (!zeroG && (mob.kind === "morrow-owl" || mob.definition.aquatic || mob.definition.flying && environment.pressureKPa >= 20)) continue;
       let velocity = this.celestialCreatureVelocity.get(mob.id);
       if (!velocity) {
         velocity = new THREE.Vector3();
@@ -30242,6 +30349,8 @@ export class VoxelEngine {
     for (const mob of [...this.mobs]) {
       if (mob.health <= 0) continue;
       const point = { x: Math.floor(mob.group.position.x + .5), y: Math.floor(mob.group.position.y + 1), z: Math.floor(mob.group.position.z + .5) };
+      // Planetary exposure is applied separately, once, including open exterior.
+      if (this.bodyContext().home === false || isMorrowMobKind(mob.kind)) continue;
       const result = stepHabitatOccupantExposure({ definition: mob.definition, exposureSeconds: mob.habitatExposureSeconds,
         elapsedSeconds: dt, zone: this.pressureRuntime.zoneAt(point), isHost: true });
       if (result.exposureSeconds !== (mob.habitatExposureSeconds ?? 0)) {
@@ -30259,8 +30368,92 @@ export class VoxelEngine {
     }
   }
 
+  private morrowDreamRefuge(mob: MobEntity) {
+    const p = mob.group.position, ground = Math.round(p.y - mob.definition.footOffset);
+    return this.world.celestialTerrain?.kind === "morrow" && morrowRegionAt(Math.round(p.x), Math.round(p.z)) === "buried-waystone-galleries"
+      && Math.abs(p.y - ground - mob.definition.footOffset) < .12
+      && this.world.getBlock(Math.round(p.x), ground, Math.round(p.z)) === BlockId.RuneStone;
+  }
+
+  private updatePlanetaryCreatureHealth(dt: number) {
+    if (this.multiplayer?.role === "guest") return;
+    const body = this.bodyContext();
+    for (const mob of [...this.mobs]) {
+      if (mob.health <= 0 || body.home && !isMorrowMobKind(mob.kind)) continue;
+      const p = mob.group.position, zone = this.pressureRuntime?.zoneAt({ x: Math.floor(p.x + .5), y: Math.floor(p.y + 1), z: Math.floor(p.z + .5) });
+      // Checking topology is not evidence of exterior or a safe refuge.
+      if (zone && !["sealed", "leaking", "depressurized"].includes(zone.status)) continue;
+      const breathable = zone ? morrowBreathableZone(zone) : body.environment.breathable;
+      const moving = mob.state !== "recover";
+      const next = stepMorrowExposure({ kind: mob.kind, state: { ...mob.morrowExposure, exposureSeconds: mob.habitatExposureSeconds ?? mob.morrowExposure?.exposureSeconds }, elapsedSeconds: dt, isHost: true,
+        breathable, moving, dreamRefuge: this.morrowDreamRefuge(mob), requiresBreathing: habitatOccupantBreathes(mob.definition) });
+      const previous = mob.morrowExposure;
+      mob.morrowExposure = { exposureSeconds: next.exposureSeconds, veilSeconds: next.veilSeconds };
+      mob.habitatExposureSeconds = next.exposureSeconds;
+      if (previous?.exposureSeconds !== next.exposureSeconds || previous?.veilSeconds !== next.veilSeconds) this.markPersistenceDirty();
+      if (next.damage > 0) {
+        this.applyCombatDamageToMob(mob, next.damage, { kind: "environment", id: "planetary-atmosphere" }, { effectId: "planetary-exposure", attackType: "neutral" });
+        mob.hurtTimer = Math.max(mob.hurtTimer, .12);
+        if (mob.health <= 0) this.killMob(mob);
+      }
+    }
+  }
+
+  /** Short physical out-and-back crossing, never aerodynamic flight in trace gas. */
+  private updateMorrowOwl(mob: MobEntity, dt: number) {
+    const p = mob.group.position;
+    if (mob.morrowRoost && p.distanceTo(new THREE.Vector3(mob.morrowRoost.x, mob.morrowRoost.y, mob.morrowRoost.z)) > 8) mob.morrowRoost = undefined;
+    const roost = mob.morrowRoost ?? (mob.morrowRoost = { x: p.x, y: p.y, z: p.z });
+    const veil = normalizeMorrowExposure(mob.morrowExposure).veilSeconds;
+    const phase = (mob.age + mob.id * .37) % 22;
+    const excursion = phase < 2.5 && veil > 4;
+    const angle = mob.id * 2.399963;
+    const target = new THREE.Vector3(roost.x + (excursion ? Math.cos(angle) * 3 : 0), roost.y + (excursion ? 1.25 : 0), roost.z + (excursion ? Math.sin(angle) * 3 : 0));
+    const delta = target.sub(p), distance = delta.length();
+    let moved = 0;
+    if (distance > .04 && veil > 0) {
+      const step = Math.min(distance, dt * mob.definition.chaseSpeed), candidate = p.clone().addScaledVector(delta.normalize(), step);
+      if (this.mobTerrainClearAt(mob, candidate.x, candidate.y, candidate.z)) {
+        mob.angle = Math.atan2(delta.z, delta.x); p.copy(candidate); moved = step;
+      }
+    } else if (veil <= 0) {
+      // An exhausted migrant falls to support instead of retaining free lift.
+      const ground = this.world.surfaceAt(Math.round(p.x), Math.round(p.z)) + mob.definition.footOffset;
+      p.y = Math.max(ground, p.y - gravityAcceleration(24, this.bodyContext().environment.gravityG) * dt);
+    }
+    mob.state = moved > .001 ? "wander" : "recover"; mob.baseY = p.y;
+    mob.hurtTimer = Math.max(0, mob.hurtTimer - dt); mob.group.rotation.y = -mob.angle - Math.PI / 2;
+    this.animateMob(mob, moved); this.refreshMobSpatialEntry(mob);
+  }
+
+  private updateSlatefinBurrower(mob: MobEntity, dt: number) {
+    const before = mob.group.position.clone(), p = mob.group.position;
+    const offered = this.selectedSlot()?.item;
+    const lured = offered !== undefined && mob.definition.diet?.includes(offered) && p.distanceTo(this.position) < 8;
+    if (lured) mob.desiredAngle = Math.atan2(this.position.z - p.z, this.position.x - p.x);
+    else if (mob.wanderTimer <= 0) { mob.desiredAngle += .4 + (mob.id % 7) * .13; mob.wanderTimer = 4; }
+    mob.wanderTimer -= dt;
+    mob.angle += Math.atan2(Math.sin(mob.desiredAngle - mob.angle), Math.cos(mob.desiredAngle - mob.angle)) * Math.min(1, dt * 2.8);
+    const stride = mob.definition.speed * dt, nx = p.x + Math.cos(mob.angle) * stride, nz = p.z + Math.sin(mob.angle) * stride;
+    const surface = this.world.surfaceAt(Math.round(nx), Math.round(nz));
+    const floor = this.world.getBlock(Math.round(nx), surface, Math.round(nz));
+    const buried = floor === BlockId.PaleRegolith && !lured;
+    const y = surface + mob.definition.footOffset - (buried ? .7 : 0);
+    let clear = Math.abs(y - p.y) <= 1.1;
+    for (const ox of [-.65, 0, .65]) for (const oz of [-.8, 0, .8]) for (const dy of [0, .45]) {
+      const block = this.world.getBlock(Math.round(nx + ox), Math.floor(y + dy + .5), Math.round(nz + oz));
+      if (block !== BlockId.Air && !(buried && block === BlockId.PaleRegolith)) clear = false;
+    }
+    if (clear) { p.set(nx, y, nz); mob.baseY = y; }
+    else { mob.desiredAngle += .7; mob.wanderTimer = 1; }
+    mob.hurtTimer = Math.max(0, mob.hurtTimer - dt); mob.state = clear ? "wander" : "recover";
+    mob.group.rotation.y = -mob.angle - Math.PI / 2;
+    this.animateMob(mob, p.distanceTo(before)); this.refreshMobSpatialEntry(mob);
+  }
+
   updateMobs(dt: number) {
     this.updateHabitatOccupantHealth(dt);
+    this.updatePlanetaryCreatureHealth(dt);
     if (this.bodyContext().environment.gravityG === 0) { this.updateCelestialCreatureMotion(dt, true); return; }
     this.updateTemporaryMagic();
     this.updateCapturePacification(dt);
@@ -30458,6 +30651,8 @@ export class VoxelEngine {
       }
 
       mob.attackCooldown = Math.max(0, mob.attackCooldown - mobDt);
+      if (mob.kind === "morrow-owl") { this.updateMorrowOwl(mob, mobDt); continue; }
+      if (mob.kind === "slatefin-burrower") { this.updateSlatefinBurrower(mob, mobDt); continue; }
       if (mob.definition.movement !== "ground" || mob.id === this.mountedCreatureId || mob.dragonState?.onShoulder) {
         mob.stepPresentationOffset = 0;
       } else mob.stepPresentationOffset = stepGroundPresentationOffset(mob.stepPresentationOffset, mobDt);

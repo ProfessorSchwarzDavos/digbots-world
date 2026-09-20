@@ -1,4 +1,5 @@
 import type { HabitatNeedId } from "./creature-care";
+import { isMorrowMobKind } from "./morrow-ecology";
 import type { CreatureTypeSource } from "./creature-types";
 import { PRIME_FORM_PROFILES } from "./creature-rarity";
 import {
@@ -419,6 +420,16 @@ function rolesFor(kind: MobKind): readonly CreatureWorkRole[] {
 
 function buildContract(kind: MobKind): CreatureEcologyContract {
   const definition = MOB_DEFS[kind];
+  if (isMorrowMobKind(kind)) return Object.freeze({
+    kind, workRoles: Object.freeze(["companion"] as CreatureWorkRole[]),
+    careNeeds: Object.freeze((kind === "morrow-owl" ? ["shelter", "perch"] : ["substrate", "temperature"]) as HabitatNeedId[]),
+    workCadenceSeconds: 30, aggregateKey: `morrow:${kind}`, aquariumRoles: [], pollinationRoles: [], perchEligible: kind === "morrow-owl",
+    containment: kind === "vacuum-lantern" ? "research-cell" : "ordinary", primeForm: null,
+    utilitySignal: definition.behavior, dropRationale: "Only finite mineral or anatomical drops; live care and observation remain useful.",
+    juvenileScale: .62, authorship: "explicit" as const,
+    ecologicalVerb: kind === "rillehopper" ? "mineral-graze" : kind === "slatefin-burrower" ? "regolith-swim" : kind === "morrow-owl" ? "brief-veil-transit" : "sealed-glow",
+    workBehavior: definition.behavior, releaseOutcome: "Returns the same specimen and its remaining veil and exposure to a valid physical location.",
+  });
   const authored = EXPANSION_CREATURE_ECOLOGY_SEEDS[kind as ExpansionCreatureKind];
   if (authored) return Object.freeze({
     kind, ...authored,

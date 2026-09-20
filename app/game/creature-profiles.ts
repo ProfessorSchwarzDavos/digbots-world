@@ -4,6 +4,7 @@ import { authoredMoveSetForKind, defaultMoveSetForTypes, EXPANSION_CREATURE_MOVE
 import { EXPANSION_CREATURE_RARITY_POLICIES, type CreatureRarityPolicy } from "./creature-rarity";
 import { creatureStatProfile, EXPANSION_CREATURE_STAT_SEEDS, type AuthoredCreatureStatSeed, type CreatureStatProfile } from "./creature-stats";
 import { CREATURE_TYPES, resolveCreatureTypes, type CreatureTypeId, type CreatureTypeSource } from "./creature-types";
+import { isMorrowMobKind } from "./morrow-ecology";
 import {
   LEGENDARY_CREATURE_ORDER, LIVING_ROSTER_ORDER, MOB_DEFS, MOB_ORDER, SUMMONED_CREATURE_ORDER,
   type LegendaryCreatureKind, type LivingRosterKind, type MobDefinition, type MobKind, type SummonedCreatureKind,
@@ -37,6 +38,8 @@ export type CreatureContentSheet = Readonly<{
 }>;
 
 const EXACT_TYPES: Readonly<Partial<Record<MobKind, readonly CreatureTypeId[]>>> = Object.freeze({
+  rillehopper: ["wild", "frost"], "vacuum-lantern": ["radiant", "stone"],
+  "slatefin-burrower": ["stone", "wild"], "morrow-owl": ["dream", "sky"],
   mossling: ["verdant", "wild"], "boglantern-mossling": ["verdant", "radiant"], "cindercone-mossling": ["verdant", "flame"], "moonbloom-mossling": ["verdant", "dream"], "moonbrawn-mossling": ["verdant", "stone"],
   ridgeback: ["stone", "wild"], woolhorn: ["wild", "frost"], glowmoth: ["radiant", "sky"], shadecrawler: ["umbral", "venom"], caveblob: ["tide", "umbral"], rattlekin: ["spirit", "neutral"], zombie: ["umbral", "spirit"],
   "sunstep-grazer": ["radiant", "wild"], pebbletortoise: ["stone", "wild"], brambleboar: ["verdant", "wild"], petalfox: ["verdant", "wild"], "emberbrush-fox": ["flame", "wild"], "moonpetal-fox": ["dream", "wild"],
@@ -207,6 +210,13 @@ export const CREATURE_CONTENT_SHEETS: Readonly<Record<ExpansionCreatureKind, Cre
 
 function makeProfile(kind: MobKind): CreatureProfile {
   const definition = MOB_DEFS[kind];
+  if (isMorrowMobKind(kind)) return Object.freeze({
+    kind, naturalTypes: EXACT_TYPES[kind]!, stats: creatureStatProfile(kind, definition),
+    moves: authoredMoveSetForKind(kind)!, captureProfile: kind === "vacuum-lantern" ? "uncapturable" : kind === "slatefin-burrower" ? "armored" : "gentle",
+    ecologyRoles: Object.freeze([kind === "rillehopper" ? "grazer" : kind === "slatefin-burrower" ? "burrower" : kind === "morrow-owl" ? "scout" : "research"] as EcologyRole[]),
+    researchClues: Object.freeze([definition.behavior, definition.discoveryHint ?? definition.habitat, ...(definition.fieldNotes ?? []).map(note => note.text)]),
+    authorship: "explicit" as const,
+  });
   const authoredSheet = CREATURE_CONTENT_SHEETS[kind as ExpansionCreatureKind];
   if (authoredSheet) return Object.freeze({
     kind, naturalTypes: authoredSheet.naturalTypes,

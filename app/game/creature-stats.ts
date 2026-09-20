@@ -153,6 +153,10 @@ const DEEPENED_LEGACY_STAT_SEEDS = Object.freeze({
 } satisfies Readonly<Partial<Record<MobKind, AuthoredCreatureStatSeed>>>);
 
 export const AUTHORED_CREATURE_STAT_SEEDS: Readonly<Partial<Record<MobKind, AuthoredCreatureStatSeed>>> = Object.freeze({
+  rillehopper: seed(stat(42, 22, 30, 36, 34, 58), "swift"),
+  "vacuum-lantern": seed(stat(24, 8, 48, 51, 54, 14), "guardian"),
+  "slatefin-burrower": seed(stat(58, 41, 22, 64, 38, 28), "sturdy"),
+  "morrow-owl": seed(stat(34, 27, 68, 24, 62, 59), "mystic"),
   ...DEEPENED_LEGACY_STAT_SEEDS,
   ...EXPANSION_CREATURE_STAT_SEEDS,
 });

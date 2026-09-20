@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import * as THREE from "three";
-import { BlockId, Item } from "../app/game/data";
+import { BLOCKS, BlockId, Item } from "../app/game/data";
+import { createAirZoneState, discoverAirZone } from "../app/game/airzone";
 import { VoxelEngine } from "../app/game/engine";
 import { homeLocation, locationId, universeId } from "../app/game/location-address";
 import { createStationRegistry, remapStationRegistry, validateStationRegistrySave } from "../app/game/orbital-station";
 import { createSurveyHopper, planSpaceVehicleTravel, remapSpacefleetUniverse } from "../app/game/space-vehicle";
-import { planStationFoundation, planStationDock, shipDock, validateStationFleetCustody, type StationBlock } from "../app/game/station-runtime";
+import { planStationFoundation, planStationCabin, planStationDock, shipDock, validateStationFleetCustody, type StationBlock } from "../app/game/station-runtime";
+import { createMachine } from "../app/game/wayworks";
 import { composeUniverseSave, splitUniverseSave } from "../app/game/universe-save";
 import { flightFixture } from "./spaceflight-fixtures";
 
@@ -45,6 +47,34 @@ test("foundation rejects blocked cells, foreign ships, sealed kits and intersect
   Object.assign(f.inventory[0], { metadata: { wayworks: { energyJ: 900 } } }); assert.throws(f.plan, /Carry/);
   const g = founded();
   assert.throws(() => planStationFoundation({ ...g, actor, name: "Overlap", actionId: "second", stationId: "other", blocked: () => false }), /existing station claim/);
+});
+
+test("cabin blueprint debits exact ordinary blocks, leaves a real socket and preserves the door vessel", () => {
+  const f = founded(), door = createMachine("pressure-door", orbit, "local"); door.energyJ = 12000;
+  const inventory = [{ item: BlockId.StoneBrick, count: 37 }, { item: BlockId.ReinforcedWindow, count: 2 },
+    { item: BlockId.StationTruss, count: 1 }, { item: BlockId.PressureDoor, count: 1, metadata: { wayworks: door } }];
+  const input = { ...f, stationId: "station", actor, inventory, blocked: () => false };
+  const plan = planStationCabin(input);
+  assert.deepEqual(plan.inventory, [null, null, null, null]); assert.equal(plan.blocks.length, 42);
+  assert.equal(plan.blocks.filter(block => block.type === BlockId.StoneBrick).length, 37);
+  assert.deepEqual(plan.doorSlot.metadata?.wayworks, door); assert.deepEqual(plan.socket, [9, 33, -1]);
+  assert.ok(!plan.blocks.some(block => [block.x, block.y, block.z].join() === plan.socket.join()));
+  assert.equal(inventory[0].count, 37); assert.equal(f.registry.revision, 1);
+  assert.throws(() => planStationCabin({ ...input, blocked: () => true }), /unoccupied/);
+  assert.throws(() => planStationCabin({ ...input, actor: { ...actor, actorId: "guest" } }), /permission/);
+  inventory[0].count--; assert.throws(() => planStationCabin(input), /37 Stone/); inventory[0].count++;
+  for (const block of plan.blocks) f.cells.set(`${block.x},${block.y},${block.z}`, block.type);
+  assert.throws(() => planStationCabin(input), /unoccupied/);
+  const topology = () => discoverAirZone({ epochs: { locationId: orbit, generation: 1, topologyRevision: 1, requestId: 1 },
+    seed: { x: 9, y: 33, z: 0 }, cells: Array.from({ length: 5 * 7 * 5 }, (_, i) => {
+      const x = 7 + i % 5, z = -2 + Math.floor(i / 5) % 5, y = 31 + Math.floor(i / 25);
+      return { x, y, z, passable: !BLOCKS[f.blockAt(x, y, z)].solid, sealMask: 0,
+        controllerIds: x === 9 && y === 33 && z === 0 && f.blockAt(...plan.socket) === BlockId.LifeSupportController ? [plan.socket.join(",")] : [] };
+    }) });
+  assert.notEqual(topology().status, "sealed", "empty socket does not seal the cabin");
+  f.cells.set(plan.socket.join(","), BlockId.LifeSupportController);
+  const sealed = topology(); assert.equal(sealed.status, "sealed"); assert.equal(sealed.cellCount, 3);
+  assert.equal(createAirZoneState(sealed).pressureMilliKPa, 0, "a new sealed shell starts empty");
 });
 
 test("dock and undock jointly preserve exact finite custody, block launch and remap safely", () => {
@@ -99,7 +129,7 @@ test("actual engine founders consume physical kit, dock, deny stale/guest edits 
     multiplayer: null, remotePlayers: new Map(), spacefleet: { schema: 1, vehicles: { hopper: f.ship } }, orbitalStations: null,
     activeWayworksKey: null, wayworks: new Map(), inventory: f.inventory, position: new THREE.Vector3(0, 32.51, 0),
     world: { locationScope: { locationId: orbit, epoch: 1, revision: 1 }, getBlock: f.blockAt,
-      setBlocksBatch: (blocks: StationBlock[]) => blocks.forEach(block => f.cells.set(`${block.x},${block.y},${block.z}`, block.type)) },
+      setBlocksBatch: (blocks: StationBlock[]) => blocks.forEach(block => f.cells.set(`${block.x},${block.y},${block.z}`, block.type)), setBlockFacing: () => {} },
     currentPlayerHeight: () => 1.8, publishBlockEdits: () => {}, events: { onToast: (message: string) => messages.push(message) }, emitHud: () => {}, saveSoon: () => {},
   }) as VoxelEngine;
   const found = { kind: "station-found" as const, name: "Actual station", registryRevision: 0, vehicleRevision: 0 };
@@ -114,4 +144,10 @@ test("actual engine founders consume physical kit, dock, deny stale/guest edits 
   assert.equal(await engine.spaceflightAction({ kind: "station-access", stationId: station.id, memberIds: ["guest"], association: null,
     access: { ...station.access, build: "trusted" }, registryRevision: 2, vehicleRevision: 1 }), true, messages.at(-1));
   assert.equal(allowed("guest", "build"), true); assert.equal(allowed("guest", "container"), false);
+  const door = createMachine("pressure-door", orbit, "local"); door.energyJ = 12000;
+  engine.inventory = [{ item: BlockId.StoneBrick, count: 37 }, { item: BlockId.ReinforcedWindow, count: 2 },
+    { item: BlockId.StationTruss, count: 1 }, { item: BlockId.PressureDoor, count: 1, metadata: { wayworks: door } }];
+  assert.equal(await engine.spaceflightAction({ kind: "station-cabin", stationId: station.id, registryRevision: 3, vehicleRevision: 1 }), true, messages.at(-1));
+  assert.deepEqual(engine.inventory, [null, null, null, null]); assert.equal(engine.wayworks.size, 12);
+  assert.equal([...engine.wayworks.values()].find(machine => machine.kind === "pressure-door")?.energyJ, 12000);
 });

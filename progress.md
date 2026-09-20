@@ -2,6 +2,20 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — revision12, first transaction checkpoint
 
+- Exact97d56f4 build-r6/official-r6 PASS. Normal browser-station-r1 founded the
+  finite deck, docked the original ship, renamed/trusted/public-dock configured,
+  SaveQuit49/cold54 retained exact custody; strict browser-station-custody-r1 PASS.
+  Undock59/redock61/leave62/save67 also observed. Desktop/mobile screenshots
+  personally opened; focus wraps both directions, width390 has no overflow.
+  Header scrolled out of reach; source now keeps it outside the scrolling body.
+  Empty deck has no gas/power; sealed station breathing remains next, not passed.
+- Added a finite cabin-shell blueprint:37 stone/2 windows/1 door/1 truss,
+  preserves packed door stores and leaves a real north-wall controller socket.
+  Focused-r24 33/33, static-r23/lint-r12 PASS. Broader-r25 44/45 failed because
+  the geometry test omitted the controller capacity annotation; corrected
+  focused-r26 45/45 PASS, including real engine placement and flood-fill geometry.
+  Three finite packed machines disclosed in a separate cabin
+  fixture; no room/gas/ship state injected. Actual breathing remains unverified.
 - Station foundation/docking checkpoint now consumes the real finite kit,
   places ten physical blocks, persists a location-owned claim, moves the original
   ship into a registered collar and blocks launch until undocked. UI exposes

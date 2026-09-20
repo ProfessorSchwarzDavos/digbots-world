@@ -1,10 +1,51 @@
 import { BlockId, cloneSlot, type InventorySlot } from "./data";
 import { parseLocationId, type LocationId } from "./location-address";
-import { applyStationAction, STATION_CLAIM_RADIUS, validateStationRegistrySave, type StationActor, type StationPosition, type StationRegistrySave } from "./orbital-station";
+import { applyStationAction, stationAllows, stationAt, STATION_CLAIM_RADIUS, validateStationRegistrySave, type StationActor, type StationPosition, type StationRegistrySave } from "./orbital-station";
 import { validateSpacefleetSave, type SpacefleetSave, type SpaceVehicleState } from "./space-vehicle";
+import { validCustodyItem } from "./wayworks-custody";
 
 export type StationBlock = { x: number; y: number; z: number; type: BlockId };
 export type StationDockReference = { stationId: string; dockId: string; locationId: LocationId };
+
+/** Optional ordinary-material blueprint. The open controller socket prevents a
+ * decorative shell from being mistaken for a supplied breathing habitat. */
+export function planStationCabin(input: { registry: StationRegistrySave; stationId: string; actor: StationActor;
+  inventory: readonly (InventorySlot | null)[]; blockAt(x: number, y: number, z: number): BlockId | undefined;
+  blocked(point: StationPosition): boolean }) {
+  const station = validateStationRegistrySave(input.registry).stations[input.stationId];
+  if (!station || !stationAllows(station, input.actor, "build")) throw Error("Station building permission is required.");
+  if (input.blockAt(...station.corePosition) !== BlockId.StationCore) throw Error("Repair the station claim core first.");
+  const [sx, y, z] = station.corePosition, x = sx + 3;
+  const door: StationPosition = [x - 1, y + 1, z], socket: StationPosition = [x, y + 1, z - 1];
+  const blocks: StationBlock[] = [{ x: sx + 1, y, z, type: BlockId.StationTruss }];
+  const volume: StationPosition[] = [[sx + 1, y, z]];
+  for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) for (let dy = 0; dy <= 4; dy++) {
+    const point: StationPosition = [x + dx, y + dy, z + dz]; volume.push(point);
+    if (dx === 0 && dz === 0 && dy > 0 && dy < 4 || dx === 0 && dz === -1 && dy === 1) continue;
+    const type = dx === -1 && dz === 0 && dy === 1 ? BlockId.PressureDoor
+      : dx === -1 && dz === 0 && dy === 2 ? BlockId.PressureDoorUpper
+        : dy === 2 && (dx === 1 && dz === 0 || dx === 0 && dz === 1) ? BlockId.ReinforcedWindow : BlockId.StoneBrick;
+    blocks.push({ x: point[0], y: point[1], z: point[2], type });
+  }
+  for (const point of volume) if (stationAt(input.registry, point)?.id !== station.id || input.blockAt(...point) !== BlockId.Air || input.blocked(point)) {
+    throw Error("The cabin needs a clear, loaded, unoccupied 3 × 5 × 3 space east of the claim core.");
+  }
+  const inventory = input.inventory.map(cloneSlot);
+  const doorIndex = inventory.findIndex(slot => slot?.item === BlockId.PressureDoor && validCustodyItem(slot));
+  if (doorIndex < 0) throw Error("Carry one intact Pressure Door; its finite stores will be preserved.");
+  const doorSlot = { ...inventory[doorIndex]!, count: 1 };
+  inventory[doorIndex] = inventory[doorIndex]!.count === 1 ? null : { ...inventory[doorIndex]!, count: inventory[doorIndex]!.count - 1 };
+  for (const [item, count] of [[BlockId.StoneBrick, 37], [BlockId.ReinforcedWindow, 2], [BlockId.StationTruss, 1]]) {
+    let remaining = count;
+    for (let i = 0; i < inventory.length && remaining; i++) {
+      const slot = inventory[i]; if (slot?.item !== item || slot.metadata) continue;
+      const used = Math.min(remaining, slot.count); remaining -= used;
+      inventory[i] = used === slot.count ? null : { ...slot, count: slot.count - used };
+    }
+    if (remaining) throw Error("Carry 37 Stone Brick, 2 Reinforced Windows and 1 Station Truss for the cabin.");
+  }
+  return { blocks, inventory, door, doorSlot, socket };
+}
 export function shipDock(ship: SpaceVehicleState): StationDockReference | null {
   const value = ship.modules.find(module => module.kind === "avionics")?.metadata.stationDock;
   if (value === undefined) return null;

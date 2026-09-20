@@ -19,7 +19,7 @@ export function SpaceflightDialog({ mission, onAction, onClose, feedback }: { mi
     else if (!event.shiftKey && event.target === last) { event.preventDefault(); first?.focus(); }
   }
   return <div className="ww-overlay" onPointerDown={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()}>
-    <section className="ww-panel" role="dialog" aria-modal="true" aria-label="Spacecraft mission" onKeyDown={keys}>
+    <section className="ww-panel spaceflight-dialog" role="dialog" aria-modal="true" aria-label="Spacecraft mission" onKeyDown={keys}>
       <header className="ww-header"><h2>Spacecraft mission</h2><button type="button" autoFocus onClick={onClose}>Return to cockpit</button></header>
       <div className="ww-body">{feedback && <p role="status">{feedback}</p>}<SpaceflightPanel mission={mission} onAction={onAction} /></div>
     </section>
@@ -80,6 +80,11 @@ function StationControls({ station, mission, onAction }: { station: OrbitalStati
       <button type="button" disabled={!!ship.trip || (!!dock.occupant && dock.occupant.vehicleId !== ship.vehicleId)} onClick={() => onAction({ kind: "station-dock", ...base,
         dockId: dock.id, undock: docked?.stationId === station.id && docked.dockId === dock.id })}>{docked?.stationId === station.id && docked.dockId === dock.id ? "Undock spacecraft" : "Dock spacecraft"}</button>
     </div>)}
+    <details><summary>Small cabin blueprint</summary>
+      <p>37 Stone Brick · 2 Reinforced Windows · 1 Pressure Door · 1 Truss. Door stores are preserved.</p>
+      <button type="button" disabled={!!ship.trip} onClick={() => onAction({ kind: "station-cabin", ...base })}>Build cabin shell</button>
+      <p>Leaves a controller socket at [{station.corePosition[0] + 3}, {station.corePosition[1] + 1}, {station.corePosition[2] - 1}]. Place a supplied Life-Support Controller facing south. Supply power and gas; keep EVA protection until the room is measured safe.</p>
+    </details>
     {owner && <details><summary>Station administration</summary>
       <label>Station name <input maxLength={80} value={name} onChange={event => setName(event.target.value)} /></label>
       <button type="button" onClick={() => onAction({ kind: "station-name", ...base, name })}>Rename station</button>

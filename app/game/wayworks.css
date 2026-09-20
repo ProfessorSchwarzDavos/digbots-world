@@ -41,6 +41,9 @@
 .ww-readings dd { margin: 0; font-size: 21px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .ww-readings dd span { font-size: 12px; font-weight: 400; white-space: nowrap; }
 .spaceflight-mission .ww-readings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.spaceflight-dialog { display: flex; flex-direction: column; overflow: hidden; }
+.spaceflight-dialog > .ww-header { flex: 0 0 auto; }
+.spaceflight-dialog > .ww-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .spaceflight-mission .ww-readings dd { white-space: nowrap; }
 .spaceflight-mission label { display: grid; gap: 5px; margin: 10px 0; min-width: 0; }
 .spaceflight-mission input { width: 100%; min-width: 0; min-height: 40px; padding: 8px; border: 1px solid #998059; border-radius: 0; background: #f3e8cb; color: #2d261d; font: inherit; }

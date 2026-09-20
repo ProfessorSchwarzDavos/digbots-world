@@ -27,7 +27,7 @@ export type SpaceflightIntent =
   | { kind: "station-dock"; stationId: string; dockId: string; undock: boolean; registryRevision: number; vehicleRevision: number }
   | { kind: "station-access"; stationId: string; memberIds: string[]; association: StationAssociation; access: StationAccess; registryRevision: number; vehicleRevision: number }
   | { kind: "station-name"; stationId: string; name: string; registryRevision: number; vehicleRevision: number }
-  | { kind: "station-habitat"; stationId: string; registryRevision: number; vehicleRevision: number };
+  | { kind: "station-habitat" | "station-cabin"; stationId: string; registryRevision: number; vehicleRevision: number };
 
 export function inspectSpaceflightMission(ship: SpaceVehicleState | null, origin: LocationStamp, route: FirstFlightRoute,
   pad: LaunchPadCheck | null, weatherSafe = true): SpaceflightMission {

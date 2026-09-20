@@ -794,7 +794,7 @@ import { resetLocationTransients, validateLocationPlayerState, validLocationVelo
 import { applySpaceVehicleAction, createSurveyHopper, SURVEY_HOPPER_CAPACITY, validateSpacefleetSave, type SpacefleetSave, type SpaceVehicleState, type VehicleVector } from "./space-vehicle";
 import { firstFlightDestination, inspectSpaceflightMission, type FirstFlightRoute, type SpaceflightIntent, type SpaceflightMission } from "./spaceflight-mission";
 import { applyStationAction, createStationRegistry, stationAllows, stationAt, validateStationRegistrySave, type StationPermission, type StationRegistrySave } from "./orbital-station";
-import { planStationFoundation, planStationDock, shipDock, validateStationFleetCustody } from "./station-runtime";
+import { planStationFoundation, planStationCabin, planStationDock, shipDock, validateStationFleetCustody } from "./station-runtime";
 import { inspectLaunchPad, supplyVehicleFromMachine, type LaunchPadCheck } from "./spaceflight-infrastructure";
 import { spaceflightMachineKind } from "./spaceflight-catalog";
 import { advanceSpaceCabin, advanceSpaceflight } from "./spaceflight-flight";
@@ -13137,7 +13137,7 @@ export class VoxelEngine {
         if (!ship || ship.revision !== action.vehicleRevision) return fail("The spacecraft changed. Inspect the current mission again.");
         const actor = { actorId: "local", locationId: this.world.locationScope.locationId, expectedVehicleRevision: ship.revision };
         const base = { vehicleId: ship.vehicleId, actionId: crypto.randomUUID() };
-        if (action.kind === "station-found" || action.kind === "station-dock" || action.kind === "station-access" || action.kind === "station-name" || action.kind === "station-habitat") {
+        if (action.kind === "station-found" || action.kind === "station-cabin" || action.kind === "station-dock" || action.kind === "station-access" || action.kind === "station-name" || action.kind === "station-habitat") {
           const registry = this.orbitalStations ?? createStationRegistry(actor.locationId);
           if (registry.revision !== action.registryRevision || ship.trip) return fail("The station or mission changed. Inspect it again.");
           const principal = { actorId: "local", factionIds: [], guildIds: [] };
@@ -13153,6 +13153,20 @@ export class VoxelEngine {
             for (const [key, state] of machines) this.wayworks.set(key, state);
             this.publishBlockEdits(plan.blocks, "batch");
             this.events.onToast("Station deck founded. It contains no air or power; build and supply a sealed habitat before leaving EVA protection.");
+          } else if (action.kind === "station-cabin") {
+            const station = registry.stations[action.stationId];
+            if (!station || this.position.distanceTo(new THREE.Vector3(...station.corePosition)) > 8 || this.wayworks.size + 2 > 256) return fail("Approach the core and leave capacity for the cabin door and bridge.");
+            const plan = planStationCabin({ registry, stationId: action.stationId, actor: principal, inventory: this.inventory,
+              blockAt: (x, y, z) => this.world.getBlock(x, y, z), blocked: ([x, y, z]) => y < MIN_Y || y > MAX_Y
+                || blockEditIntersectsPlayer({ x, y, z, type: BlockId.StoneBrick }, this.position, this.currentPlayerHeight())
+                || [...this.remotePlayers.values()].some(remote => blockEditIntersectsPlayer({ x, y, z, type: BlockId.StoneBrick }, remote.target, PLAYER_HEIGHT)) });
+            const door = placedWorkshopMachine("pressure-door", plan.doorSlot, actor.locationId, "local", 1);
+            this.world.setBlocksBatch(plan.blocks, true, true);
+            this.world.setBlockFacing(...plan.door, 1, true); this.world.setBlockFacing(plan.door[0], plan.door[1] + 1, plan.door[2], 1, true);
+            this.wayworks.set(blockKey(...plan.door), door);
+            const bridge = plan.blocks[0]; this.wayworks.set(blockKey(bridge.x, bridge.y, bridge.z), createMachine("station-truss", actor.locationId, "local"));
+            this.inventory = plan.inventory; this.publishBlockEdits(plan.blocks, "batch");
+            this.events.onToast(`Cabin shell built. Place a supplied Life-Support Controller at [${plan.socket.join(", ")}] facing south into the room. The shell contains no air or power.`);
           } else if (action.kind === "station-dock") {
             if (!aboard) return fail("Board the pilot seat before docking or undocking.");
             const plan = planStationDock({ registry, fleet: this.spacefleet, actor: principal, vehicleId: ship.vehicleId,

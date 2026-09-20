@@ -1654,3 +1654,29 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   proposal are in the task-local development handoff. CF5 remains unstarted;
   director acceptance and all deferredCFV gates are not implied. Safety review
   blocked cross-task handoff transmission; explicit user approval requested.
+
+## CF5 habitat integration - 2026-09-20 00:55 UTC
+
+- Noah approved continuation/transmission; director accepted CF4 and dispatched
+  revision11 CF5. First foundation commit56a1298 includes finite fluid/gas/heat
+  transport and chemistry, worker AirZones, authored pressure hardware, airlock
+  state machine, typed save/host/guest/agent integration and inspector.
+- Focused208/208, static and scopedlint passed before first isolated build;
+  productionbuild-r1 passed (dfzk7GyLA18RpLwK4yb4y), existing circular chunk
+  warnings retained. No publication/provider/real-save actions.
+- First normal-input synthetic browser pass confirmed breathable room readings,
+  explicit pump/controller links and automatic cycle entry. It found pale text
+  on parchment and repeated held-crank execution during its own topology check.
+  Source fixes now improve contrast, latch each continuous hold once, reject
+  aliased airlock hardware before mutation and honor disabled/signal-gated power.
+  Focused runtime/panel regression24/24passed. These fixes await rebuilt browser.
+- Guest inspector now receives bounded validated host diagnostics; targeted20/20
+  passes. Ordinary known-habitat animal/NPC exposure gains saved grace/damage;
+  nonbreathing authored types are excluded. Final integrated checks pending.
+- Browser-r1 fixture-shape error and browser-r2 genuine failures retained.
+  Browser-r2 normal SaveQuit reached title; synthetic IndexedDB checkpoint saved,
+  browser closed. Unchanged officialclient-r1 passed gameplay and its screenshot
+  was personally opened. This is exploratory evidence, not full CF5 acceptance.
+- Remaining: rebuilt normal production/airlock/manual/breach/helmet/health,
+  desktop/mobile review, representative coldreload, full criterion-level handoff
+  and CF6 proposal. CF6 is not dispatched. Frozen CF4 evidence remains untouched.

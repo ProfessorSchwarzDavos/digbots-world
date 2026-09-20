@@ -90,7 +90,8 @@ It works without electricity and provides a saved 10-second open dwell. The
 3-second dangerous override deliberately bypasses pressure/recovery checks,
 causes a recorded decompression/equalization event, then faults and reseals.
 Releasing, blurring, changing device, leaving reach, or losing the wrench stops
-the hold. A client cannot supply its own elapsed duration.
+the hold. A client cannot supply its own elapsed duration. A continuous hold
+executes once; release before starting another crank or override.
 
 A Pressure Sensor can link an Emergency Shutter. A hazard closes and locks it;
 a healthy room unlocks it but never opens it automatically. A formed Hangar
@@ -120,6 +121,18 @@ body's actual pressure, composition and mean ambient temperature; vacuum cannot
 refill a breached room. Unknown topology never grants breathable air. Guests
 receive bounded read-only geometry/atmosphere presentation, not another gas
 simulation or the host's physical stores.
+
+An opened guest inspector receives a separate bounded, host-authored view of
+its device links, readings and cycle. It is tied to the active facility,
+installation, location, generation and revision; trusted actions still go to the
+host. Stale or mismatched inspector data removes the controls.
+
+Ordinary loaded animals and NPCs in a known habitat accumulate exposure to low
+oxygen, excessive CO2 or unsafe pressure. After a 15-second grace they take
+environmental damage; safe room air reduces exposure. The dose survives saves.
+Authored undead, constructs, summons and aquatic physiology are excluded from
+this terrestrial-breathing rule and oxygen demand. Unknown discovery freezes
+their dose. This does not add a general planetary-tolerance system.
 
 Harvest traces refine the catalog's non-breathing fraction: Orison has 4%
 methane and Rimehold 3%; suitable water-bearing atmospheres provide 1% moisture.

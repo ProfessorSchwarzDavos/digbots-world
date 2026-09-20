@@ -29,7 +29,7 @@ export type PressureHost = {
   actorStillHolding(actorId: string, key: string): boolean;
   changed(): void; alarm(message: string): void;
 };
-type Hold = { key: string; command: Extract<PressureAction, { kind: "hold" }>["command"]; start: number; renewed: number };
+type Hold = { key: string; command: Extract<PressureAction, { kind: "hold" }>["command"]; start: number; renewed: number; completed: boolean };
 
 /** Location-owned coordinator. The graph is ephemeral; only machine vessels and
  * saved AirZone memberships own gas. Guests never construct this authority. */
@@ -190,7 +190,8 @@ export class PressureRuntime {
     const good = (zone: AirZoneState | undefined) => !!zone && ["sealed", "depressurized", "leaking"].includes(zone.status);
     return { linksIntact: !!links && bound && !!this.devices.get(links.innerDoorKey) && !!this.devices.get(links.outerDoorKey)
       && this.host.machines.get(links.recoveryPumpKey)?.kind === "recovery-pump" && !!reserve?.workshop.process,
-      topologyCurrent: good(chamber) && good(interior) && (links?.exteriorZoneId === "exterior" || good(exterior)), powerAvailableJ: machine.energyJ,
+      topologyCurrent: good(chamber) && good(interior) && (links?.exteriorZoneId === "exterior" || good(exterior)),
+      powerAvailableJ: machine.enabled && workshopRunning(machine.workshop) ? machine.energyJ : 0,
       chamberPressurePa: chamber?.pressureMilliKPa ?? 0, interiorPressurePa: interior?.pressureMilliKPa ?? 0, exteriorPressurePa: outsidePa,
       innerDoorOpen: !!this.devices.get(links?.innerDoorKey ?? "")?.open, outerDoorOpen: !!this.devices.get(links?.outerDoorKey ?? "")?.open,
       innerDoorObstructed: !!links && this.doorCells(links.innerDoorKey).some(point => this.host.obstructed(point)),
@@ -253,6 +254,14 @@ export class PressureRuntime {
     if (action.kind === "link") {
       const origin = pressurePoint(key)!, target = pressurePoint(action.target);
       if (action.target !== "exterior" && (!target || Math.hypot(target.x - origin.x, target.y - origin.y, target.z - origin.z) > PRESSURE_LINK_RANGE || this.host.blockAt(target) === undefined)) return fail("Links require loaded targets within sixteen blocks.");
+      if (machine.kind === "airlock-controller") {
+        const hardware = ["inner", "outer", "pump", "reserve"] as const;
+        const samples = ["chamber", "interior", "exterior"] as const;
+        if (hardware.some(role => role === action.role) && (action.target === key || hardware.some(role => role !== action.role && device.links[role] === action.target)))
+          return fail("Use separate inner door, outer door, recovery pump and gas reserve hardware. The controller cannot fill these roles.");
+        if (samples.some(role => role === action.role) && samples.some(role => role !== action.role && device.links[role] === action.target))
+          return fail("Chamber, interior and exterior need distinct air-cell samples.");
+      }
       const linked = this.host.machines.get(action.target);
       if (["inner", "outer", "pump", "reserve", "shutter"].includes(action.role)) {
         if (!linked?.workshop.process?.installationId || linked.ownerId !== machine.ownerId) return fail("Link compatible hardware owned by this workshop.");
@@ -285,7 +294,10 @@ export class PressureRuntime {
       if (!device.airlock) return fail("A configured airlock is required for manual control.");
       const hold = this.holds.get(actorId);
       if (!action.active) this.holds.delete(actorId);
-      else this.holds.set(actorId, { key, command: action.command, start: hold?.key === key && hold.command === action.command ? hold.start : now, renewed: now });
+      else {
+        const continuing = hold?.key === key && hold.command === action.command;
+        this.holds.set(actorId, { key, command: action.command, start: continuing ? hold.start : now, renewed: now, completed: continuing ? hold.completed : false });
+      }
     }
     if (action.kind === "link" || action.kind === "unlink") {
       const activeTargets = new Set(Object.values(device.links));
@@ -373,9 +385,12 @@ export class PressureRuntime {
   private updateHolds() {
     for (const [actor, hold] of this.holds) {
       if (this.now - hold.renewed > 600 || !this.host.actorStillHolding(actor, hold.key)) { this.holds.delete(actor); continue; }
+      // One continuous physical hold is one command. Heartbeats after completion
+      // must not rearm against the topology invalidated by that same door opening.
+      if (hold.completed || this.now - hold.start < (hold.command.startsWith("dangerous") ? 3000 : 8000)) continue;
       const device = this.devices.get(hold.key); if (!device?.airlock) continue;
       const result = commandAirlock(device.airlock, { kind: hold.command, expectedSequence: device.airlock.sequence }, this.observation(hold.key, this.now - hold.start));
-      if (result.accepted) { this.applyAirlock(hold.key, result); this.holds.delete(actor); }
+      if (result.accepted) { this.applyAirlock(hold.key, result); hold.completed = true; }
     }
   }
   environmentAt(point: AirPoint): BodyEnvironment {

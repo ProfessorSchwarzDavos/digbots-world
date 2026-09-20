@@ -17,6 +17,8 @@ import { createPressureOverlay, disposePressureOverlay } from "./pressure-overla
 import { buildPressurePresentation, acceptPressurePresentation, pressurePresentationOpenDoorAt, pressurePresentationClosedGateAt,
   pressurePresentationEnvironmentAt, type PressurePresentation } from "./pressure-presentation";
 import { PressureRuntime, type PressureSave, type PressureOccupant } from "./pressure-runtime";
+import { habitatOccupantOxygenDemand, normalizeHabitatExposure, stepHabitatOccupantExposure } from "./pressure-occupants";
+import { buildPressureInspector, acceptPressureInspector, pressureInspectorMatches, type PressureInspector } from "./pressure-inspector";
 import { pressureDoorUpper, pressureDoorLower, pressurePoint, validPressureDoorEdits } from "./pressure-devices";
 import { createWaystarCatalog, validateCelestialCatalog, type CelestialCatalogSnapshot, type CelestialBodyDefinition } from "./celestial-catalog";
 import { bodyEnvironment, gravityAcceleration, gravityGait, contactPushOffSpeed, effectiveFallDistance, type BodyEnvironment } from "./celestial-environment";
@@ -1394,6 +1396,8 @@ export type HudState = {
 
 export type SavedCreature = {
   id: number;
+  /** Host habitat dose survives save, sleep and location transfer. */
+  habitatExposureSeconds?: number;
   celestialVelocity?: [number, number, number];
   /** Stable across capture, release, growth replacement, sleep, and reconnect. */
   specimenId?: string;
@@ -1718,6 +1722,7 @@ type VoxelHit = {
 
 type MobEntity = {
   id: number;
+  habitatExposureSeconds?: number;
   specimenId: string;
   kind: MobKind;
   name: string;
@@ -4261,6 +4266,9 @@ export class VoxelEngine {
   wayworksMaterialTopology = new MaterialTopologyCache();
   pressureRuntime: PressureRuntime | null = null;
   guestPressure: PressurePresentation | null = null;
+  guestPressureInspector: PressureInspector | null = null;
+  pressureInspectorSequence = 0;
+  guestPressureInspectorSequence = -1;
   pressureStructures = new Set<string>();
   pressureOverlay: THREE.Group | null = null;
   pressureOverlaySignature = "";
@@ -5302,6 +5310,7 @@ export class VoxelEngine {
     this.multiplayerProgressOutgoing = [];
     this.multiplayerTombstones = [];
     this.multiplayerFacilityPlayerBaseline = null;
+    this.guestPressureInspector = null; this.guestPressureInspectorSequence = -1;
     this.lastNetworkMobSnapshotTick = this.lastNetworkDropSnapshotTick = -1;
     this.lastNetworkMobSnapshotScope = this.lastNetworkDropSnapshotScope = null;
     this.multiplayerProgressionSignature = this.multiplayerPlayerStateSignature = "";
@@ -7165,6 +7174,7 @@ export class VoxelEngine {
     this.multiplayerPeerActiveMerchants.clear();
     this.activeNetworkFacilityId = null;
     this.multiplayerFacilityPlayerBaseline = null;
+    this.guestPressureInspector = null; this.guestPressureInspectorSequence = -1;
     this.pendingReliableRequests.clear();
     this.multiplayerReceivedSnapshot = false;
     this.networkCelestialCatalog = undefined;
@@ -7417,6 +7427,7 @@ export class VoxelEngine {
     this.multiplayerPeerActiveContainers.clear();
     this.multiplayerPeerContainerSignatures.clear();
     this.multiplayerFacilityPlayerBaseline = null;
+    this.guestPressureInspector = null; this.guestPressureInspectorSequence = -1;
     this.pendingReliableRequests.clear();
     this.multiplayerProgressTransfers.clear();
     this.multiplayerProgressOutgoing = [];
@@ -7949,12 +7960,39 @@ export class VoxelEngine {
                   : kind === "alchemy" ? this.alchemyStands.get(key)
                     : kind === "distillery" ? this.distilleries.get(key)
                       : this.sugarworks.get(key);
-    return state && typeof state === "object" ? JSON.parse(JSON.stringify(state)) as Record<string, unknown> : null;
+    if (!state || typeof state !== "object") return null;
+    const copy = JSON.parse(JSON.stringify(state)) as Record<string, unknown>;
+    if (kind === "wayworks") {
+      const machine = this.wayworks.get(key)!;
+      if (this.multiplayer?.role === "guest") {
+        if (this.guestPressureInspector?.facilityId === this.sharedFacilityId(kind, key)) copy.pressureInspector = this.guestPressureInspector;
+      } else if (this.pressureRuntime?.devices.has(key) && machine.workshop.process?.installationId) {
+        copy.pressureInspector = buildPressureInspector({ locationId: machine.locationId, generation: this.pressureRuntime.host.generation,
+          facilityId: this.sharedFacilityId(kind, key), installationId: machine.workshop.process.installationId, revision: machine.revision },
+        this.pressureInspectorSequence = (this.pressureInspectorSequence ?? 0) + 1, this.pressureRuntime.diagnosticsFor(key));
+      }
+    }
+    return copy;
   }
 
   private applySharedFacilityState(kind: SharedFacilityKind, key: string, state: Record<string, unknown>) {
     if (kind === "wayworks") {
       const [x, y, z] = key.split(",").map(Number), expectedKind = machineKindForBlock(this.world.getBlock(x, y, z));
+      if (this.multiplayer?.role === "guest") {
+        const previous = this.guestPressureInspector;
+        this.guestPressureInspector = null;
+        const locationId = this.world.locationScope?.locationId ?? "home-preview";
+        if (this.activeNetworkFacilityId !== this.sharedFacilityId(kind, key) || this.activeWayworksKey !== key || state.locationId !== locationId) return false;
+        if (state.pressureInspector !== undefined && state.pressureInspector !== null) {
+          const installationId = (state.workshop as MachineState["workshop"] | undefined)?.process?.installationId;
+          const next = this.guestPressure && installationId ? acceptPressureInspector(state.pressureInspector, previous,
+            { locationId, generation: this.guestPressure.generation, facilityId: this.activeNetworkFacilityId,
+              installationId, revision: Number(state.revision) }) : null;
+          if (!next || next.sequence <= (this.guestPressureInspectorSequence ?? -1) || state.kind !== expectedKind) return false;
+          this.guestPressureInspector = next;
+          this.guestPressureInspectorSequence = next.sequence;
+        }
+      }
       if (expectedKind && typeof state.ownerId === "string") this.wayworks.set(key, normalizeMachine(state, expectedKind, this.world.locationScope?.locationId ?? "home-preview", state.ownerId));
     }
     else if (kind === "apiary") this.apiaries.set(key, restoreApiaryStorage({ [key]: state as ApiaryBlockState }).get(key) ?? createEmptyApiaryBlock());
@@ -8986,12 +9024,14 @@ export class VoxelEngine {
     }
     if (session.role === "guest" && (action.status === "accepted" || action.status === "rejected")) {
       const ownResponse = action.actorId === session.identity.id;
+      if (action.facilityKind === "wayworks" && (action.kind === "close" || action.status === "rejected" && !action.state)) this.guestPressureInspector = null;
       if (ownResponse) this.multiplayerPendingFacilityMutations.delete(action.facilityId);
       const parts = this.sharedFacilityParts(action.facilityId);
       if (parts && action.state) {
-        this.applySharedFacilityState(parts.kind, parts.key, action.state);
-        this.multiplayerFacilityRevisions.set(action.facilityId, action.expectedRevision ?? 0);
-        this.multiplayerFacilitySignatures.set(action.facilityId, JSON.stringify(action.state));
+        if (this.applySharedFacilityState(parts.kind, parts.key, action.state) !== false) {
+          this.multiplayerFacilityRevisions.set(action.facilityId, action.expectedRevision ?? 0);
+          this.multiplayerFacilitySignatures.set(action.facilityId, JSON.stringify(action.state));
+        }
       }
       if (ownResponse && action.playerState) this.applyLocalPlayerSessionSnapshot(action.playerState, true);
       if (ownResponse && action.kind === "close" && action.status === "rejected" && parts?.kind === "wayworks") {
@@ -12928,11 +12968,16 @@ export class VoxelEngine {
 
   private wayworksHud() {
     const state = this.activeWayworksKey ? this.wayworks.get(this.activeWayworksKey) : undefined;
-    if (!state) return null;
+    if (!state) { this.guestPressureInspector = null; return null; }
+    if (this.guestPressureInspector && (!this.guestPressure || !pressureInspectorMatches(this.guestPressureInspector, {
+      locationId: this.world.locationScope?.locationId ?? "home-preview", generation: this.guestPressure.generation,
+      facilityId: this.activeNetworkFacilityId ?? "", installationId: state.workshop.process?.installationId ?? "", revision: state.revision,
+    }) || machineKindForBlock(this.world.getBlock(...this.activeWayworksKey!.split(",").map(Number) as [number, number, number])) !== state.kind)) this.guestPressureInspector = null;
     const network = this.wayworksNetworks?.find((entry) => entry.nodeKeys.includes(this.activeWayworksKey!));
     return { ...state, name: state.kind.split("-").map(word => word[0].toUpperCase() + word.slice(1)).join(" "),
       capacityJ: machineCapacity(state.kind, state.workshop), rateW: machineRate(state.kind), heldItemName: this.selectedSlot() ? itemName(this.selectedSlot()!.item) : "Empty hand",
-      pressure: this.pressureRuntime?.devices.has(this.activeWayworksKey!) ? this.pressureRuntime.diagnosticsFor(this.activeWayworksKey!) : undefined,
+      pressure: this.multiplayer?.role === "guest" ? this.guestPressureInspector?.diagnostics
+        : this.pressureRuntime?.devices.has(this.activeWayworksKey!) ? this.pressureRuntime.diagnosticsFor(this.activeWayworksKey!) : undefined,
       ...(network ? { network: { id: network.id, count: network.nodeKeys.length,
         energyJ: network.nodeKeys.reduce((sum, key) => sum + (this.wayworks.get(key)?.energyJ ?? 0), 0),
         capacityJ: network.capacityJ, revision: this.wayworksTopologyRevision } } : {}) };
@@ -12979,6 +13024,7 @@ export class VoxelEngine {
   }
 
   private initializePressure(saved?: PressureSave) {
+    this.guestPressureInspector = null; this.guestPressureInspectorSequence = -1;
     if (this.pressureEditObserver) this.world.blockEditObservers.delete(this.pressureEditObserver);
     this.pressureRuntime?.dispose(); this.pressureRuntime = null;
     this.pressureStructures.clear();
@@ -13015,7 +13061,7 @@ export class VoxelEngine {
           occupants.push({ id: `player:${id}`, kind: "player", point: p, oxygenMilliMoles: use, co2MilliMoles: use });
         }
         for (const mob of this.mobs) if (mob.health > 0 && mob.definition.movement !== "aquatic") {
-          const use = mob.definition.height > 2 ? 6 : 2;
+          const use = habitatOccupantOxygenDemand(mob.definition);
           occupants.push({ id: `creature:${mob.id}`, kind: mob.profession ? "npc" : "creature", point: point(mob.group.position.x, mob.group.position.y + .5, mob.group.position.z), oxygenMilliMoles: use, co2MilliMoles: use });
         }
         return occupants;
@@ -13371,6 +13417,7 @@ export class VoxelEngine {
       this.activeChestKey = null;
     }
     const sharedFacility = this.activeSharedFacility();
+    this.guestPressureInspector = null;
     this.activeNetworkFacilityId = sharedFacility?.id ?? null;
     if (sharedFacility && this.multiplayer?.role === "guest") {
       this.multiplayerFacilitySignatures.delete(sharedFacility.id);
@@ -13383,6 +13430,7 @@ export class VoxelEngine {
   }
 
   closeContainer() {
+    this.guestPressureInspector = null;
     const closingChest = this.activeNetworkContainerId;
     const guestSharedContainer = Boolean(closingChest && this.multiplayer?.role === "guest"
       && this.multiplayerOptimisticContainers?.has(closingChest));
@@ -27110,6 +27158,7 @@ export class VoxelEngine {
   serializeCreature(mob: MobEntity): SavedCreature {
     return {
       id: mob.id,
+      ...(normalizeHabitatExposure(mob.habitatExposureSeconds) > 0 ? { habitatExposureSeconds: normalizeHabitatExposure(mob.habitatExposureSeconds) } : {}),
       ...(this.celestialCreatureVelocity?.has(mob.id) ? { celestialVelocity: this.celestialCreatureVelocity.get(mob.id)!.toArray() as [number, number, number] } : {}),
       specimenId: mob.specimenId,
       kind: mob.kind,
@@ -27208,7 +27257,7 @@ export class VoxelEngine {
       this.celestialCreatureVelocity ??= new Map();
       this.celestialCreatureVelocity.set(saved.id, new THREE.Vector3().fromArray(saved.celestialVelocity));
     }
-    return this.spawnMob(migrated.kind, position, {
+    const restored = this.spawnMob(migrated.kind, position, {
       id: migrated.id,
       specimenId: migrated.specimenId ?? null,
       health: Math.max(0.1, Number(migrated.health) || MOB_DEFS[migrated.kind].health),
@@ -27265,6 +27314,8 @@ export class VoxelEngine {
       creatureOwnerId: migrated.creatureOwnerId ?? null,
       creatureTamed: Boolean(migrated.creatureTamed),
     });
+    if (restored) restored.habitatExposureSeconds = normalizeHabitatExposure(migrated.habitatExposureSeconds);
+    return restored;
   }
 
   isMobEnclosed(mob: MobEntity) {
@@ -29932,7 +29983,32 @@ export class VoxelEngine {
     }
   }
 
+  private updateHabitatOccupantHealth(dt: number) {
+    if (this.multiplayer?.role === "guest" || !this.pressureRuntime) return;
+    // Run before simulation-tier and zero-gravity shortcuts: room consumption
+    // already includes every loaded occupant, even distant or mounted ones.
+    for (const mob of [...this.mobs]) {
+      if (mob.health <= 0) continue;
+      const point = { x: Math.floor(mob.group.position.x + .5), y: Math.floor(mob.group.position.y + 1), z: Math.floor(mob.group.position.z + .5) };
+      const result = stepHabitatOccupantExposure({ definition: mob.definition, exposureSeconds: mob.habitatExposureSeconds,
+        elapsedSeconds: dt, zone: this.pressureRuntime.zoneAt(point), isHost: true });
+      if (result.exposureSeconds !== (mob.habitatExposureSeconds ?? 0)) {
+        mob.habitatExposureSeconds = result.exposureSeconds;
+        this.markPersistenceDirty();
+      }
+      if (result.damage <= 0) continue;
+      this.applyCombatDamageToMob(mob, result.damage, { kind: "environment", id: "habitat-atmosphere" },
+        { effectId: "habitat-exposure", attackType: "neutral" });
+      this.markPersistenceDirty();
+      mob.hurtTimer = Math.max(mob.hurtTimer, .12);
+      if (mob.dragonState) this.applyDragonState(mob, { ...mob.dragonState, health: Math.max(0, mob.health), alive: mob.health > 0 });
+      if (mob.petState) mob.petState.health = Math.max(0, mob.health);
+      if (mob.health <= 0) this.killMob(mob);
+    }
+  }
+
   updateMobs(dt: number) {
+    this.updateHabitatOccupantHealth(dt);
     if (this.bodyContext().environment.gravityG === 0) { this.updateCelestialCreatureMotion(dt, true); return; }
     this.updateTemporaryMagic();
     this.updateCapturePacification(dt);

@@ -133,6 +133,24 @@ test("finite runtime supply consumes pure gas and electricity, retaining subquan
   } finally { f.runtime.dispose(); }
 });
 
+test("airlock linking rejects aliased hardware and samples before changing any owner", () => {
+  const f = fixture(); try {
+    const control = "3,2,6", pump = "4,2,5";
+    f.add(control, "airlock-controller"); f.add(pump, "recovery-pump"); f.settle();
+    assert.equal(f.act(control, { kind: "link", role: "pump", target: pump }).ok, true);
+    assert.equal(f.act(control, { kind: "link", role: "chamber", target: "3,2,4" }).ok, true);
+    const before = f.runtime.snapshot(), machine = structuredClone(f.machines.get(control));
+    for (const action of [
+      { kind: "link", role: "reserve", target: pump },
+      { kind: "link", role: "interior", target: "3,2,4" },
+      { kind: "link", role: "inner", target: control },
+    ] as const) {
+      const result = f.act(control, action); assert.equal(result.ok, false);
+      assert.deepEqual(f.runtime.snapshot(), before); assert.deepEqual(f.machines.get(control), machine);
+    }
+  } finally { f.runtime.dispose(); }
+});
+
 test("runtime recovery capture and release preserve species and heat and stop when power is empty", () => {
   const f = fixture(); try {
     const pump = "5,2,5"; f.add(pump, "recovery-pump"); f.settle();
@@ -242,6 +260,42 @@ test("runtime airlock captures finite chamber gas before opening and faults on r
     f.add(f.pump, "recovery-pump"); f.frame(.2);
     assert.equal(f.runtime.devices.get(f.airlock)!.airlock!.error, "broken-link");
     assert.equal(f.runtime.devices.get(f.outer)!.open, false);
+  } finally { f.runtime.dispose(); }
+});
+
+test("disabled or signal-gated airlock cannot spend its stored charge on an automatic cycle", () => {
+  for (const disabled of [true, false]) {
+    const f = airlockFixture(); try {
+      const machine = f.machines.get(f.airlock)!;
+      if (disabled) machine.enabled = false;
+      else { machine.workshop.control = "signal-on"; machine.workshop.signal = false; }
+      const before = machine.energyJ;
+      f.act(f.airlock, { kind: "cycle", command: "cycle-out" });
+      assert.equal(f.runtime.devices.get(f.airlock)!.airlock!.error, "power-failure");
+      assert.equal(f.machines.get(f.airlock)!.energyJ, before);
+      assert.equal(f.runtime.devices.get(f.outer)!.open, false);
+      assert.equal(f.runtime.devices.get("4,2,3")!.open, false);
+    } finally { f.runtime.dispose(); }
+  }
+});
+
+test("one paused continuous manual hold opens once and cannot retrigger during its topology recheck", () => {
+  const f = airlockFixture(); try {
+    // Both sides are checked vacuum: safe manual crank needs no power.
+    f.machines.get(f.airlock)!.energyJ = 0;
+    const send = (now: number, active: boolean) => f.runtime.operate(f.airlock, "owner", Item.FieldWrench,
+      f.machines.get(f.airlock)!.revision, { kind: "hold", command: "manual-open-inner", active }, now);
+    for (let now = 1000; now <= 9800; now += 200) {
+      assert.equal(send(now, true).ok, true); f.runtime.update(0, now); f.worker.flush();
+      if (now < 9000) assert.equal(f.runtime.devices.get("4,2,3")!.open, false);
+    }
+    assert.equal(f.runtime.devices.get("4,2,3")!.open, true);
+    assert.equal(f.runtime.devices.get(f.airlock)!.airlock!.error, null);
+    assert.equal(f.runtime.devices.get(f.airlock)!.airlock!.manualDwellMs, 10000);
+    const sequence = f.runtime.devices.get(f.airlock)!.airlock!.sequence;
+    send(10000, true); f.runtime.update(0, 10000); f.worker.flush();
+    assert.equal(f.runtime.devices.get(f.airlock)!.airlock!.sequence, sequence);
+    assert.equal(send(10010, false).ok, true);
   } finally { f.runtime.dispose(); }
 });
 

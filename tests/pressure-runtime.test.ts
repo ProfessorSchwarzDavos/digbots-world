@@ -292,6 +292,30 @@ test("runtime airlock captures finite chamber gas before opening and faults on r
   } finally { f.runtime.dispose(); }
 });
 
+test("cold active recovery waits for fresh worker topology without spending or losing gas", () => {
+  const f = airlockFixture();
+  let resumed: ReturnType<typeof fixture> | undefined;
+  try {
+    const initial = resources(f.gas(10000, { x: 5, y: 2, z: 3 }));
+    assert.equal(f.act(f.airlock, { kind: "cycle", command: "cycle-out" }).ok, true);
+    for (let i = 0; i < 5; i++) f.frame(.2);
+    assert.equal(f.runtime.devices.get(f.airlock)!.airlock!.phase, "equalize/recover-to-exterior-target");
+    const saved = structuredClone(f.runtime.snapshot()), machines = structuredClone(f.machines);
+    const charge = machines.get(f.airlock)!.energyJ;
+    resumed = fixture(saved, machines);
+    resumed.blocks.clear();
+    for (const [key, block] of f.blocks) resumed.blocks.set(key, block);
+    resumed.frame(.2);
+    assert.equal(resumed.runtime.devices.get(f.airlock)!.airlock!.error, null);
+    assert.equal(machines.get(f.airlock)!.energyJ, charge);
+    assert.equal(resumed.runtime.devices.get(f.outer)!.open, false);
+    for (let i = 0; i < 60 && !resumed.runtime.devices.get(f.outer)!.open; i++) resumed.frame(.2);
+    assert.equal(resumed.runtime.devices.get(f.airlock)!.airlock!.phase, "occupied-open-outer");
+    assert.deepEqual(machines.get(f.reserve)!.workshop.process!.airReserve, initial);
+    assert.equal(totalAirGas(resumed.runtime.zoneAt({ x: 5, y: 2, z: 3 })!), 0);
+  } finally { resumed?.runtime.dispose(); f.runtime.dispose(); }
+});
+
 test("disabled or signal-gated airlock cannot spend its stored charge on an automatic cycle", () => {
   for (const disabled of [true, false]) {
     const f = airlockFixture(); try {

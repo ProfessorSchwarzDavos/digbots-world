@@ -1706,3 +1706,16 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   then passed after separating frame validity from independent safety locks.
   Build-r3 was intentionally interrupted before source edits; partial output
   retained and no successful-build claim. Fresh isolated candidate follows.
+
+- At02:10UTC normal browser-r5 on c58f5ad completed finite water electrolysis,
+  separate filtered O2/H2 storage, twenty1L oxygen transfers into life support,
+  controlled wall mining/repair, healthy helmet removal and finite CO2 scrubbing.
+  Sensor threshold changes toggled its own and an owned receiver's signals.
+- Saving during airlock recovery exposed a cold-start integration defect:
+  checking topology immediately faulted an otherwise valid saved phase. The
+  actual-runtime regression failed red. Closed phases now wait only when every
+  linked room is known or actively checking; no opening/transfer/energy spend,
+  existing phase deadlines advance, and unknown/power/binding failures still
+  fault. Cold-recovery-r2 42/42 and integrated focused-r11 243/243 pass; static-r19
+  and lint-r8 pass. Fresh build and browser replay of the retained active-cycle
+  save remain required.

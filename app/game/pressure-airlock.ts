@@ -47,6 +47,9 @@ export interface AirlockState {
 export interface AirlockObservation {
   linksIntact: boolean;
   topologyCurrent: boolean;
+  /** All linked rooms are known or actively checking, never unloaded/unknown.
+   * Closed phases may wait within their existing deadline without transferring. */
+  topologyChecking: boolean;
   powerAvailableJ: number;
   chamberPressurePa: number;
   interiorPressurePa: number;
@@ -117,7 +120,7 @@ export function parseAirlockCommand(value: unknown): AirlockCommand | null {
 }
 export function parseAirlockObservation(value: unknown): AirlockObservation | null {
   if (!record(value)) return null;
-  const bools = ["linksIntact", "topologyCurrent", "innerDoorOpen", "outerDoorOpen",
+  const bools = ["linksIntact", "topologyCurrent", "topologyChecking", "innerDoorOpen", "outerDoorOpen",
     "innerDoorObstructed", "outerDoorObstructed"] as const;
   const ints = ["powerAvailableJ", "chamberPressurePa", "interiorPressurePa", "exteriorPressurePa",
     "occupants", "recoveryRequiredMmol", "reserveRoomMmol", "hostValidatedHeldMs"] as const;
@@ -236,7 +239,8 @@ export function stepAirlock(input: AirlockState, observation: AirlockObservation
   const obs = parseAirlockObservation(observation);
   if (!obs) return fault(state, "invalid-observation");
   const openDwell = state.phase === "idle-inner-safe" && obs.innerDoorOpen || state.phase === "occupied-open-outer" && obs.outerDoorOpen;
-  const error = health(state, obs, openDwell || ["seal-inner", "seal-outer", "verify-chamber-topology", "fault"].includes(state.phase));
+  const closedChecking = obs.topologyChecking && !obs.topologyCurrent && !obs.innerDoorOpen && !obs.outerDoorOpen;
+  const error = health(state, obs, closedChecking || openDwell || ["seal-inner", "seal-outer", "verify-chamber-topology", "fault"].includes(state.phase));
   if (error) return fault(state, error);
   const links = state.links!;
   if (state.phase === "fault") return commit(state, state, closed(links));
@@ -254,6 +258,10 @@ export function stepAirlock(input: AirlockState, observation: AirlockObservation
   // a bounded two-minute allowance rather than an impossible thirty seconds.
   const timeout = ["occupied-open-outer", "equalize/recover-to-exterior-target", "equalize-to-interior-target"].includes(state.phase) ? AIRLOCK_OPEN_TIMEOUT_MS : AIRLOCK_PHASE_TIMEOUT_MS;
   if (state.phase !== "idle-inner-safe" && state.phaseElapsedMs >= timeout) return fault(state, "phase-timeout");
+  // Cold reload and structural edits rebuild the ephemeral graph. Keep the
+  // saved phase, gas and energy while its closed rooms are being rediscovered;
+  // unknown results still fault, and the active phase deadline still advances.
+  if (closedChecking) return commit(state, state, closed(links));
   if (state.phase === "idle-inner-safe") {
     if (obs.outerDoorOpen) return fault(state, "both-doors-open");
     if (obs.topologyCurrent && obs.innerDoorOpen && delta(obs, false) > AIRLOCK_SAFE_DELTA_PA) return fault(state, "unsafe-differential");

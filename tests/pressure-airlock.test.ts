@@ -13,7 +13,7 @@ const links: AirlockLinks = { controllerKey: "0,1,0", innerDoorKey: "1,1,0", out
   chamberZoneId: "2,1,0", interiorZoneId: "0,1,1", exteriorZoneId: "exterior",
   recoveryPumpKey: "3,1,0", reserveKey: "3,0,0" };
 function observe(extra: Partial<AirlockObservation> = {}): AirlockObservation {
-  return { linksIntact: true, topologyCurrent: true, powerAvailableJ: 1_000,
+  return { linksIntact: true, topologyCurrent: true, topologyChecking: false, powerAvailableJ: 1_000,
     chamberPressurePa: 100_000, interiorPressurePa: 100_000, exteriorPressurePa: 0,
     innerDoorOpen: false, outerDoorOpen: false, innerDoorObstructed: false, outerDoorObstructed: false,
     occupants: 1, recoveryRequiredMmol: 10_000, reserveRoomMmol: 20_000, hostValidatedHeldMs: 0, ...extra };
@@ -101,6 +101,21 @@ test("every canonical phase retains exact sequence, clocks and next output after
       recoveryRequiredMmol: phase === "unlock-outer" ? 0 : 10_000,
       outerDoorOpen: phase === "occupied-open-outer" });
     assert.deepEqual(stepAirlock(saved, obs, 200), stepAirlock(state, obs, 200), phase);
+  }
+});
+
+test("closed recovery and unlocking wait for checking, never unknown, with unchanged resources and bounded clocks", () => {
+  for (const phase of ["equalize/recover-to-exterior-target", "equalize-to-interior-target", "unlock-inner", "unlock-outer"] as const) {
+    const state = cold({ ...at(phase), cycleElapsedMs: 1200, phaseElapsedMs: 1200 });
+    const waiting = stepAirlock(state, observe({ topologyCurrent: false, topologyChecking: true }), 200);
+    assert.equal(waiting.state.phase, phase); assert.equal(waiting.state.error, null);
+    assert.equal(waiting.energyCostJ, 0); assert.equal(waiting.state.phaseElapsedMs, 1400);
+    assert.deepEqual(waiting.commands.map(effect => effect.kind), ["close-door", "lock-door", "close-door", "lock-door"]);
+    assert.equal(stepAirlock(state, observe({ topologyCurrent: false }), 200).state.error, "topology-stale");
+    assert.equal(stepAirlock(state, observe({ topologyCurrent: false, topologyChecking: true, powerAvailableJ: 0 }), 200).state.error, "power-failure");
+    const timeout = phase.startsWith("equalize") ? 120000 : 30000;
+    assert.equal(stepAirlock({ ...state, cycleElapsedMs: timeout, phaseElapsedMs: timeout },
+      observe({ topologyCurrent: false, topologyChecking: true }), 200).state.error, "phase-timeout");
   }
 });
 

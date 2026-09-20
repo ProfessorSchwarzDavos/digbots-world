@@ -218,10 +218,13 @@ export class PressureRuntime {
     const reserve = links ? this.host.machines.get(links.reserveKey) : undefined;
     const bound = Object.entries(device.bindings).every(([point, id]) => this.host.machines.get(point)?.workshop.process?.installationId === id);
     const good = (zone: AirZoneState | undefined) => !!zone && ["sealed", "depressurized", "leaking"].includes(zone.status);
+    const required = [chamber, interior, ...(links?.exteriorZoneId === "exterior" ? [] : [exterior]),
+      device.links.vent ? this.zoneAt(this.roomPoint(device.links.vent)) : undefined];
     return { linksIntact: !!links && bound && !!this.devices.get(links.innerDoorKey) && !!this.devices.get(links.outerDoorKey)
       && this.host.machines.get(links.recoveryPumpKey)?.kind === "recovery-pump" && !!reserve?.workshop.process && this.chamberVentIntact(device),
       topologyCurrent: good(chamber) && good(interior) && (links?.exteriorZoneId === "exterior" || good(exterior))
         && !!device.links.vent && this.zoneAt(this.roomPoint(device.links.vent))?.zoneId === chamber?.zoneId,
+      topologyChecking: required.every(zone => good(zone) || zone?.status === "checking") && required.some(zone => zone?.status === "checking"),
       powerAvailableJ: machine.enabled && workshopRunning(machine.workshop) ? machine.energyJ : 0,
       chamberPressurePa: chamber?.pressureMilliKPa ?? 0, interiorPressurePa: interior?.pressureMilliKPa ?? 0, exteriorPressurePa: outsidePa,
       innerDoorOpen: !!this.devices.get(links?.innerDoorKey ?? "")?.open, outerDoorOpen: !!this.devices.get(links?.outerDoorKey ?? "")?.open,

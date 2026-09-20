@@ -4,6 +4,13 @@ CF5 development reference. Implementation is local; integrated browser acceptanc
 is tracked in `work/celestial-frontiers-ts-20260918/CF5/PLAN.md`. This document is
 not a release or full-campaign completion claim.
 
+On cold reload, closed airlock phases retain their saved progress while known
+rooms are actively being rechecked. Both doors stay locked, no gas or energy is
+spent, and the existing phase deadline continues. A fresh valid result resumes
+the phase; an unknown room, broken binding, power failure or timeout still
+faults closed. Starting a new cycle or a manual hold always requires current
+topology.
+
 ## Build and operate
 
 Use a crafting table and the recipe guide. Ceramic Membranes use fired clay,

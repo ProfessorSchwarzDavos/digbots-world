@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { BlockId, Item } from "../app/game/data";
+import { BlockId } from "../app/game/data";
 import { hasSpaceflightIcon, SpaceflightIcon } from "../app/game/spaceflight-icons";
 import { hasWayworksIcon, WayworksIcon } from "../app/game/wayworks-ui";
 import { SpaceflightDialog } from "../app/game/SpaceflightPanel";

@@ -71,6 +71,7 @@ export function WayworksPanel(props: WayworksPanelProps) {
   const supported = supportedWorkshopUpgrades(kind as MachineKind);
   const moduleKinds = UPGRADE_KINDS.filter(upgrade => supported.includes(upgrade) || workshop.upgrades[upgrade] > 0);
   const passiveTank = kind === "fluid-tank" || kind === "gas-tank";
+  const thermalLimitKw = (props.radiatorBoundary === "exterior" ? 8 : props.radiatorBoundary === "room" ? 2 : 0) * (1 + workshop.upgrades.thermal);
   const statusLabels: Record<string, string> = { idle: "Idle", disabled: "Disabled", "no-power": "Waiting for power", "no-input": kind === "station-radiator" ? "No stored heat to reject" : "Waiting for ingredients", "no-fuel": kind === "heat-engine" ? "Waiting for fuel or supplied heat" : "Waiting for fuel",
     "output-blocked": "Output full or incompatible", "no-water": kind === "waterwheel-generator" ? "Needs flowing water beside the wheel" : "Needs a water source directly below", "no-sun": "No sunlight reaching panel", "no-wind": "No usable wind / rotor obstructed",
     "control-off": "Stopped by control signal", "heat-limited": kind === "station-radiator" ? "Thermal boundary unverified; heat retained" : "Cooling before next cycle", "buffer-full": "Storage full", working: kind === "station-radiator" ? "Rejecting stored heat" : "Processing", generating: "Generating power", transferring: "Transferring power" };
@@ -133,7 +134,11 @@ export function WayworksPanel(props: WayworksPanelProps) {
           {!passiveTank && <><dl className="ww-readings">
             <div><dt>Stored energy</dt><dd>{reading(energyJ, 1_000)} <span>kJ</span></dd></div>
             <div><dt>Capacity</dt><dd>{reading(capacityJ, 1_000)} <span>kJ</span></dd></div>
-            <div><dt>Power rate</dt><dd>{reading(rateW)} <span>W</span></dd></div>
+            <div><dt>{kind === "station-radiator" ? "Electrical port limit" : "Power rate"}</dt><dd>{reading(rateW)} <span>W</span></dd></div>
+            {kind === "station-radiator" && <>
+              <div><dt>Stored heat</dt><dd>{reading(workshop.heatJ, 1_000)} <span>kJ</span></dd></div>
+              <div><dt>Thermal limit</dt><dd>{reading(thermalLimitKw)} <span>kW</span></dd></div>
+            </>}
           </dl>
           <div className="ww-gauge" role="meter" aria-label="Stored energy" aria-valuemin={0} aria-valuemax={100} aria-valuenow={fill} aria-valuetext={validGauge ? `${reading(energyJ, 1_000)} of ${reading(capacityJ, 1_000)} kJ` : "Storage gauge unavailable"}>
             <span className="ww-gauge-fill" style={{ width: `${fill}%` }} />

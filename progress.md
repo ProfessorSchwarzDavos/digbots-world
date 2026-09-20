@@ -2,6 +2,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — station kit integration
 
+- Browser-r1 crafted/placed all four parts from finite raw inputs, measured a
+  breathable142m3 room, exhausted/recharged a paid observatory, and transferred
+  the radiator's finite40kJ into the room. Disable retained33650J; reenable
+  exhausted it without electrical/coolant consumption. Saved173 is retained.
+- Actual seating exposed a collision trap: the bench's seated feet lay inside
+  its half-height box. Red engine regression reproduced it; bench now follows
+  ordinary non-solid stool policy, retaining explicit zero sealing. Radiator
+  stored heat/thermal limit and chart layout/selected-hover contrast corrected.
+  Focused rerun and corrected-build cold replay pending; no eclipse claim.
+
 - Added append-only craftable station hull/bulkhead/bench/greenhouse (708–711),
   authored held/world/icon presentation and usable seating. Sealed panels use
   ordinary culled chunk meshes; open furnishings use bounded scene models.

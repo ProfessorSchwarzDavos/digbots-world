@@ -18,10 +18,11 @@ const chartCss = `
 .celestial-chart header,.celestial-chart-controls { display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; }
 .celestial-chart-controls { justify-content:flex-start; margin:12px 0; }
 .celestial-chart button { font:inherit; white-space:normal; min-height:44px; max-width:100%; padding:9px 13px; border:1px solid #58766e; border-radius:4px; background:#f7f1df; color:#245c50; cursor:pointer; transition:background-color 120ms ease; }
-.celestial-chart button:hover { background:#dedbc4; }
+.celestial-chart button:hover:not(:disabled) { background:#dedbc4; color:#245c50; }
 .celestial-chart button[aria-pressed=true] { background:#245c50; color:#fff8e6; }
+.celestial-chart button[aria-pressed=true]:hover:not(:disabled) { background:#1b493e; color:#fff8e6; }
 .celestial-chart button:focus-visible { outline:3px solid #7c421e; outline-offset:3px; }
-.celestial-chart-layout { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr)); gap:18px; align-items:start; }
+.celestial-chart-layout { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr)); gap:18px; align-items:start; }
 .celestial-chart figure { margin:0; min-width:0; }
 .celestial-chart svg { width:100%; height:auto; display:block; background:#253e39; border-radius:4px; }
 .celestial-chart figcaption,.celestial-chart-note { font-size:12px; color:#5c5947; margin-top:8px; }

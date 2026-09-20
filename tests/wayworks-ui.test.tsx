@@ -25,6 +25,19 @@ const base: WayworksPanelProps = {
 };
 const render = (overrides: Partial<WayworksPanelProps> = {}) => renderToStaticMarkup(createElement(WayworksPanel, { ...base, ...overrides }));
 
+test("radiator separates finite heat, boundary capacity and electrical port limits", () => {
+  const machine = createMachine("station-radiator", "L", "local");
+  machine.workshop!.heatJ = 33650;
+  machine.workshop!.upgrades.thermal = 1;
+  const html = render({ ...machine, radiatorBoundary: "room" });
+  assert.match(html, /Stored heat<\/dt><dd>33\.65 <span>kJ/);
+  assert.match(html, /Thermal limit<\/dt><dd>4 <span>kW/);
+  assert.match(html, /Electrical port limit/);
+  assert.doesNotMatch(html, /Power rate/);
+  assert.match(render({ ...machine, radiatorBoundary: "exterior" }), /Thermal limit<\/dt><dd>16 <span>kW/);
+  assert.match(render({ ...machine, radiatorBoundary: "unknown" }), /Thermal limit<\/dt><dd>0 <span>kW/);
+});
+
 test("pressure-only station service hides inventory, reservoirs and general configuration controls", () => {
   const machine = createMachine("life-support-controller", "L", "local");
   const html = render({ ...machine, pressureOnly: true });

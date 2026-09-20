@@ -22,6 +22,20 @@ function fixture(item: ItemCode, target = [10, 34, 1], player = [10, 32.5, 1]) {
   return { engine, writes, messages, cells };
 }
 
+test("habitation seating and standing never embed the player in a collision box", () => {
+  const f = fixture(BlockId.StationHull, [5, 35, 5], [4, 32.51, 6]);
+  f.cells.set("4,33,4", BlockId.StationHabitation);
+  Object.assign(f.engine, { velocity: new THREE.Vector3(), audio: { play: () => {} } });
+  assert.equal(f.engine.toggleSeat(4, 33, 4, BlockId.StationHabitation), true);
+  assert.deepEqual(f.engine.position.toArray(), [4, 32.51, 4]);
+  assert.equal(f.engine.collidesAt(f.engine.position), false, "seated pose must also be safe to persist and reload");
+  f.engine.leaveSeat();
+  assert.equal(f.engine.collidesAt(f.engine.position, 1.8), false, "standing cannot be trapped inside the bench");
+  for (const z of [4, 4.1, 4.3, 4.6, 5]) assert.equal(f.engine.collidesAt(new THREE.Vector3(4, 32.51, z), 1.8), false);
+  assert.equal(f.engine.collidesAt(f.engine.position, 1.8, [{ x: 5, y: 35, z: 5, type: BlockId.StationHull }]), false,
+    "an unrelated overhead placement is not rejected by the existing seat");
+});
+
 test("rejected occupied collar never writes transient topology, facing, or air rollback", () => {
   const f = fixture(BlockId.OrbitalDock), before = structuredClone(f.engine.inventory);
   assert.equal(f.engine.collidesAt(f.engine.position), false, "the unchanged room is clear");

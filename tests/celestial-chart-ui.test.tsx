@@ -23,7 +23,8 @@ test("SSR chart exposes named native keyboard controls and accessible chart/list
   assert.match(html, /Current location: Blockwild/);
   assert.match(html, /Blockwild · You are here/);
   assert.match(html, /focus-visible/);
-  assert.match(html, /minmax\(min\(100%,250px\),1fr\)/);
+  assert.match(html, /minmax\(min\(100%,230px\),1fr\)/);
+  assert.match(html, /button\[aria-pressed=true\]:hover:not\(:disabled\) \{ background:#1b493e; color:#fff8e6;/);
   assert.match(html, /max-width:480px/);
 });
 

@@ -1199,7 +1199,9 @@ export const BLOCKS: Record<number, BlockDefinition> = {
   ...Object.fromEntries(Object.values(PRESSURE_CATALOG).map(def => [def.id, block(def.id, def.name, 40, 40, 40, 3, def.color, "pickaxe", 1, { layer: "none", shape: "wayworks" })])),
   ...Object.fromEntries(Object.values(SPACEFLIGHT_CATALOG).map(def => [def.id, block(def.id, def.name, 40, 40, 40, 4, def.color, "pickaxe", 1, { layer: "none", shape: "wayworks" })])),
   ...Object.fromEntries(Object.values(STATION_STRUCTURE_CATALOG).map(def => [def.id, block(def.id, def.name, 40, 40, 40, 3, def.color, "pickaxe", 1,
-    { layer: def.sealMask === 63 ? "opaque" : "none", shape: def.sealMask === 63 ? "cube" : "wayworks", lightDampening: def.sealMask === 63 ? 15 : 0, ...(def.sealMask === 0 ? { collisionHeight: .5 } : {}) })])),
+    // Like ordinary stools, a bench's seated feet occupy its cell. It must not
+    // trap standing players or make a saved seated pose collide on cold load.
+    { solid: def.id !== BlockId.StationHabitation, layer: def.sealMask === 63 ? "opaque" : "none", shape: def.sealMask === 63 ? "cube" : "wayworks", lightDampening: def.sealMask === 63 ? 15 : 0, ...(def.sealMask === 0 ? { collisionHeight: .5 } : {}) })])),
   [BlockId.PaleRegolith]: block(BlockId.PaleRegolith, "Pale Regolith", 9, 9, 9, 1.2, "#b5bbb0", "shovel", 0),
   [BlockId.MineralFrost]: block(BlockId.MineralFrost, "Mineral Frost", 21, 21, 21, 1.5, "#a8dbd0", "pickaxe", 0),
   [BlockId.ReinforcedWindow]: block(BlockId.ReinforcedWindow, "Reinforced Window", 12, 12, 12, 3, "#b4d9d5", "pickaxe", 1, { layer: "none", shape: "wayworks" }),

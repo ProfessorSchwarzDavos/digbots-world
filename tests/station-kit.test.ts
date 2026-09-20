@@ -30,7 +30,7 @@ test("collision and airtightness are separate explicit station contracts", () =>
     assert.equal(stationSealMask(id), 63); assert.equal(BLOCKS[id].solid, true);
   }
   for (const id of [BlockId.StationHabitation, BlockId.StationGreenhouse, ...Object.values(SPACEFLIGHT_CATALOG).map(def => def.id)]) {
-    assert.equal(stationSealMask(id), 0); assert.equal(BLOCKS[id as BlockId].solid, true);
+    assert.equal(stationSealMask(id), 0); assert.equal(BLOCKS[id as BlockId].solid, id !== BlockId.StationHabitation);
   }
   for (const id of [BlockId.StoneBrick, BlockId.ReinforcedWindow, BlockId.PressureDoor, BlockId.Air]) assert.equal(stationSealMask(id), undefined);
 });

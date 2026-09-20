@@ -74,6 +74,11 @@ catalog. It does not authorize travel, discover new worlds or estimate routes.
 
 ## Current boundaries
 
+Habitation benches use the ordinary non-solid seating policy: the seated pose
+occupies the furniture cell without trapping a standing player or colliding on
+reload. A bench is not a pressure wall. Radiator thermal limits describe boundary
+capacity, not guaranteed instantaneous output; the visible stored heat is finite.
+
 Association selection records policy; it does not prove membership. Remote faction
 and guild membership remains fail-closed until authenticated host membership is
 connected. Station-only mutations currently require the universe host; full typed

@@ -97,5 +97,12 @@ global pressure counter and boundary ledger. The planned canonical metadata owne
 is per orbit field, with transient bounded asteroid views; station history must
 not be split or reset to manufacture a local registry. These pure merges still
 require the host's revision/lease and an atomic resource transaction.
+The station view prerequisite is intentionally not a save registry: it has no
+action journal. Rename, access and habitat proposals return to the canonical
+permission/replay authority. Whole claims, collars, approach volumes and linked
+rooms/anchors must fit; physical placement/docking and fleet-view integration
+remain separate unfinished adapters. Voxel prerequisites translate chunk/index
+edits and remove finite-page mirrors only after exact canonical readback. No
+normal checkpoint uses these new mirror-removal helpers yet.
 The remaining single-owner catalog, complete physical/component selector, atomic
 storage integration and ordinary travel evidence are required before entry opens.

@@ -2,6 +2,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Station/voxel attachment prerequisites pass combined136 tests (owner-r5).
+  Station read models are not persisted registries; metadata proposals use the
+  original canonical permissions/replay history, including occupied-dock cargo
+  custody. Whole claims/collars/approaches and room/anchor references are checked.
+  Retained boundary-r1 red exposed a diagonal outside-approach overlap; full-volume
+  intersection replaces the corner-only test. Voxel chunk/index projection and
+  merge preserve outside edits; finite ore mirrors strip only after canonical
+  page readback and reconstruct on cold projection. Static71 test tuple inference
+  error retained and explicitly annotated; static72/lint55PASS. No engine/storage/travel integration
+  or production/runtime acceptance is claimed for these isolated prerequisites.
 - Attached block/pressure projection and merge primitives now retain outside
   components exactly, reject stale/cross-boundary/duplicate-identity state, and
   preserve one pressure counter/flux ledger with explicit gas+heat balances.

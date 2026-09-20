@@ -2,6 +2,19 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Final survey runtimeb3efd232f84865ac7d2f450668e6c53c6c3a46b1/build29
+  ABA8dhdUwNLNbrWF_dRlg passed committed79/static61/lint42-44, focusedUI19,
+  unchanged official29 and normal/cold custody-r1. Exact paused1000J debit/heat,
+  old60records retained in140, equipment/pose/othermachines exact; cold inventory,
+  fleet, inactiveguests/locations and field exact. Final desktop/mobile focus,
+  committed pause, depleted instrument and fresh cold images personally reviewed.
+  R2 retained one exact-Continue locator timeout (actual accessible name includes
+  world title); cold normal Continue and SaveQuit pass. First cold right-click
+  only acquired input, second opened the real inspector. No source workaround.
+  Both browser jobs and preview drained; Windows+WSL4338/4339 absent20:53UTC.
+  Official29 software9.3FPS is NOT performance acceptance. Pose-only synthetic
+  setup is not acquisition/EVA-return evidence. Frozen field-survey handoff
+  follows; attached local-frame travel/shared regeneration/fullCF6 remain open.
 - Survey3151163/build28 jMl6A6sS0jKlukMXr5-yx passed committed79/static61/lint43
   and unchanged official28. Normal keyboard UI survey60→140 asteroids passed
   boundary audit:1000J electricity→1000J heat, all other observed machines and

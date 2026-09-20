@@ -10,14 +10,26 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
  Full specimen metadata and budget-cost assertions retained, not dropped.
  Canonical fixture repair retains unchanged Home generation under distinct
  universes and uses blockwild/morrow for actual lunar transitions; red3/7 to13PASS.
- Integrated64PASS including final unnamed-owner guard; static-r30 PASS.
- Final lint and fresh isolated production/browser checks pending.
+ Integrated64PASS including final unnamed-owner guard; static-r30/lint-r19 PASS.
+ Runtime b121c16 isolated build-r12 SDNk794Q0RNnzEeCmWobL/official-r12 PASS.
+ Normal original138 copy SaveQuit14, Continue/unload19, pagecoldreload23,
+ finalSave33/close34: strict stable metadata for all16originals (includingpool),
+ exact fleet/inventory/edits/wayworks/facings, finite O2/scrubber and health10.
+ TargetMoon2,0 absent14 but persisted19 and33 withheight33; all5oldbelowworld
+ specimens ordinarilyregrounded. Final17includes1legalbirth; generatedcache
+ 276to256 with157oldkeysabsent is explicitly disposable, notallpreserved.
+ Three screenshots personallyreviewed; no capturedbrowsererrors. Testbrowser
+ andexactpreviewdrained. Recoveryevidence inCF6/r13-recovery, fullCF6unaccepted.
  Real IDB cache lifecycle PASS: automatic oldest-write-recency pruning to256,
  permitted266 between prune batches, clone-before-await and unload/commit/cold
  edited-voxel equality. Retained103missing keys are all oldest-prefix,93newv2;
  SaveQuit does not cache every still-loaded chunk. No cache source rewrite or
  manual delete; prior failed receipts/frozen originals unchanged. FullCF6 follows
- this safety checkpoint, not reduced to it. One fixture helper completed.
+ this safety checkpoint, not reduced to it. Fixture helper andreadonlystation
+ audit completed;0active. Nextindependentstationconsole/grants integration:
+ nearbyshipdependency andprematurecontainerpermissioncoupling documented.
+ Cross-taskprogressreport blockedbyappapproval; specificuserquestionpending,
+ no retry/workaround, localworkcontinues underunchangedauthority.
 
 ## Celestial Frontiers CF6 — revision12, first transaction checkpoint
 

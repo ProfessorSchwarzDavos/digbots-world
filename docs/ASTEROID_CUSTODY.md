@@ -25,6 +25,9 @@ without dropping or losing resources; metadata-bearing tomes cannot enter a shel
 schema that stores only book identities. Arbitrary unfunded after-images still
 fail closed. Multiplayer protocol5 rejects earlier clients before admission so
 expanded generation context cannot be silently ignored. All peers need this build.
+Bucket exchange updates the tracked liquid source together with the voxel: filling
+removes it, and pouring installs the matching source. This applies to local players
+and guest transactions; an old simulator record cannot recreate credited water.
 
 ## Persistence
 

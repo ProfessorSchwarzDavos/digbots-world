@@ -57,12 +57,23 @@ test("last hoe use breaks the tool and wrong held items cannot transform terrain
 });
 test("bucket fill and pour exchange exactly one vessel without mining loot", () => {
   const fill = fixture(Item.Bucket, BlockId.Water, 2);
+  fill.engine.liquidCells.set(key, { kind: "water", level: 0, source: true, falling: false });
   assert.equal(fill.run("bucket-fill", BlockId.Air).status, "accepted");
   assert.equal(fill.inventory()[0]!.count, 1); assert.equal(fill.inventory()[1]!.item, Item.WaterBucket);
   assert(fill.effects.includes("liquid")); assert(!fill.effects.includes("loot"));
+  assert.equal(fill.engine.liquidCells.has(key), false, "removed liquid source cannot remain authoritative in the simulator");
   const pour = fixture(Item.WaterBucket, BlockId.Stone);
   assert.equal(pour.run("bucket-pour", BlockId.Water, { ...point, y: 21 }).status, "accepted");
   assert.equal(pour.inventory()[0]!.item, Item.Bucket); assert.equal(pour.cells.get(key), BlockId.Stone);
+  assert.deepEqual(pour.engine.liquidCells.get("0,21,0"), { kind: "water", level: 0, source: true, falling: false });
+});
+test("shared local and guest bucket cell commit replaces old flow and clears filled sources", () => {
+  const f = fixture(Item.Bucket, BlockId.Water);
+  f.engine.liquidCells.set(key, { kind: "lava", level: 4, source: false, falling: true });
+  Reflect.get(f.engine, "commitBucketLiquidCell").call(f.engine, { ...point, type: BlockId.Water });
+  assert.deepEqual(f.engine.liquidCells.get(key), { kind: "water", level: 0, source: true, falling: false });
+  Reflect.get(f.engine, "commitBucketLiquidCell").call(f.engine, { ...point, type: BlockId.Air });
+  assert.equal(f.engine.liquidCells.has(key), false);
 });
 test("shelf insertion and removal transfer the actual host-owned tome", () => {
   const tome = SPELL_TOME_ITEMS[0], f = fixture(tome, BlockId.ArchiveShelf);

@@ -10273,7 +10273,7 @@ export class VoxelEngine {
           if (interaction.shelf) this.archiveShelves.set(interaction.key, interaction.shelf);
           const edit = action.edits[0];
           if (action.interaction?.kind === "plant") this.schedulePlantGrowth(edit.x, edit.y, edit.z, edit.type as BlockId);
-          if (action.interaction?.kind.startsWith("bucket-")) this.notifyLiquidChanged(edit.x, edit.y, edit.z);
+          if (action.interaction?.kind.startsWith("bucket-")) this.commitBucketLiquidCell(edit);
           this.sendAuthoritativePlayerState(peer.identity.id, action.requestId);
         }
         for (const edit of action.edits) {
@@ -10330,6 +10330,7 @@ export class VoxelEngine {
           { item: edit.type, count: 1 }, this.world.locationScope?.locationId ?? "home-preview", "local", edit.facing ?? 0));
         if (!kind && this.wayworks.has(key)) { this.wayworks.delete(key); this.clearWayworksModels(key); }
       }
+      if (action.status === "accepted" && action.interaction?.kind.startsWith("bucket-")) this.commitBucketLiquidCell(action.edits[0]);
       this.lightRefreshTimer = 0;
       if (action.status === "rejected" && action.reason) this.events.onToast(action.reason);
     }
@@ -16400,6 +16401,15 @@ export class VoxelEngine {
     return ITEMS[item]?.fuel ?? 0;
   }
 
+  /** Bucket exchange moves the source record with the visible voxel. A stale
+   * tracked source takes precedence over voxels in the liquid simulator. */
+  private commitBucketLiquidCell(edit: BlockAction["edits"][number]) {
+    const key = blockKey(edit.x, edit.y, edit.z), kind = liquidKindForBlock(edit.type as BlockId);
+    if (kind) this.liquidCells.set(key, { kind, level: 0, source: true, falling: false });
+    else this.liquidCells.delete(key);
+    this.notifyLiquidChanged(edit.x, edit.y, edit.z);
+  }
+
   notifyLiquidChanged(x: number, y: number, z: number) {
     // Several deterministic engine harnesses construct a deliberately partial
     // engine with Object.create. Keep block placement usable in those harnesses
@@ -20248,7 +20258,7 @@ export class VoxelEngine {
           if (this.requestGuestBlockInteraction(bucket.kind === "fill" ? "bucket-fill" : "bucket-pour", edit)) return;
           this.world.setBlock(edit.x, edit.y, edit.z, edit.type, true, true);
           this.publishBlockEdits([edit], bucket.kind === "fill" ? "break" : "place");
-          this.notifyLiquidChanged(edit.x, edit.y, edit.z);
+          this.commitBucketLiquidCell(edit);
           this.replaceSelectedUnit(bucket.resultItem);
           this.placeCooldown = 0.26;
           this.heldUse = 1;

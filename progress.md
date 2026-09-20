@@ -2,6 +2,13 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Typed guest runtime5020c6f's committed97PASS was followed by actual-handler
+  guest-liquid-red-r1 10PASS/1FAIL: a credited bucket fill left its tracked source.
+  Build25 intentionally stopped before acceptance; output/failure retained. Shared
+  local/host/guest source clear-rebind correction now passes111 focused/liquid
+  tests (guest-interactions-r4) and static56. Final lint38/commit/build26/browser
+  still pending. Synthetic multiplayer board/finite kit is explicitly disclosed;
+  it is not normal progression or resource acquisition evidence.
 - Generation checkpointc7793d accepted by Wildkeeper; frozen manifest1dc33745.
   Required guest-compatibility continuation now adds host-derived till/plant,
   bucket fill-pour and shelf insert-remove transactions; guest inputs no longer

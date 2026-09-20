@@ -1680,3 +1680,23 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
 - Remaining: rebuilt normal production/airlock/manual/breach/helmet/health,
   desktop/mobile review, representative coldreload, full criterion-level handoff
   and CF6 proposal. CF6 is not dispatched. Frozen CF4 evidence remains untouched.
+
+## CF5 control completion - 2026-09-20 01:27 UTC
+
+- Corrected source3fddf36 passed focused225/225, TypeScript, scopedlint and
+  isolated build-r2 (K4Ah0C7BL4uYTCwSGq-D8). Normal browser completed outbound
+  and return cycles, exact164119mmol recovery, power-loss reseal, cancelled2s
+  and successful8.6s manual crank, held dangerous decompression to6kPa, safe
+  helmet removal and coldreload. Desktop/390px screenshots personally readable.
+- Browser found a post-completion stale-revision toast; installation-bound live
+  hold continuation/release is corrected in current source, not yet rebuilt.
+- Masterplan completion adds finite vent mixture/capture/release/balance,
+  directional equalization pressure cap, sensor thresholds/signal/shutter,
+  mandatory chamber-vent binding and measured gas/pressure-operation power.
+  Helper focused46/46/static/lint passed; parent integrated checks pending.
+- Primary five-minute bounded topology integrity audit3/3passed. Its first test
+  incorrectly expected sealed status for low-pressure staged gas; corrected to
+  require unchanged status and retained the failed receipt.
+- Browser-r4 saved to title117, storage118 retained, context closed. Preview-r2
+  remains until next build. Normal chemistry/crafting/breach/unsafe health and
+  new controls still need browser coverage; no fullCF5/CFV completion claimed.

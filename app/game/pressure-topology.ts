@@ -7,11 +7,14 @@ export type PressureWorldView = {
   flagsAt(point: AirPoint): number | undefined;
   sectionLoaded(origin: AirPoint): boolean;
   annotations?(): readonly AirSnapshotCell[];
+  /** Drop derived world visibility caches before the infrequent integrity scan. */
+  beforeIntegrityAudit?(): void;
 };
 type Batch = { old: AirZoneState[]; seeds: Set<string>; seen: Set<string>; results: AirTopologyResult[];
   sections: Map<string, AirDenseSection>; build: Set<string>; seed: AirPoint | null; failed: boolean };
 const originOf = (point: AirPoint): AirPoint => ({ x: Math.floor(point.x / 16) * 16, y: Math.floor(point.y / 16) * 16, z: Math.floor(point.z / 16) * 16 });
 const DELTAS = { "+x": [1, 0, 0], "-x": [-1, 0, 0], "+y": [0, 1, 0], "-y": [0, -1, 0], "+z": [0, 0, 1], "-z": [0, 0, -1] } as const;
+export const PRESSURE_INTEGRITY_INTERVAL_MS = 300_000;
 
 /** Worker-owned traversal with bounded, incremental main-thread section copying.
  * Missing loaded sections are requested on demand, not silently treated as walls.
@@ -36,6 +39,8 @@ export class PressureTopology {
   private sourceSignature = "";
   private loadedSignature = "";
   private nowMs = 0;
+  private nextIntegrityAt: number | null = null;
+  private integritySections: string[] | null = null;
 
   constructor(readonly world: PressureWorldView, readonly locationId: string, readonly generation: number,
     readonly post: (message: AirZoneWorkerRequest) => void, saved: readonly unknown[] = []) {
@@ -62,6 +67,7 @@ export class PressureTopology {
     this.batch = null;
   }
   invalidate(point: AirPoint) {
+    this.integritySections = null;
     this.revision++; this.retire();
     const editedOrigin = originOf(point);
     // A roof edit changes exterior visibility down the whole section column.
@@ -78,6 +84,44 @@ export class PressureTopology {
       if (id && this.dirty.has(id) || diagnostic && airZoneIntersectsEdit(diagnostic, point)
         || Math.max(Math.abs(seed.x - point.x), Math.abs(seed.y - point.y), Math.abs(seed.z - point.z)) <= 1) this.pending.add(key);
     }
+  }
+  /** One cached section per idle frame, every five minutes. Compare before
+   * invalidating: unchanged rooms never flicker to checking or interrupt cycles.
+   * This is a bounded safety net for a missed edit event, not a per-tick fill. */
+  private auditIntegrity(nowMs: number) {
+    if (this.nextIntegrityAt === null) this.nextIntegrityAt = nowMs + PRESSURE_INTEGRITY_INTERVAL_MS;
+    if (!this.integritySections) {
+      if (nowMs < this.nextIntegrityAt) return;
+      this.nextIntegrityAt = nowMs + PRESSURE_INTEGRITY_INTERVAL_MS;
+      this.world.beforeIntegrityAudit?.();
+      this.integritySections = [...this.cache.keys()];
+    }
+    const key = this.integritySections.shift();
+    if (!this.integritySections.length) this.integritySections = null;
+    if (!key) return;
+    const section = this.cache.get(key);
+    if (!section) return;
+    const origin = section.origin;
+    let changed = !this.world.sectionLoaded(origin);
+    for (let y = 0; y < 16 && !changed; y++) for (let z = 0; z < 16 && !changed; z++) for (let x = 0; x < 16 && !changed; x++) {
+      changed = this.world.flagsAt({ x: origin.x + x, y: origin.y + y, z: origin.z + z }) !== section.flags[x + 16 * z + 256 * y];
+    }
+    if (!changed) return;
+    this.revision++; this.retire();
+    // A missed roof change can affect visibility lower in the same column.
+    // Adjacent columns cover cells whose boundary lies across a section edge.
+    const touchesColumn = (point: AirPoint) => Math.floor((point.x - 1) / 16) <= origin.x / 16
+      && Math.floor((point.x + 1) / 16) >= origin.x / 16
+      && Math.floor((point.z - 1) / 16) <= origin.z / 16
+      && Math.floor((point.z + 1) / 16) >= origin.z / 16;
+    for (const cached of this.cache.keys()) {
+      const p = parseAirCellKey(cached);
+      if (p.x === origin.x && p.z === origin.z) this.cache.delete(cached);
+    }
+    for (const [id, zone] of this.zones) if (zone.cellKeys.some(cell => touchesColumn(parseAirCellKey(cell)))) {
+      this.dirty.add(id); this.zones.set(id, { ...zone, status: "checking" });
+    }
+    for (const seed of this.controllers.values()) if (touchesColumn(seed)) this.pending.add(airCellKey(seed));
   }
   setSources(controllers: ReadonlyMap<string, AirPoint>, vents: ReadonlyMap<string, AirPoint>, loadedSignature: string) {
     const signature = JSON.stringify([[...controllers].sort(), [...vents].sort()]);
@@ -120,6 +164,7 @@ export class PressureTopology {
   pump(nowMs: number) {
     this.nowMs = nowMs;
     if (this.inFlight) return;
+    if (!this.batch && !this.dirty.size && !this.pending.size) this.auditIntegrity(nowMs);
     if (!this.batch) {
       if (!this.dirty.size && !this.pending.size) return;
       const old = [...this.dirty].flatMap(id => this.zones.get(id) ? [this.zones.get(id)!] : []);
@@ -213,5 +258,5 @@ export class PressureTopology {
     } catch (error) { this.lastError = error instanceof Error ? error.message : "remap-failed"; }
   }
   snapshot() { return [...this.zones.values()].map(zone => ({ ...zone, cellKeys: [...zone.cellKeys], controllerIds: [...zone.controllerIds] })); }
-  dispose() { this.retire(); this.cache.clear(); }
+  dispose() { this.retire(); this.cache.clear(); this.integritySections = null; }
 }

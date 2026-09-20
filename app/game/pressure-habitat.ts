@@ -1,9 +1,10 @@
-import { airThermalEnergy, createAirZoneState, EMPTY_AIR_GAS, stepAirZone, totalAirGas,
+import { airThermalEnergy, createAirZoneState, EMPTY_AIR_GAS, equalizeAirZones, stepAirZone, totalAirGas,
   transferAirGas, type AirGas, type AirTopologyResult, type AirZoneState } from "./airzone";
 import { chemicalStore, setChemicalStore, type ChemicalReservoir } from "./pressure-chemistry";
 import { workshopGasCapacity, workshopHeatCapacity, workshopRunning, workshopStoredTotal } from "./wayworks-stores";
 import type { MachineState } from "./wayworks";
 import type { BodyEnvironment } from "./celestial-environment";
+import type { PressureDevice, PressureMixture } from "./pressure-devices";
 
 export const HABITAT_GAS_SPECIES = { oxygen: "oxygenMilliMoles", inert: "inertMilliMoles", "carbon-dioxide": "co2MilliMoles" } as const;
 const slots: readonly ChemicalReservoir[] = ["chemical", "chemicalAux", "chemicalReagent"];
@@ -45,7 +46,7 @@ export function admitAmbientAir(zone: AirZoneState, environment: BodyEnvironment
 
 /** Finite pure-gas feed. Electrical heating pays the exact reference-temperature
  * energy added to the room; the sub-joule round-up is explicitly dissipated. */
-export function supplyHabitat(machine: MachineState, zone: AirZoneState, maximumMmol = 2000, targetPressurePa = 100000) {
+export function supplyHabitat(machine: MachineState, zone: AirZoneState, maximumMmol = 2000, targetPressurePa = 100000, mixture?: PressureMixture) {
   const fail = { machine, zone, movedMmol: 0, consumedJ: 0, dissipatedMilliJ: 0 };
   if (!validZone(machine, zone) || !machine.workshop.process || !Number.isSafeInteger(maximumMmol) || maximumMmol < 0) return fail;
   const next = copy(machine); let current = zone, movedMmol = 0, consumedJ = 0, dissipatedMilliJ = 0;
@@ -54,8 +55,9 @@ export function supplyHabitat(machine: MachineState, zone: AirZoneState, maximum
     const store = chemicalStore(next.workshop, slot);
     if (!store || !Object.hasOwn(HABITAT_GAS_SPECIES, store.resource) || filter && store.resource !== filter) continue;
     const species = HABITAT_GAS_SPECIES[store.resource as keyof typeof HABITAT_GAS_SPECIES];
-    const currentPartialPa = totalAirGas(current) ? Math.floor(current.pressureMilliKPa * current[species] / totalAirGas(current)) : 0;
-    const desiredPartialPa = filter ? targetPressurePa : store.resource === "oxygen" ? Math.floor(targetPressurePa * .21)
+    const currentPartialPa = totalAirGas(current) ? Number(BigInt(current.pressureMilliKPa) * BigInt(current[species]) / BigInt(totalAirGas(current))) : 0;
+    const fraction = mixture ? store.resource === "oxygen" ? mixture.oxygenPermille : store.resource === "carbon-dioxide" ? mixture.co2Permille : 1000 - mixture.oxygenPermille - mixture.co2Permille : null;
+    const desiredPartialPa = fraction !== null ? Math.floor(targetPressurePa * fraction / 1000) : filter ? targetPressurePa : store.resource === "oxygen" ? Math.floor(targetPressurePa * .21)
       : store.resource === "inert" ? Math.floor(targetPressurePa * .79) : 0;
     const mixtureRoom = Number(BigInt(Math.max(0, desiredPartialPa - currentPartialPa)) * BigInt(current.cellCount) * BigInt(1_000_000_000)
       / (BigInt(8314) * BigInt(293150)));
@@ -77,7 +79,7 @@ export function supplyHabitat(machine: MachineState, zone: AirZoneState, maximum
 
 /** Mixed recovery is its own physical vessel, sharing capacity with pure-gas
  * reservoirs. Both gas species and thermal energy survive capture/release. */
-export function recoverHabitat(machine: MachineState, zone: AirZoneState, maximumMmol: number, direction: "capture" | "release", targetPressurePa = 100000) {
+export function recoverHabitat(machine: MachineState, zone: AirZoneState, maximumMmol: number, direction: "capture" | "release", targetPressurePa = 100000, filter: string | null = null) {
   const fail = { machine, zone, movedMmol: 0, consumedJ: 0 };
   if (!validZone(machine, zone) || !machine.workshop.process || !Number.isSafeInteger(maximumMmol) || maximumMmol < 0) return fail;
   const reserve = machine.workshop.process.airReserve ?? { ...EMPTY_AIR_GAS, thermalEnergyMilliJ: 0 };
@@ -85,14 +87,63 @@ export function recoverHabitat(machine: MachineState, zone: AirZoneState, maximu
   const maximum = Math.min(maximumMmol, machine.energyJ * 10, direction === "capture" ? room : totalAirGas(reserve));
   if (maximum <= 0) return fail;
   const tank = vessel(machine, reserve, reserve.thermalEnergyMilliJ);
-  const transfer = direction === "capture" ? transferAirGas(zone, tank, maximum, 10_000_000) : transferAirGas(tank, zone, maximum, targetPressurePa);
+  const source = direction === "capture" ? zone : tank, target = direction === "capture" ? tank : zone;
+  if (filter && !Object.hasOwn(HABITAT_GAS_SPECIES, filter)) return fail;
+  const species = filter ? HABITAT_GAS_SPECIES[filter as keyof typeof HABITAT_GAS_SPECIES] : null;
+  // A filtered transaction view owns no persistent resource. Its transferred
+  // species and proportional heat are subtracted from the original vessel below.
+  const selected = species ? stepAirZone({ ...source, ...EMPTY_AIR_GAS, [species]: source[species],
+    thermalEnergyMilliJ: totalAirGas(source) ? Number(BigInt(source.thermalEnergyMilliJ) * BigInt(source[species]) / BigInt(totalAirGas(source))) : 0 }, {}).state : source;
+  const transfer = transferAirGas(selected, target, maximum, direction === "capture" ? 10_000_000 : targetPressurePa);
   if (!transfer.transferredMilliMoles) return fail;
-  const next = copy(machine), after = direction === "capture" ? transfer.target : transfer.source;
+  const remaining = species ? stepAirZone({ ...source, [species]: source[species] - transfer.transferredMilliMoles,
+    thermalEnergyMilliJ: source.thermalEnergyMilliJ - (transfer.target.thermalEnergyMilliJ - target.thermalEnergyMilliJ) }, {}).state : transfer.source;
+  const next = copy(machine), after = direction === "capture" ? transfer.target : remaining;
   next.workshop.process!.airReserve = totalAirGas(after) ? { oxygenMilliMoles: after.oxygenMilliMoles, inertMilliMoles: after.inertMilliMoles,
     co2MilliMoles: after.co2MilliMoles, thermalEnergyMilliJ: after.thermalEnergyMilliJ } : null;
   const consumedJ = Math.ceil(transfer.transferredMilliMoles / 10);
   next.energyJ -= consumedJ; next.revision++; next.status = "working";
-  return { machine: next, zone: direction === "capture" ? transfer.source : transfer.target, movedMmol: transfer.transferredMilliMoles, consumedJ };
+  return { machine: next, zone: direction === "capture" ? remaining : transfer.target, movedMmol: transfer.transferredMilliMoles, consumedJ };
+}
+
+/** Balanced mode withdraws excess into the same finite recovery reserve, then
+ * replenishes deficient partial pressures from the existing pure-gas slots.
+ * Stored gas is retained for explicit release; a full reserve stops extraction. */
+export function operateAtmosphereVent(machine: MachineState, zone: AirZoneState, device: PressureDevice, maximumMmol: number) {
+  const fail = { machine, zone, movedMmol: 0, consumedJ: 0 };
+  const filter = machine.workshop.process?.gasFilter ?? null;
+  if (device.mode === "off") return fail;
+  if (device.mode === "capture" || device.mode === "release") return recoverHabitat(machine, zone, maximumMmol, device.mode, device.targetPressurePa, filter);
+  if (device.mode === "supply") return supplyHabitat(machine, zone, maximumMmol, device.targetPressurePa, device.mixture);
+  let current = fail;
+  if (zone.pressureMilliKPa > device.targetPressurePa) {
+    const excess = Number(BigInt(totalAirGas(zone)) * BigInt(zone.pressureMilliKPa - device.targetPressurePa) / BigInt(zone.pressureMilliKPa));
+    current = recoverHabitat(machine, zone, Math.min(maximumMmol, excess), "capture", device.targetPressurePa, filter);
+  } else {
+    for (const [resource, species] of Object.entries(HABITAT_GAS_SPECIES)) {
+      if (filter && filter !== resource) continue;
+      const fraction = resource === "oxygen" ? device.mixture.oxygenPermille : resource === "carbon-dioxide" ? device.mixture.co2Permille : 1000 - device.mixture.oxygenPermille - device.mixture.co2Permille;
+      const desired = zone.pressureMilliKPa ? Number(BigInt(totalAirGas(zone)) * BigInt(device.targetPressurePa) * BigInt(fraction) / (BigInt(zone.pressureMilliKPa) * BigInt(1000))) : 0;
+      const excess = zone[species] - desired;
+      if (excess > 0) { current = recoverHabitat(machine, zone, Math.min(maximumMmol, excess), "capture", device.targetPressurePa, resource); break; }
+    }
+  }
+  // One direction per tick makes the finite flow budget and diagnostics exact.
+  if (current.movedMmol) return current;
+  const supplied = supplyHabitat(current.machine, current.zone, maximumMmol, device.targetPressurePa, device.mixture);
+  return { machine: supplied.machine, zone: supplied.zone, movedMmol: current.movedMmol + supplied.movedMmol, consumedJ: current.consumedJ + supplied.consumedJ };
+}
+
+/** Passive valve: never crosses equilibrium, raises the receiving room above
+ * its configured cap, or transports against the selected physical direction. */
+export function equalizeHabitat(front: AirZoneState, back: AirZoneState, maximumMmol: number, targetPressurePa: number, direction: PressureDevice["valveDirection"]) {
+  const fail = { a: front, b: back, transferredMilliMoles: 0 };
+  if (front.zoneId === back.zoneId || front.locationId !== back.locationId || ![front, back].every(zone => ["sealed", "depressurized"].includes(zone.status))) return fail;
+  const forward = front.pressureMilliKPa > back.pressureMilliKPa;
+  if (direction === "front-to-back" && !forward || direction === "back-to-front" && forward) return fail;
+  const passive = equalizeAirZones(front, back, maximumMmol);
+  const moved = transferAirGas(forward ? front : back, forward ? back : front, passive.transferredMilliMoles, targetPressurePa);
+  return { a: forward ? moved.source : moved.target, b: forward ? moved.target : moved.source, transferredMilliMoles: moved.transferredMilliMoles };
 }
 
 /** A scrubber draws CO2 into its recipe input. No free deletion: full gas or heat

@@ -24,6 +24,17 @@ const binding = { locationId: "L", generation: 2, facilityId: id, installationId
 const device = createPressureDevice("p-1");
 device.airlock = createAirlockState({ controllerKey: key, innerDoorKey: "1,0,0", outerDoorKey: "2,0,0", chamberZoneId: "3,0,0", interiorZoneId: "4,0,0", exteriorZoneId: "exterior", recoveryPumpKey: "5,0,0", reserveKey: "6,0,0" });
 const diagnostics = { device, zone: undefined, occupants: 0, capacity: 0, bounds: null, leak: null, checkAgeMs: 0, topologyRevision: 7, error: null };
+
+test("inspector validates measured rates, consumer breakdown and actual power readings", () => {
+  const rates = { oxygenConsumedMmolPerSecond: 50, oxygenProducedMmolPerSecond: 5, co2ProducedMmolPerSecond: 40,
+    co2RemovedMmolPerSecond: 5, inflowMmolPerSecond: 10000, outflowMmolPerSecond: 0, majorConsumers: [{ kind: "player", oxygenMmolPerSecond: 50 }] };
+  const power = { drawW: 50, source: "local-buffer" as const };
+  const view = buildPressureInspector(binding, 1, { ...diagnostics, rates, power }); assert.ok(view);
+  assert.deepEqual(view.diagnostics.rates, rates); assert.deepEqual(view.diagnostics.power, power);
+  assert.equal(buildPressureInspector(binding, 1, { ...diagnostics, rates: { ...rates, inflowMmolPerSecond: -1 }, power }), null);
+  assert.equal(buildPressureInspector(binding, 1, { ...diagnostics, rates: { ...rates, majorConsumers: Array(9).fill(rates.majorConsumers[0]) }, power }), null);
+  assert.equal(buildPressureInspector(binding, 1, { ...diagnostics, rates, power: { ...power, drawW: Infinity } }), null);
+});
 type API = { sharedFacilityState(kind: string, key: string): Record<string, unknown>; applySharedFacilityState(kind: string, key: string, state: Record<string, unknown>): void;
   wayworksHud(): { pressure?: PressurePanelProps["pressure"] }; handleRemoteFacilityAction(action: FacilityAction, peer: PeerInfo): void };
 function harness(trusted = true) {
@@ -44,6 +55,7 @@ function harness(trusted = true) {
     remotePlayers: new Map([[actor, { target: { x: 0, y: 0, z: 1 } }]]), multiplayerPlayerStates: new Map([[actor, player]]),
     ensureHostPlayerSession: () => host.multiplayerPlayerStates.get(actor),
     pressureRuntime: { host: { generation: 2 }, devices: new Map([[key, device]]), diagnosticsFor: () => diagnostics,
+      continuesHold: () => false,
       operate: (...args: unknown[]) => { calls.push(args); return { ok: true, reason: "Host validated hold" }; } },
   }) as VoxelEngine;
   const guest = Object.assign(Object.create(VoxelEngine.prototype), common, {
@@ -82,6 +94,21 @@ test("untrusted guest is denied before inspector disclosure or pressure mutation
   h.api.handleRemoteFacilityAction({ ...h.open, kind: "transact", expectedRevision: 4, expectedPlayerRevision: 0,
     operation: { kind: "workshop", inventorySlot: 0, action: { kind: "pressure", action: { kind: "door", open: true } } } }, h.peer);
   assert.equal(h.responses.at(-1)?.status, "rejected"); assert.equal(h.calls.length, 0);
+});
+
+test("facility revision drift only admits a host-matched live hold, never stale player inventory or new actions", () => {
+  for (const scenario of ["continuation", "new-hold", "stale-player", "ordinary-command", "future-revision"] as const) {
+    const h = harness();
+    const runtime = h.host.pressureRuntime!;
+    runtime.continuesHold = (_key, _actor, action) => scenario !== "new-hold" && action.kind === "hold";
+    const freshRevision = h.responses[0].expectedRevision!;
+    h.api.handleRemoteFacilityAction({ ...h.open, requestId: `facility_hold_${scenario}`, kind: "transact",
+      expectedRevision: freshRevision + (scenario === "future-revision" ? 100 : -1), expectedPlayerRevision: scenario === "stale-player" ? 1 : 0,
+      operation: { kind: "workshop", inventorySlot: 0, action: { kind: "pressure", action: scenario === "ordinary-command"
+        ? { kind: "cycle", command: "cycle-out" } : { kind: "hold", command: "manual-open-inner", active: true } } } }, h.peer);
+    assert.equal(h.responses.at(-1)?.status, scenario === "continuation" ? "accepted" : "rejected", scenario);
+    assert.equal(h.calls.length, scenario === "continuation" ? 1 : 0, scenario);
+  }
 });
 
 test("stale snapshots, replacement, closed panel and changed location clear guest controls", () => {

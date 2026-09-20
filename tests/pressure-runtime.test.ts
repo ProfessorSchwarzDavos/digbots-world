@@ -233,16 +233,17 @@ test("a healthy room unlocks its bound alarm shutter without opening it", () => 
 });
 
 function airlockFixture() {
-  const f = splitDoorFixture(), airlock = "5,2,1", outer = "6,2,3", pump = "6,2,5", reserve = "7,2,5";
+  const f = splitDoorFixture(), airlock = "5,2,1", outer = "6,2,3", pump = "6,2,5", reserve = "7,2,5", vent = "7,2,4";
   f.add(airlock, "airlock-controller", 2); f.add(outer, "pressure-door", 1);
-  f.add(pump, "recovery-pump"); f.add(reserve, "gas-compressor"); f.frame();
+  f.add(pump, "recovery-pump"); f.add(reserve, "gas-compressor"); f.add(vent, "atmosphere-vent"); f.frame();
+  assert.equal(f.act(vent, { kind: "link", role: "room", target: "5,2,3" }).ok, true);
   for (const [role, target] of Object.entries({ room: "5,2,3", inner: "4,2,3", outer, chamber: "5,2,3",
-    interior: "3,2,3", exterior: "exterior", pump, reserve })) {
+    interior: "3,2,3", exterior: "exterior", pump, reserve, vent })) {
     assert.equal(f.act(airlock, { kind: "link", role, target } as PressureAction).ok, true, role);
   }
   f.runtime.onEdit({ x: 6, y: 2, z: 3 }); f.settle();
   assert.ok(f.runtime.devices.get(airlock)!.airlock?.links);
-  return { ...f, airlock, outer, pump, reserve };
+  return { ...f, airlock, outer, pump, reserve, vent };
 }
 
 test("runtime airlock captures finite chamber gas before opening and faults on replacement binding", () => {
@@ -283,8 +284,9 @@ test("one paused continuous manual hold opens once and cannot retrigger during i
   const f = airlockFixture(); try {
     // Both sides are checked vacuum: safe manual crank needs no power.
     f.machines.get(f.airlock)!.energyJ = 0;
+    const initialRevision = f.machines.get(f.airlock)!.revision;
     const send = (now: number, active: boolean) => f.runtime.operate(f.airlock, "owner", Item.FieldWrench,
-      f.machines.get(f.airlock)!.revision, { kind: "hold", command: "manual-open-inner", active }, now);
+      initialRevision, { kind: "hold", command: "manual-open-inner", active }, now);
     for (let now = 1000; now <= 9800; now += 200) {
       assert.equal(send(now, true).ok, true); f.runtime.update(0, now); f.worker.flush();
       if (now < 9000) assert.equal(f.runtime.devices.get("4,2,3")!.open, false);
@@ -296,6 +298,7 @@ test("one paused continuous manual hold opens once and cannot retrigger during i
     send(10000, true); f.runtime.update(0, 10000); f.worker.flush();
     assert.equal(f.runtime.devices.get(f.airlock)!.airlock!.sequence, sequence);
     assert.equal(send(10010, false).ok, true);
+    assert.equal(send(10020, true).ok, false, "a new hold still requires a fresh revision");
   } finally { f.runtime.dispose(); }
 });
 
@@ -360,4 +363,95 @@ test("pressure door edits require an atomic matched pair for placement and remov
   assert.equal(validPressureDoorEdits([{ ...lower, type: BlockId.Air }], installed), false);
   assert.equal(validPressureDoorEdits([{ ...upper, type: BlockId.Air }], installed), false);
   assert.equal(validPressureDoorEdits([{ ...lower, type: BlockId.Stone }, { ...upper, type: BlockId.Air }], installed), false);
+});
+
+test("airlock missing or replaced chamber vent faults without deleting chamber gas", () => {
+  for (const replacement of [false, true]) {
+    const f = airlockFixture(); try {
+      const before = resources(f.gas(10000, { x: 5, y: 2, z: 3 }));
+      assert.equal(f.act(f.airlock, { kind: "cycle", command: "cycle-out" }).ok, true);
+      if (replacement) f.add(f.vent, "atmosphere-vent"); else f.machines.delete(f.vent);
+      f.frame(.2);
+      assert.equal(f.runtime.devices.get(f.airlock)!.airlock!.error, "broken-link");
+      assert.equal(f.runtime.diagnosticsFor(f.airlock).error, "link-chamber-vent");
+      assert.equal(f.runtime.devices.get(f.outer)!.open, false);
+      assert.deepEqual(resources(f.runtime.zoneAt({ x: 5, y: 2, z: 3 })!), before);
+    } finally { f.runtime.dispose(); }
+  }
+});
+
+test("configurable sensors emit owned workshop signals and aggregate shutter alarms", () => {
+  const f = fixture(), a = "5,2,5", b = "6,2,5", shutter = "7,2,4"; try {
+    f.add(a, "pressure-sensor"); f.add(b, "pressure-sensor"); f.add(shutter, "emergency-shutter"); f.frame();
+    for (const sensor of [a, b]) {
+      assert.equal(f.act(sensor, { kind: "link", role: "room", target: "3,2,4" }).ok, true);
+      assert.equal(f.act(sensor, { kind: "link", role: "shutter", target: shutter }).ok, true);
+    }
+    assert.equal(f.act(a, { kind: "link", role: "signal", target: controller }).ok, true);
+    assert.equal(f.act(b, { kind: "link", role: "signal", target: controller }).ok, false, "single writer per signal");
+    f.settle(); f.gas();
+    const settings = { minimumPressurePa: 60000, maximumPressurePa: 120000, minimumOxygenPpm: 300000, maximumCo2Ppm: 5000, output: "alarm" } as const;
+    assert.equal(f.act(a, { kind: "sensor", ...settings }).ok, true); f.frame(.2);
+    assert.equal(f.machines.get(a)!.workshop.signal, true); assert.equal(f.machines.get(controller)!.workshop.signal, true);
+    assert.equal(f.runtime.diagnosticsFor(a).power!.drawW, 50);
+    assert.equal(f.machines.get(b)!.workshop.signal, false); assert.equal(f.runtime.devices.get(shutter)!.locked, true);
+    assert.equal(f.act(a, { kind: "unlink", role: "signal" }).ok, true);
+    assert.equal(f.machines.get(controller)!.workshop.signal, false, "unlink releases the exact bound signal input");
+    assert.equal(f.act(a, { kind: "link", role: "signal", target: controller }).ok, true);
+    f.settle(); f.frame(.2);
+    assert.equal(f.act(a, { kind: "sensor", ...settings, minimumOxygenPpm: 160000 }).ok, true); f.frame(.2);
+    assert.equal(f.machines.get(controller)!.workshop.signal, false); assert.equal(f.runtime.devices.get(shutter)!.locked, false);
+    assert.equal(f.runtime.devices.get(shutter)!.open, false);
+    // An unrelated pre-existing lock survives a safe sensor sample.
+    f.runtime.devices.get(shutter)!.locked = true; f.frame(.2); assert.equal(f.runtime.devices.get(shutter)!.locked, true);
+    f.add(controller, "life-support-controller"); f.frame();
+    f.act(a, { kind: "sensor", ...settings }); f.frame(.2);
+    assert.equal(f.machines.get(controller)!.workshop.signal, false, "replacement must not inherit signal writer");
+  } finally { f.runtime.dispose(); }
+});
+
+test("hold continuation cannot reuse its old installation binding after replacement", () => {
+  const f = airlockFixture(); try {
+    const revision = f.machines.get(f.airlock)!.revision;
+    const action = { kind: "hold", command: "manual-open-inner", active: true } as const;
+    assert.equal(f.runtime.operate(f.airlock, "owner", Item.FieldWrench, revision, action, 1000).ok, true);
+    const replacement = f.add(f.airlock, "airlock-controller", 2); replacement.revision = revision + 10; f.frame();
+    assert.equal(f.runtime.operate(f.airlock, "owner", Item.FieldWrench, revision, action, 1200).ok, false);
+    assert.equal(f.runtime.devices.get("4,2,3")!.open, false);
+  } finally { f.runtime.dispose(); }
+});
+
+test("alarm shutter lock ownership survives cold normalization and clears only its own lock", () => {
+  const f = splitDoorFixture(), shutter = "4,2,3"; try {
+    f.act(controller, { kind: "link", role: "shutter", target: shutter }); f.settle(); f.frame(.2);
+    assert.equal(f.runtime.devices.get(shutter)!.alarmLocked, true);
+    const saved = f.runtime.snapshot(), copied = new Map([...f.machines].map(([key, machine]) => [key, structuredClone(machine)]));
+    const cold = fixture(saved, copied); try {
+      // Restore the actual loaded block geometry before discovery.
+      cold.blocks.clear(); for (const [key, block] of f.blocks) cold.blocks.set(key, block);
+      cold.settle(); cold.gas(12 * 40000); cold.frame(.2);
+      assert.equal(cold.runtime.devices.get(shutter)!.locked, false);
+      assert.equal(cold.runtime.devices.get(shutter)!.alarmLocked, false);
+      assert.equal(cold.runtime.devices.get(shutter)!.open, false);
+    } finally { cold.runtime.dispose(); }
+  } finally { f.runtime.dispose(); }
+});
+
+test("diagnostics count actual served consumers and finite flow at five hertz", () => {
+  const f = fixture(), vent = "5,2,5"; try {
+    f.add(vent, "atmosphere-vent"); f.settle(); f.gas(10000);
+    f.host.occupants = () => [{ id: "player", kind: "player", point: room, oxygenMilliMoles: 4, co2MilliMoles: 3 },
+      { id: "npc", kind: "npc", point: room, oxygenMilliMoles: 6, co2MilliMoles: 5 },
+      { id: "blocked", kind: "creature", point: room, oxygenMilliMoles: 100000, co2MilliMoles: 100000 }];
+    f.act(vent, { kind: "mode", mode: "capture" }); f.frame(.2);
+    const rates = f.runtime.diagnosticsFor(controller).rates!;
+    assert.equal(rates.oxygenConsumedMmolPerSecond, 50); assert.equal(rates.co2ProducedMmolPerSecond, 40);
+    assert.equal(rates.outflowMmolPerSecond, 10000); assert.equal(rates.inflowMmolPerSecond, 0);
+    assert.deepEqual(rates.majorConsumers, [{ kind: "npc", oxygenMmolPerSecond: 30 }, { kind: "player", oxygenMmolPerSecond: 20 }]);
+    assert.equal(f.runtime.diagnosticsFor(controller).reserveSeconds, 0);
+    f.host.occupants = () => []; f.act(vent, { kind: "mode", mode: "release" }); f.frame(.2);
+    assert.equal(f.runtime.diagnosticsFor(controller).rates!.inflowMmolPerSecond, 10000);
+    assert.equal(f.runtime.diagnosticsFor(controller).rates!.oxygenConsumedMmolPerSecond, 0);
+    assert.equal(f.runtime.diagnosticsFor(controller).reserveSeconds, null);
+  } finally { f.runtime.dispose(); }
 });

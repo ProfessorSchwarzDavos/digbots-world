@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import { Item, itemName } from "./data";
 import { chemistryCost, chemistryRecipes, type ChemicalQuantity } from "./pressure-chemistry";
 import { pressureDoorKind } from "./pressure-catalog";
-import { PRESSURE_LINK_RANGE, PRESSURE_LINK_ROLES, pressurePoint, type PressureAction, type PressureLinkRole } from "./pressure-devices";
+import { PRESSURE_LINK_RANGE, PRESSURE_LINK_ROLES, parsePressureAction, pressurePoint, type PressureAction, type PressureDevice, type PressureLinkRole } from "./pressure-devices";
 import type { PressureRuntime } from "./pressure-runtime";
 import type { MachineKind } from "./wayworks";
 import type { WorkshopAction } from "./wayworks-integration";
@@ -30,7 +30,7 @@ const zoneHelp: Record<string, string> = {
   "over-capacity": "The room exceeds controller capacity. Add controllers or divide the room; the discovery limit is 16,384 cells.",
   sealed: "A sealed boundary alone does not guarantee breathable air. Check oxygen, CO₂ and temperature.",
 };
-const roleLabels: Record<PressureLinkRole, string> = { room: "Room sample", inner: "Inner door", outer: "Outer door", chamber: "Chamber sample", interior: "Interior sample", exterior: "Exterior sample", pump: "Recovery pump", reserve: "Recovery reserve", shutter: "Emergency shutter" };
+const roleLabels: Record<PressureLinkRole, string> = { room: "Room sample", inner: "Inner door", outer: "Outer door", chamber: "Chamber sample", interior: "Interior sample", exterior: "Exterior sample", pump: "Recovery pump", reserve: "Recovery reserve", vent: "Chamber vent", shutter: "Emergency shutter", signal: "Signal receiver" };
 const fluidOptions = ["water", "coolant", "liquid-fuel"];
 const gasOptions = ["oxygen", "inert", "hydrogen", "methane", "carbon-dioxide"];
 const quantityText = (entry: ChemicalQuantity) => `${reading(entry.amount, 1000)} ${entry.slot === "fluid" || entry.slot === "fluidAux" ? "L" : "standard L"} ${words(entry.resource)}`;
@@ -128,8 +128,8 @@ function PressurePanelContent({ kind, workshop, pressure, onAction }: PressurePa
   const filterLoaded = workshop.slots.reagent?.item === Item.HabitatFilter;
   const filterRemaining = process?.filterUsedMl ? 240000 - process.filterUsedMl : filterLoaded ? 240000 : 0;
   const showHabitat = kind === "carbon-scrubber" || !recipes.length && !["liquid-pipe", "gasline", "heat-conduit"].includes(kind);
-  const canTarget = ["life-support-controller", "thermal-regulator", "atmosphere-vent", "recovery-pump"].includes(kind);
-  const canMode = canTarget || kind === "carbon-scrubber" || kind === "equalization-vent";
+  const canTarget = ["life-support-controller", "thermal-regulator", "atmosphere-vent", "recovery-pump", "equalization-vent"].includes(kind);
+  const canMode = canTarget || kind === "carbon-scrubber" || kind === "pressure-sensor";
 
   return <section className={styles.panel} aria-label="Pressure and chemistry controls" data-pressure-kind={kind}>
     {showHabitat && <>
@@ -144,6 +144,10 @@ function PressurePanelContent({ kind, workshop, pressure, onAction }: PressurePa
       </dl>
       <p className={styles.help}>O₂ {reading(zone ? pressure?.oxygenPartsPerMillion : undefined, 10000)}% · Inert {reading(zone ? total ? zone.inertMilliMoles / total * 100 : 0 : undefined)}% · CO₂ {reading(zone ? pressure?.co2PartsPerMillion : undefined)} ppm</p>
       <p className={styles.help}>Occupants: {reading(zone ? pressure?.occupants : undefined)} · O₂ reserve: {zone && pressure?.reserveSeconds === null ? "No current consumption estimate" : `${reading(zone ? pressure?.reserveSeconds ?? undefined : undefined)} s`}</p>
+      <p className={styles.help}>Last 0.2 s sample · O₂ consumed {reading(pressure?.rates?.oxygenConsumedMmolPerSecond)} mmol/s · O₂ produced by plants {reading(pressure?.rates?.oxygenProducedMmolPerSecond)} mmol/s · CO₂ produced {reading(pressure?.rates?.co2ProducedMmolPerSecond)} mmol/s · CO₂ removed {reading(pressure?.rates?.co2RemovedMmolPerSecond)} mmol/s</p>
+      <p className={styles.help}>Gas inflow {reading(pressure?.rates?.inflowMmolPerSecond)} mmol/s · Gas outflow {reading(pressure?.rates?.outflowMmolPerSecond)} mmol/s. Reserve assumes measured consumption continues.</p>
+      <p className={styles.help}>Measured pressure-operation draw: {reading(pressure?.power?.drawW)} W · Source: {pressure?.power ? "local machine buffer" : "unavailable"}. Upstream grid charging is separate.</p>
+      {pressure?.rates && <p className={styles.help}>Major O₂ consumers: {pressure.rates.majorConsumers.length ? pressure.rates.majorConsumers.map(consumer => `${words(consumer.kind)} ${reading(consumer.oxygenMmolPerSecond)} mmol/s`).join(" · ") : "None in the last sample"}</p>}
       <p className={styles.help}>Last check: {zone ? `${reading(pressure?.checkAgeMs, 1000)} s ago` : "Unavailable"} · Topology revision {reading(pressure?.topologyRevision)} · Gas revision {reading(zone?.resourceRevision)}</p>
       <p className={styles.help}>Wrench overlay: pale box = room bounding extent, not a seal; lines = explicit links; orange diamond and ray = reported leak or unknown face. Port arrows show configured flow direction.</p>
       {pressure?.leak && <p className={styles.warning} role="status">{pressure.leak.unknown ? "Unknown boundary" : "Leak"} at {pressure.leak.cell.x}, {pressure.leak.cell.y}, {pressure.leak.cell.z} · face {pressure.leak.face} · {pressure.leak.cause}</p>}
@@ -156,10 +160,11 @@ function PressurePanelContent({ kind, workshop, pressure, onAction }: PressurePa
         <div className={styles.fields}><label>Target pressure · kPa<input type="number" min="10" max="120" step="0.001" value={pressureDraft} onChange={event => setPressureDraft(event.currentTarget.value)} /></label><label>Target temperature · °C<input type="number" min="0" max="45" step="0.001" value={temperatureDraft} onChange={event => setTemperatureDraft(event.currentTarget.value)} /></label></div>
         <button type="button" disabled={!targetValid} onClick={() => send({ kind: "target", pressurePa: targetPressurePa, temperatureMilliC: targetTemperatureMilliC })}>Apply targets</button>
       </details>}
-      {canMode && <label className={styles.field}>Operating mode<select value={device.mode} onChange={event => send({ kind: "mode", mode: event.currentTarget.value as typeof device.mode })}><option value="supply">{kind === "thermal-regulator" || kind === "carbon-scrubber" || kind === "equalization-vent" ? "Run" : kind === "recovery-pump" ? "Standby" : "Supply"}</option>{(kind === "recovery-pump" || device.mode === "capture") && <option value="capture">Capture</option>}{(kind === "recovery-pump" || device.mode === "release") && <option value="release">Release</option>}<option value="off">Off</option></select></label>}
+      {canMode && <label className={styles.field}>Operating mode<select value={device.mode} onChange={event => send({ kind: "mode", mode: event.currentTarget.value as typeof device.mode })}><option value="supply">{kind === "thermal-regulator" || kind === "carbon-scrubber" || kind === "equalization-vent" || kind === "pressure-sensor" ? "Run" : kind === "recovery-pump" ? "Standby" : "Supply"}</option>{(kind === "recovery-pump" || kind === "atmosphere-vent" || device.mode === "capture") && <option value="capture">Capture</option>}{(kind === "recovery-pump" || kind === "atmosphere-vent" || device.mode === "release") && <option value="release">Release</option>}{kind === "atmosphere-vent" && <option value="balanced">Balanced composition</option>}<option value="off">Off</option></select></label>}
+      <PressureDeviceSettings kind={kind} device={device} send={send} signal={workshop.signal} />
       {kind === "hangar-pressure-gate" && <details className={styles.detail}><summary>Formed gate dimensions</summary><p className={styles.help}>Current frame: {device.gateWidth} × {device.gateHeight} blocks. Close the gate before changing its 3–9 block dimensions; the host checks the complete frame.</p><div className={styles.fields}><label>Gate width<input type="number" min="3" max="9" step="1" value={width} onChange={event => setWidth(event.currentTarget.value)} /></label><label>Gate height<input type="number" min="3" max="9" step="1" value={height} onChange={event => setHeight(event.currentTarget.value)} /></label></div><button type="button" disabled={!gateValid || device.open} onClick={() => send({ kind: "gate", width: Number(width), height: Number(height) })}>Check frame dimensions</button></details>}
       {kind === "airlock-controller" && <div className={styles.group}>
-        <h4>Airlock cycle</h4><p className={styles.safety} role="status">{airlock ? words(airlock.phase) : "Not configured — link doors, room samples, pump and reserve."}</p>
+        <h4>Airlock cycle</h4><p className={styles.safety} role="status">{airlock ? words(airlock.phase) : "Not configured — link doors, room samples, chamber vent, pump and reserve."}</p>
         {airlock && <p className={styles.help}>Phase {reading(airlock.phaseElapsedMs, 1000)} s · Cycle {reading(airlock.cycleElapsedMs, 1000)} s · Sequence {airlock.sequence} · Recovery {airlock.recoveryVerified ? "verified" : "not yet verified"}</p>}
         {airlock?.error && <p className={styles.warning} role="status">Airlock fault: {words(airlock.error)}. Repair the cause before resetting.</p>}
         <div className={styles.actions}><button type="button" disabled={!airlock} onClick={() => send({ kind: "cycle", command: "cycle-out" })}>Cycle out</button><button type="button" disabled={!airlock} onClick={() => send({ kind: "cycle", command: "return-in" })}>Return in</button><button type="button" disabled={!airlock} onClick={() => send({ kind: "cycle", command: "reset" })}>Reset cycle</button></div>
@@ -175,7 +180,7 @@ function PressurePanelContent({ kind, workshop, pressure, onAction }: PressurePa
       {showHabitat && <details className={styles.detail}><summary>Room and hardware links</summary><p className={styles.help}>Select the Field Wrench. Targets must be loaded and within {PRESSURE_LINK_RANGE} blocks. Room samples are air-cell coordinates; door, pump and reserve links use owned hardware coordinates.</p>
         <dl className={styles.links}>{PRESSURE_LINK_ROLES.filter(key => device.links[key]).map(key => <div key={key}><dt>{roleLabels[key]}</dt><dd><code>{device.links[key]}</code><button type="button" aria-label={`Unlink ${roleLabels[key].toLowerCase()}`} onClick={() => send({ kind: "unlink", role: key })}>Unlink</button></dd></div>)}</dl>
         {!Object.keys(device.links).length && <p className={styles.help}>No explicit links. The room sample defaults to the block in front.</p>}
-        {kind === "airlock-controller" && <p className={styles.help}>Use two separate doors, a Recovery Pump and a separate gas-capable reserve. Chamber, interior and exterior samples must be distinct air cells. Keep pump and reserve enabled and powered.</p>}
+        {kind === "airlock-controller" && <p className={styles.help}>Use two separate doors, an Atmosphere Vent sampling the chamber, a Recovery Pump and a separate gas-capable reserve. Chamber, interior and exterior samples must be distinct air cells. Keep pump and reserve enabled and powered.</p>}
         <div className={styles.fields}><label>Link role<select value={role} onChange={event => setRole(event.currentTarget.value as PressureLinkRole)}>{PRESSURE_LINK_ROLES.map(key => <option key={key} value={key}>{roleLabels[key]}</option>)}</select></label><label>Target coordinates · x,y,z<input type="text" value={target} maxLength={80} placeholder={role === "exterior" ? "x,y,z or exterior" : "x,y,z"} onChange={event => setTarget(event.currentTarget.value)} /></label></div>
         {role === "exterior" && <p className={styles.help}>Use “exterior” for the world atmosphere, or coordinates for another room.</p>}
         <button type="button" disabled={!linkValid} onClick={() => send({ kind: "link", role, target: linkTarget })}>Link target</button>
@@ -197,4 +202,25 @@ function PressurePanelContent({ kind, workshop, pressure, onAction }: PressurePa
       <p className={styles.help}>Limits apply with face connections and available storage. Configuration requires the Field Wrench.</p>
     </details>}
   </section>;
+}
+
+function PressureDeviceSettings({ kind, device, send, signal }: { kind: MachineKind; device: PressureDevice; send: (action: PressureAction) => void; signal: boolean }) {
+  const [oxygen, setOxygen] = useState(String(device.mixture.oxygenPermille / 10));
+  const [carbon, setCarbon] = useState(String(device.mixture.co2Permille / 10));
+  const [sensor, setSensor] = useState({ minimumPressurePa: String(device.sensor.minimumPressurePa), maximumPressurePa: String(device.sensor.maximumPressurePa),
+    minimumOxygenPpm: String(device.sensor.minimumOxygenPpm), maximumCo2Ppm: String(device.sensor.maximumCo2Ppm), output: device.sensor.output });
+  const mixtureAction = parsePressureAction({ kind: "mixture", oxygenPermille: Number(oxygen) * 10, co2Permille: Number(carbon) * 10 });
+  const sensorAction = parsePressureAction({ kind: "sensor", minimumPressurePa: Number(sensor.minimumPressurePa), maximumPressurePa: Number(sensor.maximumPressurePa),
+    minimumOxygenPpm: Number(sensor.minimumOxygenPpm), maximumCo2Ppm: Number(sensor.maximumCo2Ppm), output: sensor.output });
+  if (kind === "atmosphere-vent") return <details className={styles.detail}><summary>Vent mixture and finite recovery</summary>
+    <p className={styles.help}>Current target: O₂ {reading(device.mixture.oxygenPermille, 10)}% · CO₂ {reading(device.mixture.co2Permille, 10)}% · remainder inert. Supply uses stored pure gas; capture and release preserve gas and heat in the shared finite reserve. Balanced mode captures excess then replenishes missing gas; a full reserve stops capture. Filters apply in both directions.</p>
+    <div className={styles.fields}><label>Target oxygen · %<input type="number" min="0" max="100" step="0.1" value={oxygen} onChange={event => setOxygen(event.currentTarget.value)} /></label><label>Target carbon dioxide · %<input type="number" min="0" max="100" step="0.1" value={carbon} onChange={event => setCarbon(event.currentTarget.value)} /></label></div>
+    <button type="button" disabled={!mixtureAction || !oxygen.trim() || !carbon.trim()} onClick={() => mixtureAction && send(mixtureAction)}>Apply mixture</button></details>;
+  if (kind === "equalization-vent") return <label className={styles.field}>Check-valve direction<select value={device.valveDirection} onChange={event => send({ kind: "valve", direction: event.currentTarget.value as PressureDevice["valveDirection"] })}><option value="both">Both directions</option><option value="front-to-back">Front room → back room</option><option value="back-to-front">Back room → front room</option></select><span className={styles.help}>Transfers down the pressure gradient, stopping at equilibrium or the receiving pressure target. Room sample is the front side; the opposite block is the back side.</span></label>;
+  if (kind !== "pressure-sensor") return null;
+  const fields = [["minimumPressurePa", "Minimum pressure · Pa", 200000], ["maximumPressurePa", "Maximum pressure · Pa", 200000], ["minimumOxygenPpm", "Minimum oxygen · ppm", 1000000], ["maximumCo2Ppm", "Maximum carbon dioxide · ppm", 1000000]] as const;
+  return <details className={styles.detail}><summary>Sensor thresholds and output</summary><p className={styles.help}>Signal: {signal ? "On" : "Off"}. Any threshold violation or unchecked room triggers the alarm. Link one owned signal receiver to control its existing signal-on/off mode. Sensor operation costs 50 J/s. Linked shutters close on alarm or loss of sensor power; clearing never opens them.</p>
+    <div className={styles.fields}>{fields.map(([field, label, max]) => <label key={field}>{label}<input type="number" min="0" max={max} step="1" value={sensor[field]} onChange={event => setSensor({ ...sensor, [field]: event.currentTarget.value })} /></label>)}</div>
+    <label className={styles.field}>Output polarity<select value={sensor.output} onChange={event => setSensor({ ...sensor, output: event.currentTarget.value as "alarm" | "safe" })}><option value="alarm">On while alarmed</option><option value="safe">On while thresholds are satisfied</option></select></label>
+    <button type="button" disabled={!sensorAction || fields.some(([field]) => !sensor[field].trim())} onClick={() => sensorAction && send(sensorAction)}>Apply sensor thresholds</button></details>;
 }

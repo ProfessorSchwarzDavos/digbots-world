@@ -57,6 +57,12 @@ export function acceptPressureInspector(value: unknown, previous: PressureInspec
       || !(d.leak === null || d.leak && point(d.leak.cell) && ["+x", "-x", "+y", "-y", "+z", "-z"].includes(d.leak.face)
         && label(d.leak.cause) && typeof d.leak.unknown === "boolean")) return null;
     const z = d.zone;
+    if (d.power && (Object.keys(d.power).length !== 2 || !whole(d.power.drawW) || d.power.source !== "local-buffer")) return null;
+    if (d.rates && (Object.keys(d.rates).length !== 7
+      || ![d.rates.oxygenConsumedMmolPerSecond, d.rates.oxygenProducedMmolPerSecond, d.rates.co2ProducedMmolPerSecond,
+        d.rates.co2RemovedMmolPerSecond, d.rates.inflowMmolPerSecond, d.rates.outflowMmolPerSecond].every(v => whole(v, 0))
+      || !Array.isArray(d.rates.majorConsumers) || d.rates.majorConsumers.length > 8
+      || d.rates.majorConsumers.some(c => !label(c.kind) || !whole(c.oxygenMmolPerSecond)))) return null;
     if (z && (z.schemaVersion !== 1 || z.locationId !== next.locationId || !label(z.zoneId) || !label(z.membershipDigest)
       || !Array.isArray(z.cellKeys) || z.cellKeys.length !== 0 || !Array.isArray(z.controllerIds) || z.controllerIds.length !== 0
       || !whole(z.cellCount, 1, 16384) || !whole(z.topologyRevision) || !whole(z.resourceRevision)
@@ -65,7 +71,7 @@ export function acceptPressureInspector(value: unknown, previous: PressureInspec
       || ![z.oxygenMilliMoles, z.inertMilliMoles, z.co2MilliMoles, z.thermalEnergyMilliJ, z.boundaryLeakArea].every(v => whole(v)))) return null;
     const detached = structuredClone(next);
     // Safety labels and reserve are derived from validated readings, never trusted independently.
-    detached.diagnostics = { ...detached.diagnostics, device, ...(z ? airZoneDiagnostics(z as AirZoneState, d.occupants * 4) : {}) };
+    detached.diagnostics = { ...detached.diagnostics, device, ...(z ? airZoneDiagnostics(z as AirZoneState, (d.rates?.oxygenConsumedMmolPerSecond ?? 0) / 5) : {}) };
     if (!z) {
       delete detached.diagnostics.breathable; delete detached.diagnostics.reasons;
       delete detached.diagnostics.reserveSeconds;

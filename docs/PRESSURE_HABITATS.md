@@ -54,6 +54,13 @@ output therefore backpressures the process even if the primary looks empty.
 The inspector lists each buffer separately. Venting discards only the primary
 gas buffer, after confirmation.
 
+An Atmosphere Vent can supply a target oxygen/inert/CO2 mixture, capture mixed
+room air, release its finite captured reserve, or balance composition by capturing
+excess before supplying deficits. Capture/release retains gas and heat; a full
+shared reserve blocks more capture. Filters and the flow limit apply. An
+Equalization Vent has a receiving-pressure cap and a front-to-back, back-to-front
+or bidirectional check valve; it never pumps against the pressure gradient.
+
 Pickaxes recover one sealed machine with its stores/modules and paid process
 progress. Filled pipes cannot stack. Empty cable stacks remain splittable.
 Placement assigns a new installation identity: old links never operate newly
@@ -70,7 +77,8 @@ Open doors merge connected space; Equalization Vents transfer gas without
 merging room membership.
 
 On the airlock, link Inner door, Outer door, Chamber sample, Interior sample,
-Exterior sample (or the literal `exterior`), Recovery pump and Reserve hardware.
+Exterior sample (or the literal `exterior`), Chamber vent, Recovery pump and
+Reserve hardware. The vent must be an Atmosphere Vent sampling the chamber.
 All targets must be loaded and within 16 blocks. Hardware must share ownership;
 the pump and reserve are separate devices. Provide power and enough upgraded
 reserve capacity for the entire recovered chamber mixture. At 100 kPa and
@@ -83,6 +91,8 @@ inward closes the outer door, releases recovered air first and equalizes with
 the interior before opening the inner door. Both doors cannot ordinarily open
 together. Power failure, obstruction, stale topology, missing/replaced links and
 timeouts fail closed. Reset never assumes the chamber is already safe.
+Older airlock saves retain their resources but need this chamber-vent link before
+cycling; replacing a linked vent does not inherit the previous binding.
 
 Safe manual opening needs an 8-second continuous pointer or Space/Enter hold,
 a checked differential no greater than 5 kPa, and completed outer recovery.
@@ -93,7 +103,11 @@ Releasing, blurring, changing device, leaving reach, or losing the wrench stops
 the hold. A client cannot supply its own elapsed duration. A continuous hold
 executes once; release before starting another crank or override.
 
-A Pressure Sensor can link an Emergency Shutter. A hazard closes and locks it;
+A Pressure Sensor has minimum/maximum pressure, minimum O2 concentration and
+maximum CO2 thresholds, with alarm or safe-state signal output. It consumes
+50 W from its own finite buffer. A bound signal receiver must be compatible,
+owned hardware; one sensor owns each receiver input. A sensor can also link an
+Emergency Shutter. A hazard closes and locks it;
 a healthy room unlocks it but never opens it automatically. A formed Hangar
 Pressure Gate needs the complete rectangular frame, including corners, sill
 and header. Set width/height from 3–9; the controller is centred on the sill.
@@ -103,7 +117,10 @@ Missing frames fail closed and the inspector reports the error.
 
 The panel reports pressure, oxygen partial pressure, composition, temperature,
 occupants, reserve estimate, volume/capacity, revision/check age and first known
-leak/unknown face. Hazard text accompanies color. Muffling never silences
+leak/unknown face. The last 0.2-second sample lists measured gas flow, oxygen/CO2
+consumption/production, major oxygen consumers and pressure-operation power draw.
+Power comes from the local machine buffer; this reading is not a claim of
+upstream generator provenance or total chemistry/grid power. Hazard text accompanies color. Muffling never silences
 critical life-support alarms. With a wrench, face arrows show configured flow,
 lines show explicit links, a pale box shows room bounding extent (not proof of
 a seal), and an orange marker/ray identifies the reported boundary face.
@@ -111,7 +128,10 @@ a seal), and an orange marker/ray identifies the reported boundary face.
 Gas uses integer mmol in rooms and standard-volume mL in machine stores:
 24 mL = 1 mmol. Sub-mmol machine residuals stay in the machine. Liquid uses mL,
 electricity uses J, and room thermal energy uses mJ. Room arithmetic runs at
-5 Hz; bounded worker discovery runs only after relevant edits/source changes.
+5 Hz; bounded worker discovery runs after relevant edits/source changes. A
+five-minute integrity scan compares at most one cached16³section per idle frame.
+An unchanged scan does not interrupt a room or cycle; a missed change schedules
+the same conservative rediscovery/remapping path, retaining finite gas custody.
 Location/generation/topology/request epochs reject stale worker replies.
 
 Machine radiator heat enters a known adjacent room or dissipates outside.

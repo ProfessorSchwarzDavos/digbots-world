@@ -3,7 +3,8 @@ import test from "node:test";
 import { createMachine, normalizeMachine } from "../app/game/wayworks.ts";
 import { createAirZoneState, discoverAirZone, totalAirGas, type AirPoint } from "../app/game/airzone.ts";
 import { createAirZoneWorkerHandler } from "../app/game/airzone-worker-protocol.ts";
-import { admitAmbientAir, supplyHabitat, recoverHabitat, drawHabitatCarbon, regulateHabitat, mixtureForFraction } from "../app/game/pressure-habitat.ts";
+import { admitAmbientAir, supplyHabitat, recoverHabitat, drawHabitatCarbon, regulateHabitat, mixtureForFraction, operateAtmosphereVent, equalizeHabitat } from "../app/game/pressure-habitat.ts";
+import { createPressureDevice, normalizePressureDevice, parsePressureAction } from "../app/game/pressure-devices.ts";
 import { createWaystarCatalog } from "../app/game/celestial-catalog.ts";
 import { bodyEnvironment } from "../app/game/celestial-environment.ts";
 import { PressureTopology } from "../app/game/pressure-topology.ts";
@@ -99,4 +100,60 @@ test("stale worker replies and unloaded cells cannot install breathable state or
   const reply = createAirZoneWorkerHandler()(request);
   loaded = false; runtime.setSources(new Map([["life", { x: 0, y: 0, z: 0 }]]), new Map(), "none");
   assert.equal(runtime.receive(reply), false); assert.equal(runtime.zones.size, 0);
+});
+
+test("vent filtered capture and release preserve exact species, heat, finite capacity and cold save custody", () => {
+  const zone = createAirZoneState(room(), { oxygenMilliMoles: 8000, inertMilliMoles: 30000, co2MilliMoles: 2000 }, 35000);
+  const machine = createMachine("atmosphere-vent", "home", "local"); machine.energyJ = 32000;
+  machine.workshop.process!.gasFilter = "carbon-dioxide";
+  const device = createPressureDevice("p-1"); device.mode = "capture";
+  const captured = operateAtmosphereVent(machine, zone, device, 3000);
+  assert.equal(captured.movedMmol, 2000); assert.equal(captured.zone.co2MilliMoles, 0);
+  assert.equal(captured.zone.oxygenMilliMoles, zone.oxygenMilliMoles); assert.equal(captured.zone.inertMilliMoles, zone.inertMilliMoles);
+  assert.equal(captured.machine.workshop.process!.airReserve!.thermalEnergyMilliJ + captured.zone.thermalEnergyMilliJ, zone.thermalEnergyMilliJ);
+  assert.equal(operateAtmosphereVent(captured.machine, zone, device, 3000).movedMmol, 0, "shared gas capacity is full");
+  const cold = normalizeMachine(JSON.parse(JSON.stringify(captured.machine)), machine.kind, "home", "local");
+  device.mode = "release"; device.targetPressurePa = 120000;
+  const released = operateAtmosphereVent(cold, captured.zone, device, 3000);
+  for (const field of ["oxygenMilliMoles", "inertMilliMoles", "co2MilliMoles", "thermalEnergyMilliJ"] as const) assert.equal(released.zone[field], zone[field]);
+  assert.equal(released.machine.workshop.process!.airReserve, null);
+  device.mode = "capture"; cold.energyJ = 0; assert.equal(operateAtmosphereVent(cold, zone, device, 3000).movedMmol, 0);
+});
+
+test("balanced vent captures excess composition and supplies configured mixture without free oxygen", () => {
+  let machine = createMachine("atmosphere-vent", "home", "local"); machine.energyJ = 160000; machine.workshop.upgrades.capacity = 4;
+  machine.workshop.chemical = { resource: "oxygen", amount: 24000 };
+  machine.workshop.process!.chemicalAux = { resource: "inert", amount: 85000 };
+  const device = createPressureDevice("p-1"); device.mode = "balanced"; device.targetPressurePa = 10000; device.mixture = { oxygenPermille: 180, co2Permille: 0 };
+  let zone = createAirZoneState(room(), { oxygenMilliMoles: 0, inertMilliMoles: 0, co2MilliMoles: 1000 });
+  for (let i = 0; i < 40; i++) { const result = operateAtmosphereVent(machine, zone, device, 2000); machine = result.machine; zone = result.zone; }
+  assert.equal(zone.co2MilliMoles, 0); assert.equal(machine.workshop.process!.airReserve!.co2MilliMoles, 1000);
+  assert.ok(zone.pressureMilliKPa > 9900 && zone.pressureMilliKPa <= 10000);
+  assert.ok(Math.abs(zone.oxygenMilliMoles / totalAirGas(zone) - .18) < .001, JSON.stringify({ zone, reserve: machine.workshop.process!.airReserve, stores: [machine.workshop.chemical, machine.workshop.process!.chemicalAux] }));
+  assert.equal(zone.oxygenMilliMoles * 24 + machine.workshop.chemical!.amount, 24000);
+  assert.equal(zone.inertMilliMoles * 24 + machine.workshop.process!.chemicalAux!.amount, 85000);
+});
+
+test("equalization respects receiving target and physical direction without merging or losing heat", () => {
+  const front = createAirZoneState(room(), mixtureForFraction(40000), 30000);
+  const back = { ...createAirZoneState(room(), mixtureForFraction(2000), 10000), zoneId: "back" };
+  const blocked = equalizeHabitat(front, back, 40000, 20000, "back-to-front"); assert.equal(blocked.transferredMilliMoles, 0);
+  const moved = equalizeHabitat(front, back, 40000, 20000, "front-to-back");
+  assert.ok(moved.transferredMilliMoles > 0); assert.ok(moved.b.pressureMilliKPa <= 20000); assert.ok(moved.a.pressureMilliKPa >= moved.b.pressureMilliKPa);
+  assert.equal(moved.a.zoneId, front.zoneId); assert.equal(moved.b.zoneId, back.zoneId);
+  for (const field of ["oxygenMilliMoles", "inertMilliMoles", "co2MilliMoles", "thermalEnergyMilliJ"] as const) assert.equal(moved.a[field] + moved.b[field], front[field] + back[field]);
+  assert.equal(equalizeHabitat(moved.a, moved.b, 40000, 20000, "both").transferredMilliMoles, 0);
+  assert.equal(equalizeHabitat({ ...front, status: "unknown" }, back, 40000, 20000, "both").transferredMilliMoles, 0);
+});
+
+test("new pressure configuration is exact, bounded and compatible with old saves", () => {
+  const device = createPressureDevice("p-1"), legacy = Object.fromEntries(Object.entries(device).filter(([key]) => !["mixture", "sensor", "valveDirection"].includes(key)));
+  assert.deepEqual(normalizePressureDevice(legacy), device);
+  for (const action of [{ kind: "mixture", oxygenPermille: 800, co2Permille: 201 }, { kind: "mixture", oxygenPermille: 210.1, co2Permille: 0 },
+    { kind: "valve", direction: "both", hidden: true }, { kind: "sensor", ...device.sensor, minimumPressurePa: 130000 }, { kind: "sensor", ...device.sensor, maximumCo2Ppm: -1 }]) assert.equal(parsePressureAction(action), null);
+  for (const action of [{ kind: "mixture", oxygenPermille: 180, co2Permille: 0 }, { kind: "valve", direction: "front-to-back" }, { kind: "sensor", ...device.sensor }, { kind: "link", role: "vent", target: "1,2,3" }]) assert.ok(parsePressureAction(action));
+  assert.equal(normalizePressureDevice({ ...device, mixture: { oxygenPermille: 210, co2Permille: 0, hidden: true } }), null);
+  assert.equal(normalizePressureDevice({ ...device, mixture: { kind: "mode", mode: "supply" } }), null);
+  assert.equal(parsePressureAction({ kind: "valve", direction: { toString: () => "both" } }), null);
+  assert.equal(parsePressureAction({ kind: "sensor", ...device.sensor, output: { toString: () => "alarm" } }), null);
 });

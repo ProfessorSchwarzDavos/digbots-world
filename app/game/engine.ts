@@ -8963,7 +8963,15 @@ export class VoxelEngine {
         const reject = (reason: string) => this.rejectFacilityAction(action, peer.identity!.id, reason, currentState, player, revision);
         if (action.state !== undefined || action.playerState !== undefined || !validFacilityOperation(action.operation)
           || this.multiplayerPeerActiveFacilities.get(peer.identity.id) !== action.facilityId) { reject("Open this facility before sending a semantic operation."); return; }
-        if (action.expectedRevision !== revision || action.expectedPlayerRevision !== player.revision) { reject("State changed; refresh both revisions and retry."); return; }
+        // An already admitted physical hold is tied to the host installation,
+        // actor, command and heartbeat lifetime. Automatic machine ticks may
+        // advance its facility view; they must not cancel that same live hold.
+        // Inventory/player revisions and every new action remain strict.
+        const continuation = action.expectedRevision !== undefined && action.expectedRevision < revision
+          && parts.kind === "wayworks" && action.operation.kind === "workshop"
+          && action.operation.action.kind === "pressure"
+          && this.pressureRuntime?.continuesHold(parts.key, peer.identity.id, action.operation.action.action, performance.now());
+        if (action.expectedRevision !== revision && !continuation || action.expectedPlayerRevision !== player.revision) { reject("State changed; refresh both revisions and retry."); return; }
         if (player.revision >= Number.MAX_SAFE_INTEGER) { reject("Player revision exhausted; reconnect before another operation."); return; }
         let inventory = player.inventory.map(inventorySlotFromNetwork);
         const equipment = { ...player.equipment }; let offhand = player.offhand;

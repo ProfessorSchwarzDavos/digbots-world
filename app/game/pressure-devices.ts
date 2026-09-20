@@ -2,11 +2,16 @@ import { BlockId } from "./data";
 import { normalizeAirlockState, type AirlockCommandKind, type AirlockState } from "./pressure-airlock";
 import type { AirPoint } from "./airzone";
 
-export const PRESSURE_LINK_ROLES = ["room", "inner", "outer", "chamber", "interior", "exterior", "pump", "reserve", "shutter"] as const;
+export const PRESSURE_LINK_ROLES = ["room", "inner", "outer", "chamber", "interior", "exterior", "pump", "reserve", "vent", "shutter", "signal"] as const;
 export type PressureLinkRole = typeof PRESSURE_LINK_ROLES[number];
+export type PressureMixture = { oxygenPermille: number; co2Permille: number };
+export type PressureSensorSettings = { minimumPressurePa: number; maximumPressurePa: number; minimumOxygenPpm: number; maximumCo2Ppm: number; output: "alarm" | "safe" };
 export type PressureAction = { kind: "link"; role: PressureLinkRole; target: string }
   | { kind: "unlink"; role: PressureLinkRole }
-  | { kind: "mode"; mode: "supply" | "capture" | "release" | "off" }
+  | { kind: "mode"; mode: "supply" | "capture" | "release" | "balanced" | "off" }
+  | ({ kind: "mixture" } & PressureMixture)
+  | { kind: "valve"; direction: "both" | "front-to-back" | "back-to-front" }
+  | ({ kind: "sensor" } & PressureSensorSettings)
   | { kind: "target"; pressurePa: number; temperatureMilliC: number }
   | { kind: "gate"; width: number; height: number }
   | { kind: "door"; open: boolean }
@@ -14,7 +19,8 @@ export type PressureAction = { kind: "link"; role: PressureLinkRole; target: str
   | { kind: "hold"; command: Extract<AirlockCommandKind, `manual-${string}` | `dangerous-${string}`>; active: boolean };
 export type PressureDevice = {
   schema: 1; installationId: string; links: Partial<Record<PressureLinkRole, string>>; bindings: Record<string, string>;
-  open: boolean; locked: boolean; mode: "supply" | "capture" | "release" | "off";
+  open: boolean; locked: boolean; alarmLocked: boolean; mode: "supply" | "capture" | "release" | "balanced" | "off";
+  mixture: PressureMixture; valveDirection: "both" | "front-to-back" | "back-to-front"; sensor: PressureSensorSettings;
   targetPressurePa: number; targetTemperatureMilliC: number; gateWidth: number; gateHeight: number;
   airlock: AirlockState | null;
 };
@@ -33,17 +39,24 @@ export function parsePressureAction(value: unknown): PressureAction | null {
   switch (action.kind) {
     case "link": return exact("role", "target") && role && (typeof action.target === "string" && !!pressurePoint(action.target) || action.role === "exterior" && action.target === "exterior") ? action as PressureAction : null;
     case "unlink": return exact("role") && role ? action as PressureAction : null;
-    case "mode": return exact("mode") && ["supply", "capture", "release", "off"].includes(String(action.mode)) ? action as PressureAction : null;
+    case "mode": return exact("mode") && typeof action.mode === "string" && ["supply", "capture", "release", "balanced", "off"].includes(action.mode) ? action as PressureAction : null;
+    case "mixture": return exact("oxygenPermille", "co2Permille") && whole(action.oxygenPermille, 0, 1000) && whole(action.co2Permille, 0, 1000) && Number(action.oxygenPermille) + Number(action.co2Permille) <= 1000 ? action as PressureAction : null;
+    case "valve": return exact("direction") && typeof action.direction === "string" && ["both", "front-to-back", "back-to-front"].includes(action.direction) ? action as PressureAction : null;
+    case "sensor": return exact("minimumPressurePa", "maximumPressurePa", "minimumOxygenPpm", "maximumCo2Ppm", "output")
+      && whole(action.minimumPressurePa, 0, 200000) && whole(action.maximumPressurePa, Number(action.minimumPressurePa), 200000)
+      && whole(action.minimumOxygenPpm, 0, 1000000) && whole(action.maximumCo2Ppm, 0, 1000000) && typeof action.output === "string" && ["alarm", "safe"].includes(action.output) ? action as PressureAction : null;
     case "target": return exact("pressurePa", "temperatureMilliC") && whole(action.pressurePa, 10000, 120000) && whole(action.temperatureMilliC, 0, 45000) ? action as PressureAction : null;
     case "gate": return exact("width", "height") && whole(action.width, 3, 9) && whole(action.height, 3, 9) ? action as PressureAction : null;
     case "door": return exact("open") && typeof action.open === "boolean" ? action as PressureAction : null;
-    case "cycle": return exact("command") && ["cycle-out", "return-in", "reset"].includes(String(action.command)) ? action as PressureAction : null;
-    case "hold": return exact("command", "active") && ["manual-open-inner", "manual-open-outer", "dangerous-open-inner", "dangerous-open-outer"].includes(String(action.command)) && typeof action.active === "boolean" ? action as PressureAction : null;
+    case "cycle": return exact("command") && typeof action.command === "string" && ["cycle-out", "return-in", "reset"].includes(action.command) ? action as PressureAction : null;
+    case "hold": return exact("command", "active") && typeof action.command === "string" && ["manual-open-inner", "manual-open-outer", "dangerous-open-inner", "dangerous-open-outer"].includes(action.command) && typeof action.active === "boolean" ? action as PressureAction : null;
     default: return null;
   }
 }
 export function createPressureDevice(installationId: string): PressureDevice {
-  return { schema: 1, installationId, links: {}, bindings: {}, open: false, locked: false, mode: "supply",
+  return { schema: 1, installationId, links: {}, bindings: {}, open: false, locked: false, alarmLocked: false, mode: "supply",
+    mixture: { oxygenPermille: 210, co2Permille: 0 }, valveDirection: "both",
+    sensor: { minimumPressurePa: 65000, maximumPressurePa: 120000, minimumOxygenPpm: 160000, maximumCo2Ppm: 5000, output: "alarm" },
     targetPressurePa: 100000, targetTemperatureMilliC: 20000, gateWidth: 5, gateHeight: 5, airlock: null };
 }
 export function normalizePressureDevice(value: unknown): PressureDevice | null {
@@ -51,11 +64,19 @@ export function normalizePressureDevice(value: unknown): PressureDevice | null {
   const raw = value as PressureDevice;
   if (raw.schema !== 1 || typeof raw.installationId !== "string" || !/^p-[1-9][0-9]{0,14}$/.test(raw.installationId)
     || !raw.links || !raw.bindings || typeof raw.open !== "boolean" || typeof raw.locked !== "boolean"
+    || raw.alarmLocked !== undefined && typeof raw.alarmLocked !== "boolean"
     || !parsePressureAction({ kind: "mode", mode: raw.mode }) || !parsePressureAction({ kind: "target", pressurePa: raw.targetPressurePa, temperatureMilliC: raw.targetTemperatureMilliC })
-    || !parsePressureAction({ kind: "gate", width: raw.gateWidth, height: raw.gateHeight }) || Object.keys(raw.links).length > 9 || Object.keys(raw.bindings).length > 9) return null;
+    || !parsePressureAction({ kind: "gate", width: raw.gateWidth, height: raw.gateHeight }) || Object.keys(raw.links).length > PRESSURE_LINK_ROLES.length || Object.keys(raw.bindings).length > PRESSURE_LINK_ROLES.length) return null;
+  const defaults = createPressureDevice(raw.installationId), mixture = raw.mixture === undefined ? defaults.mixture : raw.mixture,
+    sensor = raw.sensor === undefined ? defaults.sensor : raw.sensor, valveDirection = raw.valveDirection === undefined ? defaults.valveDirection : raw.valveDirection;
+  if (!mixture || !sensor || typeof mixture !== "object" || typeof sensor !== "object" || Object.keys(mixture).length !== 2 || Object.keys(sensor).length !== 5
+    || !parsePressureAction({ ...mixture, kind: "mixture" }) || !parsePressureAction({ ...sensor, kind: "sensor" })
+    || !parsePressureAction({ kind: "valve", direction: valveDirection })) return null;
   for (const [role, target] of Object.entries(raw.links)) if (!parsePressureAction({ kind: "link", role, target })) return null;
   for (const [key, id] of Object.entries(raw.bindings)) if (!pressurePoint(key) || typeof id !== "string" || !/^p-[1-9][0-9]{0,14}$/.test(id)) return null;
   return { ...createPressureDevice(raw.installationId), links: { ...raw.links }, bindings: { ...raw.bindings }, open: raw.open, locked: raw.locked,
+    alarmLocked: raw.alarmLocked ?? false,
+    mixture: { ...mixture }, sensor: { ...sensor }, valveDirection,
     mode: raw.mode, targetPressurePa: raw.targetPressurePa, targetTemperatureMilliC: raw.targetTemperatureMilliC, gateWidth: raw.gateWidth, gateHeight: raw.gateHeight,
     airlock: raw.airlock === null ? null : normalizeAirlockState(raw.airlock) };
 }

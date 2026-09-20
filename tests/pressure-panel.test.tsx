@@ -24,6 +24,15 @@ const render = (props: Partial<PressurePanelProps> = {}) => renderToStaticMarkup
 const device = createPressureDevice("p-1");
 const diagnostic = { device, zone: undefined, occupants: 0, capacity: 0, leak: null, checkAgeMs: 0, topologyRevision: 7, error: null } as PressurePanelProps["pressure"];
 
+test("normal controls expose finite vent modes, mixture, equalization valve and sensor thresholds", () => {
+  const vent = render({ kind: "atmosphere-vent", pressure: diagnostic });
+  for (const label of ["Capture", "Release", "Balanced composition", "Target oxygen", "Target carbon dioxide", "Apply mixture", "Chamber vent"]) assert.ok(vent.includes(label), label);
+  const valve = render({ kind: "equalization-vent", pressure: diagnostic });
+  assert.match(valve, /Target pressure/); assert.match(valve, /Check-valve direction/); assert.match(valve, /front-to-back/);
+  const sensor = render({ kind: "pressure-sensor", pressure: diagnostic });
+  for (const label of ["Minimum pressure", "Maximum pressure", "Minimum oxygen", "Maximum carbon dioxide", "Output polarity", "Signal receiver", "Apply sensor thresholds"]) assert.ok(sensor.includes(label), label);
+});
+
 test("unknown habitat remains unverified, with unavailable readings and no nested dialog", () => {
   const html = render();
   assert.match(html, /data-state="unknown">Unknown/);

@@ -2,6 +2,15 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Pure per-orbit metadata-owner proposal now rejects duplicate location mirrors,
+  stale revisions, omitted prior custody, unknown extensions and wrong field scope.
+  All classified fields have explicit physical-vs-view-local disposition without
+  opaque metadata rewriting. One-ring scope reconciliation requires new-region
+  construction to reach canonical pages before its mirror disappears, retaining
+  all prior asteroid records. Record-r4:21PASS; static74/lint57PASS.
+  This remains unconnected structural ownership code, not a complete selector or
+  persistent catalog. Next repository catalog will be internal UniverseData so
+  flat engine saves do not echo stale owner revisions back into storage.
 - Station/voxel attachment prerequisites pass combined136 tests (owner-r5).
   Station read models are not persisted registries; metadata proposals use the
   original canonical permissions/replay history, including occupied-dock cargo

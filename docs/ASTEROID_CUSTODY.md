@@ -104,5 +104,10 @@ rooms/anchors must fit; physical placement/docking and fleet-view integration
 remain separate unfinished adapters. Voxel prerequisites translate chunk/index
 edits and remove finite-page mirrors only after exact canonical readback. No
 normal checkpoint uses these new mirror-removal helpers yet.
+The pure per-orbit owner record separates physical fields from view-local state,
+rejects duplicate/missing custody and stale revisions, and explicitly reconciles
+new finite regions during a one-ring survey. It is not yet stored by the universe
+repository. Its structural ownership checks are not a complete spatial selector
+or a substitute for each subsystem's semantic and authorization checks.
 The remaining single-owner catalog, complete physical/component selector, atomic
 storage integration and ordinary travel evidence are required before entry opens.

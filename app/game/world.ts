@@ -3146,8 +3146,8 @@ export class ChunkWorld {
     savedFacings?: Readonly<Record<string, number>>,
     scope?: LocationStamp,
   ) {
+    const nextScope = scope ? validateLocationStamp(scope) : this.locationScope;
     this.locationLoadEpoch += 1;
-    if (scope) this.locationScope = validateLocationStamp(scope);
     // Drop old callbacks and their transferred buffers before admitting work
     // for a different owner, even when its seed and coordinates are identical.
     this.terrainGenerationPipeline.dispose();
@@ -3155,6 +3155,8 @@ export class ChunkWorld {
     this.terrainGenerationPipeline = new TerrainGenerationPipeline();
     this.terrainBufferPipeline = new TerrainBufferPipeline();
     this.disposeChunks();
+    // Disposal caches the outgoing payload under its original owner and edits.
+    this.locationScope = nextScope;
     this.generationQueue = [];
     this.generationQueued.clear();
     this.generationEnqueuedAt.clear();
@@ -3795,7 +3797,9 @@ export class ChunkWorld {
       const dz = Math.floor(index / 3) - 1;
       return this.chunkEditSignature(chunkKey(cx + dx, cz + dz));
     }).join(".");
-    return `terrain-location-v1|${this.locationScope.locationId}|g${GENERATOR_VERSION}|${this.seedText}|${JSON.stringify(this.generationOptions)}|${key}|${editHalo}`;
+    // Location v1 could label outgoing orbit voxels as incoming surface terrain.
+    // Ignore those disposable records without deleting caches or durable saves.
+    return `terrain-location-v2|${this.locationScope.locationId}|g${GENERATOR_VERSION}|${this.seedText}|${JSON.stringify(this.generationOptions)}|${key}|${editHalo}`;
   }
 
   private generationNamespace(key: string) { return `${this.locationLoadEpoch}|${this.chunkCacheKey(key)}`; }

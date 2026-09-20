@@ -2,6 +2,19 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — revision12, first transaction checkpoint
 
+- Director-approved bounded cache correction: focused-r34 reproduced12 failures
+  in16 tests (wrong outgoing keys both directions, invalid-scope epoch mutation,
+  v1 cache eligibility and8 invalid spawn supports); stale callback/boundary
+  controls passed. Reset now validates first, invalidates old work early, disposes
+  with outgoing scope/seed/options/edits, then installs incoming scope. Derived
+  terrain-location-v2 ignores poisoned v1 entries without deleting them. Native
+  Morrow support and Owl refuge scans require integer in-world ground plus two
+  clearance cells. focused-r35:48PASS/3FAIL (unchanged legacy location-runtime
+  fixtures use unsupported bare morrow body ID); all16 new regressions PASS.
+  focused-r36 bounded44PASS; static-r28/lint-r17 and green historical-column
+  cache-correction-r1 PASS, y33.5 and old-v1 rejection. Build/cold-load pending;
+  old invalid specimens preserved, not relocated/deleted. Director budget-drain
+  ACK: finish only this bounded checkpoint, drain all jobs, no follow-on work.
 - b4d529d build-r9/official-r9 and normal cabin-r4/r5 interaction custody PASS:
   old east window rotated, upper-door inspection and nearby habitat refresh,
   exact facing/link persistence, original fleet/inventory/gas/heat retained.

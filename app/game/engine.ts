@@ -28254,12 +28254,15 @@ export class VoxelEngine {
         let found = false;
         for (let dx = -5; dx <= 5 && !found; dx++) for (let dz = -5; dz <= 5 && !found; dz++) for (let dy = 8; dy >= -8; dy--) {
           const rx = Math.round(site.center.x + dx), rz = Math.round(site.center.z + dz), ry = Math.round(site.center.y + dy);
+          if (!Number.isSafeInteger(ry) || ry < MIN_Y || ry > MAX_Y - 2) continue;
           this.world.generateChunk(Math.floor(rx / CHUNK_SIZE), Math.floor(rz / CHUNK_SIZE));
           if (this.world.getBlock(rx, ry, rz) !== BlockId.RuneStone || !this.world.isWalkThrough(this.world.getBlock(rx, ry + 1, rz)) || !this.world.isWalkThrough(this.world.getBlock(rx, ry + 2, rz))) continue;
           x = rx; z = rz; ground = ry; found = true; break;
         }
         if (!found) continue;
       }
+      // Below-world Bedrock and above-world Air are sentinels, not spawn support.
+      if (!Number.isSafeInteger(ground) || ground < MIN_Y || ground > MAX_Y - 2) continue;
       const definition = MOB_DEFS[kind], pool: NaturalPopulationPool = "surface-animal", cost = naturalPopulationCost(definition);
       if (local.byPool[pool].cost + cost > budgets[pool].target || global.totalCost + cost > ceiling) return;
       if (!this.ecologyAllowsSpecies(kind, x, z) || this.naturalSpawnVisibleToPlayer(x, ground, z, 48)) continue;

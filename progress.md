@@ -22,6 +22,18 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 - Separate engine asteroid local-frame travel remains fail-closed until attached
   metadata has one owner. Runtime field expansion/full CF6/CFV remain unfinished.
   See docs/ASTEROID_CUSTODY.md and CF6/r14-asteroid-runtime/PLAN.md.
+- Final runtime313c8a1/build22 YvEMSfzfwuhoh5vp-SyzD:74 focused tests, static49,
+  lint33, UI3, unchanged official22, seven-stage actual-IDB fault/import/retention,
+  mining-custody-r2 and cold-custody-r1 PASS. Normal r2 claim/trusted-public grants,
+  copper/slate mining and one finite dirt placement survive fresh r3 cold load.
+  Exact two pickaxe durability uses/one dirt debit, fleet/Home, canonical pages,
+  station claims and cold machine/pressure/facing/terrain metadata retained.
+  Desktop/mobile/focus/labels personally reviewed; all jobs/ports drained.
+- No loose-cargo conservation claim: fixture lacks Tether Spool and normal
+  pickup rejects; three observed Raw Copper are absent in finalr2, while one
+  Moon Slate remains through cold. Ordinary drift/expiry is an inference only.
+  Fixture changes only initial pose, not supplies/terrain; no normal travel claim.
+  No publication/deploy, phase completion, new helpers or evidence cleanup.
 
 ## Celestial Frontiers CF6 — station kit integration
 

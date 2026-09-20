@@ -2,6 +2,17 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Repository checkpoint5969ed9/runtimebe0d4b4/build31 independently accepted by
+  Wildkeeper23:46:37UTC. Next whole-unit entity capture prerequisite preserves
+  exact unchanged canonical axes across known body/roost/work/dragon/boat anchors,
+  live/sleep transfers and reordered arrays. Drops have no saved stable ID, so
+  host-owned ephemeral source lineage is mandatory; no metadata-based identity
+  guessing or saved-schema change. Real naive arithmetic red-r2 changes0.1 to
+  0.10000000000000142; r1 was a retained nonexistent-descriptor fixture error.
+  Capture-r2:51PASS, including100cold JSON cycles; static82/lint63PASS. Static81
+  readonly test mutations retained and replaced with immutable fixture copies.
+  This helper is not integrated or a complete collider/guard/POI/agent selector;
+  host authority, revision-bound finite changes and ordinary travel remain open.
 - Final correctionbe0d4b4 passes committed combined247/static80/lint61 and
   build31z2xopHBtFbwOnGLyxeQ7r. Unchanged official31 and normal browser r2 pass;
   keyboard survey60-to140 retains old60, exact1000J electrical debit/heat gain,

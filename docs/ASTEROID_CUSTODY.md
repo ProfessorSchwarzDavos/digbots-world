@@ -89,6 +89,11 @@ aquariums and pressure; `asteroid-attachment-entities.ts` handles known entity
 anchors and complete lead/passenger relationships; `asteroid-attachment-policy.ts`
 classifies every location-owned save field. These are not save-owner adapters or
 travel permission checks. Portable inventory metadata remains opaque.
+`asteroid-attachment-entity-capture.ts` retains unchanged canonical fractional
+axes against an exact whole-unit baseline, including live/sleep transfers and
+reordered boats. Loose drops require explicit ephemeral host lineage because
+the saved drop schema has no stable IDs; matching by item or array order is not
+safe. This capture helper is not a spatial selector or resource authorization.
 
 Pressure zone IDs are derived from location and membership, so projections must
 remap their station/airlock references together. Gas, heat, installation identities,

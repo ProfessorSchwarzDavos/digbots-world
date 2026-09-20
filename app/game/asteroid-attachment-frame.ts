@@ -41,6 +41,9 @@ export function asteroidAttachmentContains(frame: AsteroidAttachmentFrame, point
   return axes.every(axis => Number.isSafeInteger(point[axis])) && point.x >= b.minX && point.x <= b.maxX
     && point.y >= b.minY && point.y <= b.maxY && point.z >= b.minZ && point.z <= b.maxZ;
 }
+export function asteroidAttachmentContainsCell(frame: AsteroidAttachmentFrame, key: string, view: AsteroidAttachmentView): boolean {
+  return asteroidAttachmentContains(frame, pointFor(key), view);
+}
 export function rebaseAsteroidCell(frame: AsteroidAttachmentFrame, key: string, from: AsteroidAttachmentView): string {
   const point = pointFor(key);
   if (!asteroidAttachmentContains(frame, point, from)) throw Error("Attached installation crosses the asteroid frame boundary.");

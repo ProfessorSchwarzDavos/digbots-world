@@ -2,6 +2,14 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Attached block/pressure projection and merge primitives now retain outside
+  components exactly, reject stale/cross-boundary/duplicate-identity state, and
+  preserve one pressure counter/flux ledger with explicit gas+heat balances.
+  Focused attachment-owner-r3:90PASS; static68/lint51PASS. Retained owner-r1 fixture
+  failure (missing process initialization), static67 fixture type error, and
+  corrected reruns. Still unconnected to engine/storage/travel. Canonical design
+  refined to one orbit-field metadata owner in orbit coordinates, so global
+  pressure ledgers and station history are not duplicated among asteroid owners.
 - Survey54c02c2/runtimeb3efd23/build29 independently accepted by Wildkeeper.
   Attached-frame prerequisite now covers disjoint252-cell coordinate contracts,
   whole machine/aquarium/pressure rebasing, exact gas/heat/deadline/identity custody,

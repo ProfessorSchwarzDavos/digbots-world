@@ -91,5 +91,11 @@ Pressure zone IDs are derived from location and membership, so projections must
 remap their station/airlock references together. Gas, heat, installation identities,
 airlock deadlines and finite cargo cannot change merely because coordinates do.
 Unknown fields and components crossing frame boundaries must block admission.
+The keyed-block and pressure projection/merge prerequisites retain untouched
+outside components, reject stale baselines and identity collisions, and keep one
+global pressure counter and boundary ledger. The planned canonical metadata owner
+is per orbit field, with transient bounded asteroid views; station history must
+not be split or reset to manufacture a local registry. These pure merges still
+require the host's revision/lease and an atomic resource transaction.
 The remaining single-owner catalog, complete physical/component selector, atomic
 storage integration and ordinary travel evidence are required before entry opens.

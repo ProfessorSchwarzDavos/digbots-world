@@ -8,7 +8,8 @@ import { MORROW_MOB_KINDS } from "../app/game/morrow-ecology";
 import { MOB_DEFS, MOB_ORDER } from "../app/game/mobs";
 import { createMobVisual } from "../app/game/mob-models";
 import { creatureProfile } from "../app/game/creature-profiles";
-import { creatureEcologyContract } from "../app/game/creature-ecology";
+import { creatureEcologyContract, validateCreatureEcologyContracts } from "../app/game/creature-ecology";
+import { createFieldPerchState, placeBirdOnFieldPerch, normalizeFieldPerchState, takeBirdFromFieldPerch } from "../app/game/field-perch";
 import { habitatOccupantOxygenDemand } from "../app/game/pressure-occupants";
 import { captureLanternJar, readLanternJar } from "../app/game/lantern-jar";
 import { createAirZoneState, discoverAirZone } from "../app/game/airzone";
@@ -162,6 +163,16 @@ test("actual Owl controller makes bounded crossings and rests on its real dream 
   Reflect.set(engine, "world", { celestialTerrain: { kind: "morrow" }, surfaceAt: () => 0, getBlock: () => BlockId.PaleRegolith });
   for (let i = 0; i < 40; i++) exposure(1);
   assert.ok(mob.health < 20, "ordinary lunar soil does not replenish a refuge");
+});
+
+test("authored Morrow Owl perch custody preserves its finite veil without granting free recharge", () => {
+  assert.deepEqual(validateCreatureEcologyContracts(), []);
+  const owl = { ...specimen, kind: "morrow-owl", custom: { morrowExposure: { exposureSeconds: 2, veilSeconds: 3 } } } as CreatureMetadata;
+  const occupied = placeBirdOnFieldPerch(createFieldPerchState(), owl)!;
+  assert.ok(occupied); assert.deepEqual(occupied.resident, owl);
+  const restored = normalizeFieldPerchState(JSON.parse(JSON.stringify(occupied)));
+  const taken = takeBirdFromFieldPerch(restored)!;
+  assert.deepEqual(taken.metadata, owl); assert.equal(taken.state.resident, null);
 });
 
 test("actual Slatefin moves inside loose regolith without destroying voxels or entering stone", () => {

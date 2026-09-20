@@ -326,7 +326,7 @@ export const EXPANSION_CREATURE_ECOLOGY_SEEDS = Object.freeze({
 const sets = {
   aquarium: new Set<MobKind>(AQUARIUM_MOB_ORDER),
   aquatic: new Set<MobKind>([...AQUATIC_MOB_ORDER, ...HEARTHROADS_AQUATIC_ORDER, ...TIDEGLASS_AQUATIC_ORDER]),
-  birds: new Set<MobKind>([...BIRD_ORDER, "runeowl", "ironbeak-magpie", "mirecrown-crane", "stormglass-roclet"]),
+  birds: new Set<MobKind>([...BIRD_ORDER, "runeowl", "ironbeak-magpie", "mirecrown-crane", "stormglass-roclet", "morrow-owl"]),
   pollinators: new Set<MobKind>([...POLLINATOR_ORDER, ...BUTTERFLY_ORDER, "glowmoth"]),
   sentients: new Set<MobKind>(SENTIENT_MOB_ORDER),
   constructs: new Set<MobKind>(V1_FACTION_CREATURE_ORDER.filter((kind) => MOB_DEFS[kind].family === "construct")),

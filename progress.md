@@ -2,6 +2,20 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — revision12, first transaction checkpoint
 
+- Exact8f44fc8 build-r5/official-r5 PASS. Normal browser-return-r2 rebuilt the
+  Morrow pad from all nine carried tiles, boarded without a console, piloted
+  ascent, reached Morrow orbit/Home orbit/Home surface and disembarked healthy.
+  Strict browser-return-custody-r1 PASS: original ship/cargo/modules/hull/crew,
+  three route costs once, original berth, exact final saved ship;30Lfuel/45Loxid/
+  45.928LO2/133.456kJ remain. No return resupply or replacement ship staged.
+- Jar-r3 normal release and cold reload preserve exact name/health/genetic seed,
+  progression/capture history/exposure/work, one world owner and one empty jar.
+  Both strict receipts PASS; second SaveQuit pointer interception is retained,
+  not claimed successful. Screenshots personally reviewed. Perch audit found
+  Morrow Owl missing from bird eligibility; focused-r19 36/36, static-r19 and
+  lint-r9 PASS after correction. Station/asteroid runtime/rescue/maps/typed
+  authority and natural ecology browser gates remain; no fullCF6/CFV claim.
+
 - Exact6d91ce6 build-r4/official-r4 PASS, indoor release screenshot confirms
   floor32.5 rather than roof36.5. Strict storage comparison exposed changed
   progression/genetic seeds; source now preserves those through real spawn,

@@ -17,6 +17,14 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
   two-sided glass surfaces and reusable exact-socket elbows, preserving stores.
   Fifty expanded tests/static43/lint27 pass before final low-wall-corner refinement;
   final runtime/browser/custody evidence remains pending.
+- Revision14 runtime3c5c95b/build18 verified:50 focused tests, static44/lint29,
+  official18b and final cold custody PASS. Personally reviewed seamless flat roof,
+  both upright wall axes, exposed/rejoined frames, all four transport families,
+  exact socket elbows, port/rotation/remove/replace and cold saved connections.
+  Mobile390px no overflow; EVA HUD still occludes upper view. Synthetic-only,
+  finite ordinary actions; mined pipe loose cargo expired/absent after normal
+  EVA recovery and is not claimed conserved. FullCF6 remains open; geometry
+  source-bound manifest/handoff is separate from accepted prior habitat evidence.
 
 - Browser-r1 crafted/placed all four parts from finite raw inputs, measured a
   breathable142m3 room, exhausted/recharged a paid observatory, and transferred

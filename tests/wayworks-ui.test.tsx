@@ -118,3 +118,10 @@ test("full-screen narrow Waygrid has no outer padding beyond the viewport", () =
   const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
   assert.match(css, /@media \(max-width: 720px\)\s*\{\s*\.waygrid-overlay\s*\{\s*padding: 0;\s*\}\s*\.waygrid-window\s*\{\s*width: 100vw; height: 100dvh;/);
 });
+
+test("machine close hover overrides the generic enabled-button background", () => {
+  const css = readFileSync(new URL("../app/game/wayworks.css", import.meta.url), "utf8");
+  // The generic :hover:not(:disabled) rule otherwise wins specificity and puts
+  // pale ink on pale parchment. Keep the dark header control independently legible.
+  assert.match(css, /\.ww-panel \.ww-close:hover:not\(:disabled\)\s*\{\s*background: #5b4931;\s*\}/);
+});

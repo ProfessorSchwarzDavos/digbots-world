@@ -53,7 +53,7 @@
 .ww-panel button:focus-visible,
 .ww-panel select:focus-visible { outline: 3px solid #73501c; outline-offset: 3px; }
 .ww-panel .ww-close { flex: 0 0 44px; width: 44px; padding: 0; color: #f5dfae; background: #393127; border-color: #b18a48; font-size: 26px; }
-.ww-panel .ww-close:hover { background: #5b4931; }
+.ww-panel .ww-close:hover:not(:disabled) { background: #5b4931; }
 .ww-panel .ww-close:focus-visible { outline-color: #f5dfae; }
 .ww-operation { margin-top: 18px; padding-top: 2px; }
 .ww-selected { margin: 0 0 12px; font-size: 12px; }

@@ -1719,3 +1719,25 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   fault. Cold-recovery-r2 42/42 and integrated focused-r11 243/243 pass; static-r19
   and lint-r8 pass. Fresh build and browser replay of the retained active-cycle
   save remain required.
+
+## CF5 final normal verification - 2026-09-20 03:04 UTC
+
+- Production6e3d04f/build-r5 passed retained active-cycle cold recovery, outward
+  opening and safe return. Normal r8 crafted/assembled/powered a3x4hangar gate,
+  crossed it, confirmed closed collision and missing-frame denial, then repaired
+  and reopened it without a persistent lock. A mined/placed Gasline retained
+ 4800mLhydrogen and its filter through r9 cold reload.
+- Controlled helmet-off low-pressure exposure caused hypoxia/pressure injury;
+  the player exited alive and resealed both test walls. No full-pressure-suit
+  protection claim. An earlier optional relocation/floor-overmine/death trace is
+  retained separately as a failed synthetic harness experiment, not acceptance.
+- r9 captured14000mmol from the4cellchamber; directional equalization then
+  raised90.531→95.000kPa exactly, lowered the separate95cellroom99.069→98.880kPa,
+  and spent400J. Reverse direction blocked flow. Normal paired-door replacement
+  retained12kJ, required explicit installation rebind, and restored idle-inner-safe.
+- Desktop and390px screenshots personally reviewed. One hover selector lost to
+  generic button specificity, hiding the close glyph against pale parchment;
+  focused regression fails red, narrow selector correction awaits final rebuild.
+  All functional source since6e3d04f is unchanged by this visual-only correction.
+- Final exact-source checks/build/official client and evidence handoff remain;
+  CF6 proposal exists but source is undispatched. Frozen CF0-CF4 untouched.

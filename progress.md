@@ -1741,3 +1741,16 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   All functional source since6e3d04f is unchanged by this visual-only correction.
 - Final exact-source checks/build/official client and evidence handoff remain;
   CF6 proposal exists but source is undispatched. Frozen CF0-CF4 untouched.
+
+- Final8e601fa focused-r12 **244/244**,static-r20,lint-r9 and isolatedbuild-r6
+  PASS; build IDgOlqK09YdAkvjYfoBkqaN. Browser-r10 coldloads the restored normal
+  construction checkpoint: idle-inner-safe, originaldoor12000J, gate1520J and
+  gasline4800mLH2 survive. Desktop005/mobile009 hover screenshots personally
+  opened; close glyph legible and390pxdocument remains390wide. SaveQuit14,
+  title15/storage16/context17closed. Unchanged official-webgame-r2 PASS,
+  playing26workshopinstances,health2/breathingsafe,no captured errors; image
+  personally opened. Known circular-chunk/module-type warnings retained.
+- Preview4336 stopped after verification; port readback has no listener.
+  All helpers/builds/tests/browser jobs drained. CF5 exact-source manifest and
+  criterion-level handoff are ready for director review. This is not CFV or full
+  campaign completion; CF6 remains proposal-only pending acceptance/dispatch.

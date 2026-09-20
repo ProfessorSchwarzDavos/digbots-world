@@ -193,6 +193,34 @@ test("door opening checks live pressure, both collision halves, obstruction and 
   } finally { f.runtime.dispose(); }
 });
 
+test("normal hangar construction and frame repair do not create a permanent interlock", () => {
+  const f = fixture(), key = "4,2,3";
+  try {
+    f.add(key, "hangar-pressure-gate"); f.settle();
+    assert.equal(f.act(key, { kind: "gate", width: 3, height: 3 }).ok, true);
+    assert.equal(f.runtime.diagnosticsFor(key).error, "incomplete-frame");
+    for (let x = 3; x <= 5; x++) for (let y = 2; y <= 4; y++) if ((x === 3 || x === 5 || y === 2 || y === 4) && `${x},${y},3` !== key) {
+      f.blocks.set(`${x},${y},3`, BlockId.HangarFrame); f.runtime.onEdit({ x, y, z: 3 });
+    }
+    f.settle();
+    assert.equal(f.runtime.diagnosticsFor(key).error, null);
+    assert.equal(f.runtime.devices.get(key)!.locked, false);
+    assert.equal(f.runtime.closedGateAt({ x: 4, y: 3, z: 3 }), true);
+    assert.equal(f.act(key, { kind: "door", open: true }).ok, true);
+    const corner = { x: 3, y: 4, z: 3 };
+    f.blocks.set(airCellKey(corner), BlockId.Air); f.runtime.onEdit(corner); f.settle();
+    assert.equal(f.runtime.devices.get(key)!.open, false);
+    assert.equal(f.runtime.diagnosticsFor(key).error, "incomplete-frame");
+    f.blocks.set(airCellKey(corner), BlockId.HangarFrame); f.runtime.onEdit(corner); f.settle();
+    assert.equal(f.act(key, { kind: "door", open: true }).ok, true);
+    f.runtime.devices.get(key)!.locked = true; // Existing independent safety lock.
+    f.blocks.set(airCellKey(corner), BlockId.Air); f.runtime.onEdit(corner); f.settle();
+    f.blocks.set(airCellKey(corner), BlockId.HangarFrame); f.runtime.onEdit(corner); f.settle();
+    assert.equal(f.runtime.devices.get(key)!.locked, true);
+    assert.equal(f.act(key, { kind: "door", open: true }).ok, false);
+  } finally { f.runtime.dispose(); }
+});
+
 test("unknown topology retains finite air but disables breathable environment and powered opening", () => {
   const f = splitDoorFixture(), door = "4,2,3"; try {
     const original = resources(f.gas(12 * 40000)); f.gas(12 * 40000, { x: 5, y: 2, z: 3 });

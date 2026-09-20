@@ -1700,3 +1700,9 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
 - Browser-r4 saved to title117, storage118 retained, context closed. Preview-r2
   remains until next build. Normal chemistry/crafting/breach/unsafe health and
   new controls still need browser coverage; no fullCF5/CFV completion claimed.
+
+- At01:35UTC source review found unfinished hangar frames permanently interlocked
+  their controller even after repair. The actual-runtime regression failed red,
+  then passed after separating frame validity from independent safety locks.
+  Build-r3 was intentionally interrupted before source edits; partial output
+  retained and no successful-build claim. Fresh isolated candidate follows.

@@ -167,7 +167,12 @@ export class PressureRuntime {
         return type === undefined ? { kind: "unloaded" } : type === BlockId.HangarFrame || airCellKey(point) === key ? { kind: "frame" }
           : !BLOCKS[type]?.solid ? { kind: "clear" } : { kind: "obstructed" };
       });
-      if (result.valid) this.gates.set(key, result.interior); else { this.gateErrors.set(key, result.reason); device.open = false; device.locked = true; }
+      if (result.valid) this.gates.set(key, result.interior);
+      else {
+        // Frame validity already gates setDoor. Do not turn an unfinished build
+        // into an unrelated permanent airlock/alarm lock that repair cannot clear.
+        this.gateErrors.set(key, result.reason); device.open = false;
+      }
     }
   }
   doorCells(key: string): readonly AirPoint[] {

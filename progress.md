@@ -1,5 +1,19 @@
 Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks; add double-tap-forward sprinting; build scalable butterfly exhibit blocks with inventories, flowers, landing behavior, and capacity up to about 20 connected blocks; make recipe-book hover previews and click-to-fill crafting, fix crafting/furnace arrows, add recipe search and mirrored recipes; animate and flow water, improve swimming/shore exits, add oxygen; add ocean, river, and underground fish; add a larger two-seat sailboat with crouch-use chest storage; fix third-person vertical controls and interaction; allow mobs through open doors; remove tree-growth notices; add five surface mobs, birds, desert plants/features, desert and forest temple POIs with chests, a new enemy, and rare magical durable loot; add a tameable breedable banana-rabbit pet with naming and commands; add metadata-preserving creature cages; add male/female player choice with multiplayer, armor, and held-item representation; add a banana-rabbit POI; add visible game versions and save-version metadata plus title-screen fullscreen; add skeleton archery; optimize and benchmark 10-default/16-max render distance with separate 6-8 simulation distance; rework clouds and biome-sensitive weather; enrich meadow grass, flowers, butterflies, and a large butterfly POI. Do all of it thoughtfully and report only when entirely done.
 
+## Celestial Frontiers CF6 — asteroid runtime integration
+
+- Connected geometry checkpoint9b236bf/runtime3c5c95b/build18 is frozen and
+  director accepted; evidence remains unchanged in CF6/r14-connected-geometry.
+- New universe-owned asteroid fields migrate ordinary orbit edits and project
+  canonical depletion before chunk hydration. Nearby Field-Wrench host discovery,
+  claim and independent build/extract grants now use normal inventory/tool rules.
+  Multiblock human/peer/drone mutations check all relevant claim cells.
+- asteroid-runtime-r3: 50 combined tests PASS; r1's three fixture/oracle failures
+  retained and corrected. static46 PASS. Final static/lint/build/browser pending.
+- Separate engine asteroid local-frame travel remains fail-closed until attached
+  metadata has one owner. Runtime field expansion/full CF6/CFV remain unfinished.
+  See docs/ASTEROID_CUSTODY.md and CF6/r14-asteroid-runtime/PLAN.md.
+
 ## Celestial Frontiers CF6 — station kit integration
 
 - Habitat b96771f/build16 checkpoint frozen separately: actual natural eclipse,

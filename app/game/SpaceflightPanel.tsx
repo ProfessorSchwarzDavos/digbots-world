@@ -1,7 +1,8 @@
 "use client";
 import { useState, type KeyboardEvent } from "react";
 import { itemName } from "./data";
-import { FIRST_FLIGHT_ROUTES, SPACE_RESOURCE_LABELS, type SpaceflightIntent, type SpaceflightMission } from "./spaceflight-mission";
+import { FIRST_FLIGHT_ROUTES, SPACE_RESOURCE_LABELS, type AsteroidInspection, type SpaceflightIntent, type SpaceflightMission } from "./spaceflight-mission";
+import type { AsteroidGrant } from "./asteroid-custody";
 import { SURVEY_HOPPER_CAPACITY, VEHICLE_RESOURCES } from "./space-vehicle";
 import { STATION_GRANTS, STATION_PERMISSIONS, type OrbitalStation, type StationGrant } from "./orbital-station";
 import { shipDock } from "./station-runtime";
@@ -19,12 +20,41 @@ export function SpaceflightDialog({ mission, onAction, onClose, feedback }: { mi
     else if (!event.shiftKey && event.target === last) { event.preventDefault(); first?.focus(); }
   }
   return <div className="ww-overlay" onPointerDown={event => event.stopPropagation()} onKeyUp={event => event.stopPropagation()}>
-    <section className="ww-panel spaceflight-dialog" role="dialog" aria-modal="true" aria-label={!mission.ship && mission.stations ? "Orbital station" : "Spacecraft mission"} onKeyDown={keys}>
-      <header className="ww-header"><h2>{mission.ship ? "Spacecraft mission" : mission.stations ? "Orbital station" : "Spacecraft mission"}</h2>
-        <button type="button" autoFocus onClick={onClose}>{mission.ship ? "Return to cockpit" : "Return to game"}</button></header>
-      <div className="ww-body">{feedback && <p role="status">{feedback}</p>}<SpaceflightPanel mission={mission} onAction={onAction} /></div>
+    <section className="ww-panel spaceflight-dialog" role="dialog" aria-modal="true" aria-label={mission.asteroid ? "Asteroid claim" : !mission.ship && mission.stations ? "Orbital station" : "Spacecraft mission"} onKeyDown={keys}>
+      <header className="ww-header"><h2>{mission.asteroid ? "Asteroid claim" : mission.ship ? "Spacecraft mission" : mission.stations ? "Orbital station" : "Spacecraft mission"}</h2>
+        <button type="button" autoFocus onClick={onClose}>{mission.ship && !mission.asteroid ? "Return to cockpit" : "Return to game"}</button></header>
+      <div className="ww-body">{feedback && <p role="status">{feedback}</p>}{mission.asteroid
+        ? <AsteroidControls key={`${mission.asteroid.id}:${mission.asteroid.registryRevision}`} asteroid={mission.asteroid} onAction={onAction} />
+        : <SpaceflightPanel mission={mission} onAction={onAction} />}</div>
     </section>
   </div>;
+}
+
+function AsteroidControls({ asteroid, onAction }: { asteroid: AsteroidInspection; onAction(action: SpaceflightIntent): void }) {
+  const [trusted, setTrusted] = useState(asteroid.claim?.trustedIds.join(", ") ?? "");
+  const [build, setBuild] = useState<AsteroidGrant>(asteroid.claim?.build ?? "owner");
+  const [extract, setExtract] = useState<AsteroidGrant>(asteroid.claim?.extract ?? "owner");
+  const base = { asteroidId: asteroid.id, epoch: asteroid.epoch, registryRevision: asteroid.registryRevision };
+  const ids = trusted.split(",").map(value => value.trim()).filter(Boolean);
+  const validIds = ids.length <= 64 && new Set(ids).size === ids.length && ids.every(id => /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,159}$/.test(id));
+  return <section className="ww-materials" aria-label="Observed asteroid">
+    <h3>{asteroid.composition[0].toUpperCase() + asteroid.composition.slice(1)} asteroid</h3>
+    <p>{asteroid.id} · inspected at [{asteroid.point.x}, {asteroid.point.y}, {asteroid.point.z}]</p>
+    <p role="status">{asteroid.claim ? `Claimed by ${asteroid.claim.ownerId}.` : "Unclaimed. Anyone may extract; claim it before building."}</p>
+    {!asteroid.nearby && <p>Return within six blocks of the inspected rock to change this claim.</p>}
+    {!asteroid.claim ? <button type="button" disabled={!asteroid.nearby} onClick={() => onAction({ kind: "asteroid-claim", ...base })}>Claim asteroid</button>
+      : asteroid.claim.ownerId === "local" ? <>
+        <label>Construction <select value={build} onChange={event => setBuild(event.target.value as AsteroidGrant)}>
+          <option value="owner">Owner only</option><option value="trusted">Trusted builders</option><option value="public">Everyone</option></select></label>
+        <label>Extraction <select value={extract} onChange={event => setExtract(event.target.value as AsteroidGrant)}>
+          <option value="owner">Owner only</option><option value="trusted">Trusted miners</option><option value="public">Everyone</option></select></label>
+        <details><summary>Trusted player and agent IDs</summary><label>Trusted IDs <input value={trusted} maxLength={10300}
+          onChange={event => setTrusted(event.target.value)} placeholder="Comma-separated authenticated IDs" /></label>
+          {!validIds && <p>Use at most 64 unique IDs containing letters, digits, dots, colons, underscores or hyphens.</p>}</details>
+        <button type="button" disabled={!asteroid.nearby || !validIds} onClick={() => onAction({ kind: "asteroid-access", ...base, trustedIds: ids, build, extract })}>Save asteroid access</button>
+      </> : <p>Construction: {asteroid.claim.build}. Extraction: {asteroid.claim.extract}. Only the owner can change access.</p>}
+    <p>Claims supply no materials, air or power. Mining still requires the normal tools; extracted rock stays depleted.</p>
+  </section>;
 }
 
 export function SpaceflightPanel({ mission, onAction }: { mission: SpaceflightMission; onAction: (action: SpaceflightIntent) => void }) {

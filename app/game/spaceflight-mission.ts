@@ -3,6 +3,8 @@ import { planSpaceVehicleTravel, SURVEY_HOPPER_CAPACITY, VEHICLE_RESOURCES, type
 import type { LaunchPadCheck } from "./spaceflight-infrastructure";
 import type { StationAccess, StationAssociation, StationPosition, StationRegistrySave } from "./orbital-station";
 import type { StationTelemetry } from "./station-telemetry";
+import type { AsteroidClaim, AsteroidGrant } from "./asteroid-custody";
+import type { CelestialPoint } from "./celestial-terrain";
 
 export const FIRST_FLIGHT_ROUTES = ["home-orbit", "home-surface", "morrow-orbit", "morrow-surface"] as const;
 export type FirstFlightRoute = typeof FIRST_FLIGHT_ROUTES[number];
@@ -18,7 +20,13 @@ export type SpaceflightMission = {
   costs: VehicleResources | null; blockers: string[]; status: string; destination: LocationId | null;
   stations?: StationRegistrySave | null;
   stationReadings?: Record<string, StationTelemetry | null>;
+  asteroid?: AsteroidInspection;
 };
+export type AsteroidInspection = Readonly<{ id: string; composition: string; point: CelestialPoint;
+  claim: AsteroidClaim | null; epoch: number; registryRevision: number; nearby: boolean }>;
+export type AsteroidManagementIntent = { kind: "asteroid-claim"; asteroidId: string; epoch: number; registryRevision: number }
+  | { kind: "asteroid-access"; asteroidId: string; epoch: number; registryRevision: number;
+    trustedIds: string[]; build: AsteroidGrant; extract: AsteroidGrant };
 /** Station authority has its own revision and does not depend on a nearby ship. */
 export type StationManagementIntent =
   | { kind: "station-access"; stationId: string; memberIds: string[]; association: StationAssociation; access: StationAccess; registryRevision: number }
@@ -34,7 +42,8 @@ export type SpaceflightIntent =
   | { kind: "cargo-in" | "cargo-out"; slot: number; vehicleRevision: number }
   | { kind: "station-found"; name: string; registryRevision: number; vehicleRevision: number }
   | { kind: "station-dock"; stationId: string; dockId: string; undock: boolean; registryRevision: number; vehicleRevision: number }
-  | StationManagementIntent;
+  | StationManagementIntent
+  | AsteroidManagementIntent;
 
 export function isStationManagementIntent(action: SpaceflightIntent): action is StationManagementIntent {
   return action.kind === "station-access" || action.kind === "station-name" || action.kind === "station-habitat" || action.kind === "station-cabin" || action.kind === "station-register-dock";

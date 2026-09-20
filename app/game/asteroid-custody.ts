@@ -295,7 +295,7 @@ export function createAsteroidReader(raw: unknown): AsteroidReader {
 export function asteroidBlockAt(registry: AsteroidRegistry, id: string, local: CelestialPoint): BlockId {
   return createAsteroidReader(registry).blockAt(id, local);
 }
-function allowed(entry: AsteroidRecord, actorId: string, permission: "build" | "extract"): boolean {
+export function asteroidAllows(entry: AsteroidRecord, actorId: string, permission: "build" | "extract"): boolean {
   if (!entry.claim) return permission === "extract";
   return entry.claim.ownerId === actorId || entry.claim[permission] === "public"
     || entry.claim[permission] === "trusted" && entry.claim.trustedIds.includes(actorId);
@@ -335,7 +335,7 @@ export function applyAsteroidAction(raw: unknown, request: AsteroidAction, conte
       if (entry.claim?.ownerId !== context.actorId) fail("only owner may change access");
       next = { ...entry, claim: { ownerId: context.actorId, trustedIds: command.trustedIds, build: command.build, extract: command.extract } };
     } else {
-      if (!allowed(entry, context.actorId, command.type === "extract" ? "extract" : "build")) fail("permission denied");
+      if (!asteroidAllows(entry, context.actorId, command.type === "extract" ? "extract" : "build")) fail("permission denied");
       if (asteroidBlockAt(registry, command.asteroidId, command.position) !== command.expectedBlock) fail("current block mismatch");
       next = { ...entry, pages: writePage(entry.pages, asteroidVoxelLayout(entry.descriptor), command.position,
         command.type === "extract" ? BlockId.Air : command.block) };
@@ -358,6 +358,32 @@ export function remapAsteroidRegistry(raw: unknown, destination: UniverseId): As
 }
 
 export type AsteroidExpansionBinding = Readonly<{ orbit: LocationAddress; seed: number; epoch: number; expectedRevision: number }>;
+/** Host checkpoint reconciliation, not an extraction grant. The caller supplies
+ * already-authoritative world edits and checkpoints inventory/drops with them.
+ * This also migrates older ordinary orbit edits without regenerating mined ore. */
+export function reconcileAsteroidVoxels(raw: unknown, edits: readonly Readonly<{ asteroidId: string; position: CelestialPoint; block: BlockId }>[],
+  binding: AsteroidExpansionBinding): AsteroidRegistry {
+  const registry = parseAsteroidRegistry(raw);
+  exact(binding, ["orbit", "seed", "epoch", "expectedRevision"]);
+  if (locationId(binding.orbit) !== locationId(registry.orbit) || binding.seed !== registry.seed
+    || binding.epoch !== registry.epoch || binding.expectedRevision !== registry.revision) fail("stale voxel checkpoint binding");
+  if (!Array.isArray(edits) || edits.length > ASTEROID_MAX_FIELD_VOXELS) fail("invalid voxel checkpoint");
+  const reader = createAsteroidReader(registry), changed = new Map<string, AsteroidRecord>(), seen = new Set<string>();
+  for (const edit of edits) {
+    exact(edit, ["asteroidId", "position", "block"]); token(edit.asteroidId); block(edit.block);
+    const original = asteroid(registry, edit.asteroidId); position(edit.position, original.descriptor);
+    const key = `${edit.asteroidId}:${edit.position.x},${edit.position.y},${edit.position.z}`;
+    if (seen.has(key)) fail("duplicate checkpoint voxel"); seen.add(key);
+    if (reader.blockAt(edit.asteroidId, edit.position) === edit.block) continue;
+    const entry = changed.get(edit.asteroidId) ?? original;
+    changed.set(edit.asteroidId, { ...entry, pages: writePage(entry.pages, asteroidVoxelLayout(entry.descriptor), edit.position, edit.block) });
+  }
+  if (!changed.size) return registry;
+  if (registry.epoch === Number.MAX_SAFE_INTEGER || registry.revision === Number.MAX_SAFE_INTEGER) fail("checkpoint counter exhausted");
+  return parseAsteroidRegistry({ ...registry, epoch: registry.epoch + 1, revision: registry.revision + 1, journal: [],
+    asteroids: registry.asteroids.map(entry => changed.get(entry.descriptor.id) ?? entry) });
+}
+
 /** Host migration only: unlocks generated descriptors, never grants claims, voxels or inventory. */
 export function expandAsteroidRegistry(raw: unknown, expansionLevel: number, binding: AsteroidExpansionBinding): AsteroidRegistry {
   const registry = parseAsteroidRegistry(raw);

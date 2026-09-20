@@ -7,6 +7,7 @@ import { composeUniverseSave, splitUniverseSave, type SaveFields } from "./unive
 import { assertVehicleCommitReady, commitVehicleArrival, remapSpacefleetUniverse, validateSpacefleetSave, validateSpacefleetUniverse } from "./space-vehicle";
 import { remapStationRegistry, validateStationRegistrySave } from "./orbital-station";
 import { validateStationFleetCustody } from "./station-runtime";
+import { remapAsteroidFields, validateAsteroidFields } from "./asteroid-runtime";
 import { generationOptionsFromWorldOptions, LEGACY_WORLD_KEY, normalizeWorldOptions, WORLD_CATALOG_KEY, WORLD_DATA_PREFIX, type StoredWorld, type WorldMetadata, type WorldOptions } from "./world-storage";
 
 export const UNIVERSE_DATABASE = `${TYPESCRIPT_STORAGE_PREFIX}-universe-v1`;
@@ -241,6 +242,7 @@ export class UniverseStorage {
     if (manifest.catalogDigest !== catalogRecord.sha256) throw new UniverseStorageError("corrupt", "Catalog manifest checksum mismatch.");
     const universe = await verify(only("universeRecords") as unknown as CheckedRecord<UniverseData>, id, id);
     if (universe.fields.spacefleet !== undefined) validateSpacefleetUniverse(validateSpacefleetSave(universe.fields.spacefleet), id);
+    if (universe.fields.asteroidFields !== undefined) validateAsteroidFields(universe.fields.asteroidFields, id);
     if (universe.importHistory !== undefined) {
       if (!Array.isArray(universe.importHistory)) throw new UniverseStorageError("corrupt", "Invalid import provenance.");
       for (const history of universe.importHistory) {
@@ -388,6 +390,7 @@ export class UniverseStorage {
     const catalog = createWaystarCatalog(world.options.dayLengthMinutes), parts = splitUniverseSave(world.save);
     composeUniverseSave(parts);
     if (world.save.spacefleet !== undefined) validateSpacefleetUniverse(world.save.spacefleet, id);
+    if (world.save.asteroidFields !== undefined) validateAsteroidFields(world.save.asteroidFields, id);
     if (world.save.orbitalStations !== undefined) validateStationRegistrySave(world.save.orbitalStations, home);
     const catalogRecord = await checked(id, id, catalog);
     const backups = await Promise.all((input.backups ?? []).map(async ({ sourceKey, raw }): Promise<LegacyBackup> => {
@@ -424,6 +427,7 @@ export class UniverseStorage {
     if (save.seed !== location.descriptor.generator.seed || save.generatorVersion !== location.descriptor.generator.version || (save.generatorProfile ?? "world-below-v15") !== location.descriptor.generator.profile) throw new UniverseStorageError("invalid", "A checkpoint cannot change the captured terrain generator.");
     const parts = splitUniverseSave(save); composeUniverseSave(parts);
     if (save.spacefleet !== undefined) validateSpacefleetUniverse(save.spacefleet, id);
+    if (save.asteroidFields !== undefined) validateAsteroidFields(save.asteroidFields, id);
     if (save.orbitalStations !== undefined) validateStationRegistrySave(save.orbitalStations, manifest.currentLocationId);
     const metadata = cloneUniverseJson(input.metadata ?? manifest.metadata), options = cloneUniverseJson(input.options ?? manifest.options);
     if (metadata.id !== id) throw new UniverseStorageError("invalid", "Metadata cannot change universe identity.");
@@ -472,6 +476,7 @@ export class UniverseStorage {
     if (originSave.seed !== origin.descriptor.generator.seed || originSave.generatorVersion !== origin.descriptor.generator.version || (originSave.generatorProfile ?? "world-below-v15") !== origin.descriptor.generator.profile) throw new UniverseStorageError("invalid", "Origin generator changed.");
     const parts = splitUniverseSave(originSave); composeUniverseSave(parts);
     if (originSave.spacefleet !== undefined) validateSpacefleetUniverse(originSave.spacefleet, id);
+    if (originSave.asteroidFields !== undefined) validateAsteroidFields(originSave.asteroidFields, id);
     if (originSave.orbitalStations !== undefined) validateStationRegistrySave(originSave.orbitalStations, manifest.currentLocationId);
     let target = snapshot.locations.find((entry) => entry.descriptor.id === destination);
     if (!target) {
@@ -570,6 +575,7 @@ export class UniverseStorage {
     // in the new universe. Its authoritative history begins at this import.
     const importedUniverse: UniverseData = { ...snapshot.universe, fields: { ...snapshot.universe.fields,
       ...(snapshot.universe.fields.spacefleet !== undefined ? { spacefleet: remapSpacefleetUniverse(validateSpacefleetSave(snapshot.universe.fields.spacefleet), oldId, newId) } : {}),
+      ...(snapshot.universe.fields.asteroidFields !== undefined ? { asteroidFields: remapAsteroidFields(snapshot.universe.fields.asteroidFields, oldId, newId) } : {}),
       agentWorldFingerprint: `worldfp_import_${newId.replace(/[^A-Za-z0-9_-]/g, "_")}` }, importHistory: [...snapshot.universe.importHistory ?? [], { sourceUniverseId: oldId, archiveDigest: String(sha256), journals: snapshot.journals, receipts: snapshot.receipts }] };
     const writes: WriteRecord[] = [{ store: "manifests", value: manifest }, { store: "catalogs", value: catalogRecord }, { store: "universeRecords", value: await checked(newId, newId, importedUniverse) }];
     for (const { descriptor, fields } of snapshot.locations) {

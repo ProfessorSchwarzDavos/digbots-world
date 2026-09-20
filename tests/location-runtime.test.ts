@@ -9,8 +9,8 @@ import { locationAddress, locationId, type LocationStamp } from "../app/game/loc
 import { createMapKnowledge, normalizeMapKnowledge } from "../app/game/map-system.ts";
 import { LOCATION_TRANSIENT_DEFAULTS, resetLocationTransients, validateLocationPlayerState } from "../app/game/location-manager.ts";
 
-const stamp = (body = "blockwild", epoch = 1): LocationStamp => ({
-  locationId: locationId(locationAddress({ universeId: "synthetic-runtime", systemId: "waystar", bodyId: body, kind: "surface", instanceId: "main" })), epoch, revision: 0,
+const stamp = (body = "blockwild", epoch = 1, universe = "synthetic-runtime"): LocationStamp => ({
+  locationId: locationId(locationAddress({ universeId: universe, systemId: "waystar", bodyId: body, kind: "surface", instanceId: "main" })), epoch, revision: 0,
 });
 
 test("location lifecycle neutralizes old motion/actions and validates durable rider bindings", () => {
@@ -62,7 +62,7 @@ test("actual chunk owners isolate same-seed same-coordinate edits and cache keys
     const first = world.generateChunk(-1, 0), baseline = first.blocks.slice();
     world.setBlock(-2, 60, 3, BlockId.GoldOre, true, true);
     const edits = world.serializeEdits(), firstKey = internals.chunkCacheKey("-1,0"), oldNamespace = internals.generationNamespace("-1,0");
-    world.reset("CF1-RUNTIME", undefined, undefined, undefined, stamp("morrow"));
+    world.reset("CF1-RUNTIME", undefined, undefined, undefined, stamp("blockwild", 1, "synthetic-runtime-other"));
     const second = world.generateChunk(-1, 0);
     assert.deepEqual(second.blocks, baseline, "location identity does not alter the captured home generator");
     assert.notEqual(internals.chunkCacheKey("-1,0"), firstKey);
@@ -82,7 +82,7 @@ test("late persistent-cache results cannot consume a new owner's pending work ev
   try {
     world.reset("CF1-LATE", undefined, undefined, undefined, stamp());
     internals.requestPersistentChunk("0,0", 0, 0, 0);
-    world.reset("CF1-LATE", undefined, undefined, undefined, stamp("morrow"));
+    world.reset("CF1-LATE", undefined, undefined, undefined, stamp("blockwild/morrow"));
     world.reset("CF1-LATE", undefined, undefined, undefined, stamp());
     internals.requestPersistentChunk("0,0", 0, 0, 0);
     const key = internals.chunkCacheKey("0,0");
@@ -92,6 +92,15 @@ test("late persistent-cache results cannot consume a new owner's pending work ev
     resolvers[1](undefined); await Promise.resolve(); await Promise.resolve();
     assert.equal(internals.pendingPersistentChunks.has(key), false);
   } finally { world.dispose(); }
+});
+
+test("only the canonical Morrow body selects lunar surface terrain", () => {
+  const invalid = new ChunkWorld(), canonical = new ChunkWorld();
+  try {
+    assert.throws(() => invalid.reset("CF1-MORROW", undefined, undefined, undefined, stamp("morrow")), /no supported terrain generator/u);
+    canonical.reset("CF1-MORROW", undefined, undefined, undefined, stamp("blockwild/morrow"));
+    assert.equal(canonical.celestialTerrain?.kind, "morrow");
+  } finally { invalid.dispose(); canonical.dispose(); }
 });
 
 test("map owners retain the entire canonical identity and reject malformed location IDs", () => {
@@ -112,7 +121,7 @@ test("Basic renderer releases the previous location's installed mesh before acce
     world.reset("CF1-BASIC", undefined, undefined, undefined, stamp()); update(1000);
     const oldMesh = renderer.group.children[0];
     assert.ok(oldMesh);
-    world.reset("CF1-BASIC", undefined, undefined, undefined, stamp("morrow")); update(2000);
+    world.reset("CF1-BASIC", undefined, undefined, undefined, stamp("blockwild/morrow")); update(2000);
     assert.ok(renderer.group.children[0]);
     assert.notEqual(renderer.group.children[0], oldMesh);
     assert.equal(oldMesh.parent, null);

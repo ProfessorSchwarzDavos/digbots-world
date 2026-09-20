@@ -1,5 +1,24 @@
 Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks; add double-tap-forward sprinting; build scalable butterfly exhibit blocks with inventories, flowers, landing behavior, and capacity up to about 20 connected blocks; make recipe-book hover previews and click-to-fill crafting, fix crafting/furnace arrows, add recipe search and mirrored recipes; animate and flow water, improve swimming/shore exits, add oxygen; add ocean, river, and underground fish; add a larger two-seat sailboat with crouch-use chest storage; fix third-person vertical controls and interaction; allow mobs through open doors; remove tree-growth notices; add five surface mobs, birds, desert plants/features, desert and forest temple POIs with chests, a new enemy, and rare magical durable loot; add a tameable breedable banana-rabbit pet with naming and commands; add metadata-preserving creature cages; add male/female player choice with multiplayer, armor, and held-item representation; add a banana-rabbit POI; add visible game versions and save-version metadata plus title-screen fullscreen; add skeleton archery; optimize and benchmark 10-default/16-max render distance with separate 6-8 simulation distance; rework clouds and biome-sensitive weather; enrich meadow grass, flowers, butterflies, and a large butterfly POI. Do all of it thoughtfully and report only when entirely done.
 
+## Celestial Frontiers CF6 — revision13 recovery and full continuation
+
+- Explicit97%weekly resume replaces the old50%pause; director privately owns
+ 92/94/97 action gates. Same primary/integration/local-only preservation bounds.
+ Source-backed recovery: Morrow birth and restore now share surface population
+ accounting (Slatefin/Owl generic-family reclassification reproduced red2/4).
+ Unnamed owned creatures also retain non-natural status (red1/6 reproduced).
+ Full specimen metadata and budget-cost assertions retained, not dropped.
+ Canonical fixture repair retains unchanged Home generation under distinct
+ universes and uses blockwild/morrow for actual lunar transitions; red3/7 to13PASS.
+ Integrated64PASS including final unnamed-owner guard; static-r30 PASS.
+ Final lint and fresh isolated production/browser checks pending.
+ Real IDB cache lifecycle PASS: automatic oldest-write-recency pruning to256,
+ permitted266 between prune batches, clone-before-await and unload/commit/cold
+ edited-voxel equality. Retained103missing keys are all oldest-prefix,93newv2;
+ SaveQuit does not cache every still-loaded chunk. No cache source rewrite or
+ manual delete; prior failed receipts/frozen originals unchanged. FullCF6 follows
+ this safety checkpoint, not reduced to it. One fixture helper completed.
+
 ## Celestial Frontiers CF6 — revision12, first transaction checkpoint
 
 - Director-approved bounded cache correction: focused-r34 reproduced12 failures

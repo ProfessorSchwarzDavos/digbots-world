@@ -5,6 +5,8 @@ import type { MobDefinition } from "./mobs";
 
 export const MORROW_MOB_KINDS = ["rillehopper", "vacuum-lantern", "slatefin-burrower", "morrow-owl"] as const;
 export type MorrowMobKind = typeof MORROW_MOB_KINDS[number];
+/** One shared lunar surface budget, including shallow regolith swimmers and roosting visitors. */
+export const MORROW_NATURAL_POOL = "surface-animal" as const;
 export function isMorrowMobKind(kind: string): kind is MorrowMobKind {
   return (MORROW_MOB_KINDS as readonly string[]).includes(kind);
 }

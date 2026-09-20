@@ -19,7 +19,7 @@ import { buildPressurePresentation, acceptPressurePresentation, pressurePresenta
 import { PressureRuntime, type PressureSave, type PressureOccupant } from "./pressure-runtime";
 import { habitatOccupantBreathes, habitatOccupantOxygenDemand, normalizeHabitatExposure, stepHabitatOccupantExposure } from "./pressure-occupants";
 import { applyMorrowCreaturePose } from "./morrow-creature-models";
-import { isMorrowMobKind, safeLanternJar, pickMorrowSpawn, morrowBreathableZone, normalizeMorrowExposure, stepMorrowExposure, MORROW_OWL_VEIL_SECONDS, type MorrowExposureState } from "./morrow-ecology";
+import { isMorrowMobKind, safeLanternJar, pickMorrowSpawn, morrowBreathableZone, normalizeMorrowExposure, stepMorrowExposure, MORROW_NATURAL_POOL, MORROW_OWL_VEIL_SECONDS, type MorrowExposureState } from "./morrow-ecology";
 import { captureLanternJar, readLanternJar } from "./lantern-jar";
 import { buildPressureInspector, acceptPressureInspector, pressureInspectorMatches, type PressureInspector } from "./pressure-inspector";
 import { pressureDoorUpper, pressureDoorLower, pressurePoint, validPressureDoorEdits } from "./pressure-devices";
@@ -27705,6 +27705,7 @@ export class VoxelEngine {
       && !migrated.factionId && !migrated.aligned && !migrated.hiredByPlayerId && !migrated.attunedOrbId
       && !migrated.enclosed && !migrated.petState?.tamed && !migrated.shadeState?.tamed
       && !migrated.reedstriderBond?.tamed && !migrated.courserBond?.tamed && !migrated.leviathanGrowth?.tamed
+      && !migrated.creatureTamed && !migrated.creatureOwnerId
       && !migrated.dragonState?.tamed && !migrated.name,
     );
     const restoredUnderground = legacyNatural && typeof this.world?.surfaceAt === "function"
@@ -27723,7 +27724,9 @@ export class VoxelEngine {
       naturalSpawned: legacyNatural,
       everLed: Boolean(migrated.everLed),
       naturalPool: legacyNatural
-        ? (migrated.naturalPool === "cave-water"
+        ? (this.world.celestialTerrain?.kind === "morrow" && isMorrowMobKind(migrated.kind)
+          ? MORROW_NATURAL_POOL
+          : migrated.naturalPool === "cave-water"
           ? "cave-water"
           : naturalPopulationPoolForDefinition(definition, restoredUnderground))
         : null,
@@ -28263,7 +28266,7 @@ export class VoxelEngine {
       }
       // Below-world Bedrock and above-world Air are sentinels, not spawn support.
       if (!Number.isSafeInteger(ground) || ground < MIN_Y || ground > MAX_Y - 2) continue;
-      const definition = MOB_DEFS[kind], pool: NaturalPopulationPool = "surface-animal", cost = naturalPopulationCost(definition);
+      const definition = MOB_DEFS[kind], pool = MORROW_NATURAL_POOL, cost = naturalPopulationCost(definition);
       if (local.byPool[pool].cost + cost > budgets[pool].target || global.totalCost + cost > ceiling) return;
       if (!this.ecologyAllowsSpecies(kind, x, z) || this.naturalSpawnVisibleToPlayer(x, ground, z, 48)) continue;
       const y = ground + definition.footOffset;

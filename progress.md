@@ -2,6 +2,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Generation routing3303e56, build24 rqxUHoGs1fb9ld9453Vha: committed112PASS,
+  static52/lint36/build24/unchanged official24 PASS. Expanded synthetic field
+  browser normal ice mining/save/fresh cold passed exact canonical page/claim,
+  pickaxe248->247, Home/fleet/inventory/metadata audits (expanded-custody-r2).
+  Four screenshots personally reviewed; software-rendered3.6FPS sample is NOT
+  performance acceptance. Jobs/ports drained. Fixture-helper seed mismatch stop
+  retained; corrected bounded helper passed. Source-bound packet under
+  CF6/r14-asteroid-frames/generation-checkpoint. FullCF6/CFV remain incomplete;
+  normal unlock UI, attached-frame travel, cargo recovery and typed guest adapters
+  plus explicit old-client protocol/capability cutover remain required.
 - Director accepted the bounded orbit runtime and peer correction at34b884e.
   Next generation slice routes persisted expansion into ChunkWorld/cache/worker
   and public host snapshots, infers canonical non-low asteroid bands, and rejects

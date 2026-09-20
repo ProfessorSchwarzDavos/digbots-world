@@ -11,6 +11,12 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
   chart immediate-selection transition removed. Initial48 focused tests PASS;
   cable envelope red and test-only reader typing failure retained. Build/browser
   visual verification and normal edits/cold reconstruction pending.
+- Build17/0ba8d7b passed and cold habitat showed flat ceilings/upright walls;
+  immediate chart selection is readable at desktop/390px. Personal visual review
+  found glass-box ghost seams and off-center machine socket gaps. Follow-up uses
+  two-sided glass surfaces and reusable exact-socket elbows, preserving stores.
+  Fifty expanded tests/static43/lint27 pass before final low-wall-corner refinement;
+  final runtime/browser/custody evidence remains pending.
 
 - Browser-r1 crafted/placed all four parts from finite raw inputs, measured a
   breathable142m3 room, exhausted/recharged a paid observatory, and transferred

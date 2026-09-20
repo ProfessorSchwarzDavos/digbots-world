@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { WindowArm, WindowLayout } from "./connected-geometry";
+import { createTransportConnectors, updateTransportConnectors, type TransportTargets } from "./transport-model-connectors";
 
 export const PRESSURE_MODEL_KINDS = [
   "liquid-pipe", "gasline", "heat-conduit", "atmospheric-condenser", "electrolyzer",
@@ -15,6 +16,7 @@ export type PressureModelState = Readonly<{
   open?: number; alarm?: boolean; locked?: boolean;
   connected?: Readonly<Partial<Record<PressureModelFace, boolean>>>;
   windowLayout?: WindowLayout;
+  connectionTargets?: TransportTargets;
   gateWidth?: number; gateHeight?: number;
 }>;
 export const isPressureModelKind = (kind: unknown): kind is PressureModelKind =>
@@ -57,7 +59,8 @@ export function createPressureModel(kind: PressureModelKind, state: PressureMode
       result = new THREE.MeshStandardMaterial({ color: colors[key], roughness: key === "glass" ? .28 : .6,
         metalness: key === "glass" || key === "ceramic" ? .02 : .1,
         emissive: colors[key], emissiveIntensity: .08,
-        transparent: key === "glass", opacity: key === "glass" ? .32 : 1, depthWrite: key !== "glass" });
+        transparent: key === "glass", opacity: key === "glass" ? .32 : 1, depthWrite: key !== "glass",
+        side: key === "glass" && kind === "reinforced-window" ? THREE.DoubleSide : THREE.FrontSide });
       surfaces.set(key, result);
     }
     return result;
@@ -181,6 +184,7 @@ export function createPressureModel(kind: PressureModelKind, state: PressureMode
     // Disconnected directions close at the central casting, never invent a link.
     for (const y of [.37, .63]) cylinder(root, "junction-bolt", .025, .028, "dark", 0, y, 0);
     status(.04, .49, -.13);
+    createTransportConnectors(root, material(surface), .058);
   } else if (kind === "pressure-door" || kind === "horizon-door" || kind === "emergency-shutter") {
     const horizon = kind === "horizon-door";
     for (const x of [-.44, .44]) {
@@ -234,7 +238,9 @@ export function createPressureModel(kind: PressureModelKind, state: PressureMode
     status(0, .15, -.3); sockets();
   } else if (kind === "reinforced-window") {
     const flat = group(root, "flat-ceiling-pane", 0, .5, 0); flat.visible = false;
-    box(flat, "thick-laminated-glass", 1, .12, 1, "glass");
+    // One two-sided surface avoids duplicate transparent side faces at every
+    // connected cell/half-pane. The surrounding frame supplies visible depth.
+    mesh(flat, "thick-laminated-glass", new THREE.PlaneGeometry(1, 1), "glass", 0, 0, 0).rotation.x = -Math.PI / 2;
     const borders = {} as Record<WindowArm, THREE.Object3D>;
     const arms = {} as NonNullable<Rig["window"]>["arms"];
     for (const face of ["left", "right", "front", "back"] as const) {
@@ -244,7 +250,7 @@ export function createPressureModel(kind: PressureModelKind, state: PressureMode
       const arm = group(root, `window-arm-${face}`, 0, .5, 0);
       arm.rotation.y = face === "left" ? Math.PI : face === "front" ? Math.PI / 2 : face === "back" ? -Math.PI / 2 : 0;
       arm.visible = xEdge;
-      box(arm, "wall-laminated-glass", .5, 1, .12, "glass", .25, 0, 0);
+      mesh(arm, "wall-laminated-glass", new THREE.PlaneGeometry(.5, 1), "glass", .25, 0, 0);
       const end = box(arm, `connected-border-${face}`, .1, 1, .2, "iron", .45, 0, 0);
       const top = box(arm, "wall-border-top", .5, .1, .2, "iron", .25, .45, 0);
       const bottom = box(arm, "wall-border-bottom", .5, .1, .2, "iron", .25, -.45, 0);
@@ -418,6 +424,7 @@ export function createPressureModel(kind: PressureModelKind, state: PressureMode
 /** Allocation-free telemetry update. Omitted fields preserve readings. `time: 0`
  * is the reduced-motion pose; idle mechanisms and vent ribbons never run. */
 export function updatePressureModel(root: THREE.Group, state: PressureModelState): void {
+  updateTransportConnectors(root, state);
   const rig = rigs.get(root); if (!rig) return;
   if (state.fill !== undefined) rig.fill = unit(state.fill);
   if (state.fluidFill !== undefined) rig.fluidFill = unit(state.fluidFill);

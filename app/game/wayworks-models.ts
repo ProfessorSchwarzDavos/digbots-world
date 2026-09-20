@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { PowerTopologyFace } from "./wayworks-network";
+import { createTransportConnectors, updateTransportConnectors, type TransportTargets } from "./transport-model-connectors";
 
 export type WayworksModelKind =
   | "hand-dynamo" | "sunplate-array" | "field-battery" | "charging-pedestal" | "grid-cable"
@@ -10,6 +11,7 @@ export type WayworksModelKind =
 export type WayworksModelState = Readonly<{
   fill?: number; active?: boolean; time?: number; progress?: number; fluidFill?: number;
   connected?: Readonly<Partial<Record<PowerTopologyFace, boolean>>>;
+  connectionTargets?: TransportTargets;
 }>;
 
 type Motion = { object: THREE.Object3D; axis: "x" | "y" | "z"; speed: number; base: number; stroke?: number };
@@ -528,6 +530,7 @@ export function createWayworksModel(kind: WayworksModelKind, options: Omit<Waywo
       parts.connections[face] = [arm, port]; arm.visible = port.visible = face === "front" || face === "back";
     }
     box(root, "cable-status-band", 0.19, 0.038, 0.19, lamp, 0, 0.64, 0);
+    createTransportConnectors(root, dark, .078);
   }
   updateWayworksModel(root, options);
   return root;
@@ -539,6 +542,7 @@ export function createWayworksModel(kind: WayworksModelKind, options: Omit<Waywo
  * Calling this on a non-Wayworks group is deliberately a harmless no-op.
  */
 export function updateWayworksModel(group: THREE.Group, state: WayworksModelState): void {
+  updateTransportConnectors(group, state);
   const parts = rigs.get(group);
   if (!parts) return;
   if (state.fill !== undefined) parts.fill = clampFill(state.fill);

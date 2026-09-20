@@ -52,14 +52,18 @@ const horizontal = CONNECTION_DIRECTIONS.slice(0, 4);
 /** Local, bounded and order-independent. Horizontal sheets without vertical
  * supports are skylights; vertical glazing follows wall runs, bends and tees.
  * Ambiguous isolated columns use their saved cardinal facing as a stable hint. */
-export function windowLayout(x: number, y: number, z: number, facing: number, blockAt: BlockReader): WindowLayout {
+export function windowLayout(x: number, y: number, z: number, facing: number, blockAt: BlockReader,
+  facingAt: (x: number, y: number, z: number) => number = () => facing): WindowLayout {
   const support = (block: BlockId | undefined) => block === BlockId.ReinforcedWindow ? 2
     : block !== undefined && BLOCKS[block]?.solid && BLOCKS[block]?.shape === "cube" ? 1 : 0;
   const flatAt = (a: number, b: number, c: number) => {
     const sx = support(blockAt(a - 1, b, c)) + support(blockAt(a + 1, b, c));
     const sz = support(blockAt(a, b, c - 1)) + support(blockAt(a, b, c + 1));
     const sy = support(blockAt(a, b - 1, c)) + support(blockAt(a, b + 1, c));
-    return sx + sz >= 3 && Math.min(sx, sz) > sy;
+    const crossSupport = Math.min(sx, sz);
+    // A one-block-high L on a floor is a wall corner, not a skylight. A roof
+    // with stronger support along both horizontal axes may still cap a wall.
+    return sx + sz >= 3 && crossSupport > sy && (sy === 0 || crossSupport >= 3);
   };
   const armsAt = (a: number, b: number, c: number) => {
     const arms = { front: false, back: false, left: false, right: false };
@@ -74,7 +78,7 @@ export function windowLayout(x: number, y: number, z: number, facing: number, bl
         sx += support(blockAt(a - 1, b + dy, c)) + support(blockAt(a + 1, b + dy, c));
         sz += support(blockAt(a, b + dy, c - 1)) + support(blockAt(a, b + dy, c + 1));
       }
-      axisX = sx === sz ? facing % 2 === 0 : sx > sz;
+      axisX = sx === sz ? facingAt(a, b, c) % 2 === 0 : sx > sz;
     }
     arms.left = arms.right = axisX; arms.front = arms.back = !axisX;
     return arms;

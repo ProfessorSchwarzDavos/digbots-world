@@ -13,7 +13,8 @@ import { chemistryAtmosphere } from "./pressure-chemistry";
 import { updateWayworksPortOverlay } from "./wayworks-models";
 import { createWorkshopModel as createWayworksModel, updateWorkshopModel as updateWayworksModel } from "./workshop-models";
 import { createPressureModel, updatePressureModel } from "./pressure-models";
-import { transportConnections, windowLayout } from "./connected-geometry";
+import { CONNECTION_DIRECTIONS, transportConnections, windowLayout, type ConnectionMask } from "./connected-geometry";
+import type { TransportTargets } from "./transport-model-connectors";
 import { createPressureOverlay, disposePressureOverlay } from "./pressure-overlay";
 import { buildPressurePresentation, acceptPressurePresentation, pressurePresentationOpenDoorAt, pressurePresentationClosedGateAt,
   pressurePresentationEnvironmentAt, type PressurePresentation } from "./pressure-presentation";
@@ -13628,6 +13629,7 @@ export class VoxelEngine {
       const device = this.pressureRuntime?.devices.get(key) ?? this.guestPressure?.doors.find(door => door.key === key);
       const connected = transportConnections(state, x, y, z, this.world.locationScope?.locationId ?? "home-preview",
         (a, b, c) => this.world.getBlock(a, b, c), (a, b, c) => this.wayworks.get(blockKey(a, b, c)));
+      model.userData.transportConnections = connected;
       updateWayworksModel(model, { fill: state.energyJ / Math.max(1, machineCapacity(state.kind, state.workshop)),
         progress: state.workshop.cycle ? state.workshop.cycle.progressMs / state.workshop.cycle.durationMs : 0,
         fluidFill: gasCapacity ? workshopStoredTotal(state.workshop, "chemical") / gasCapacity : fluidCapacity ? workshopStoredTotal(state.workshop, "fluid") / fluidCapacity : 0,
@@ -13635,6 +13637,25 @@ export class VoxelEngine {
         active: !this.paused && state.enabled && ["generating", "transferring", "working"].includes(state.status), time: performance.now() / 1000 });
       const resource = this.wayworksOverlayResource;
       updateWayworksPortOverlay(model, wrench && distance < 8, resource === "energy" ? state.ports : state.workshop.resourcePorts[resource], resource);
+    }
+    // All neighbor models now exist, independent of insertion order. Use their
+    // actual authored socket transforms, not an assumed center-of-block port.
+    const transports = new Set(["liquid-pipe", "gasline", "heat-conduit", "grid-cable"]);
+    for (const key of visible) {
+      const state = this.wayworks.get(key)!; if (!transports.has(state.kind)) continue;
+      const model = this.wayworksModels.get(key)!, connected = model.userData.transportConnections as ConnectionMask;
+      const [x, y, z] = key.split(",").map(Number), targets: Partial<Record<keyof TransportTargets, readonly [number, number, number]>> = {};
+      model.updateMatrixWorld(true);
+      for (const [, dx, dy, dz] of CONNECTION_DIRECTIONS) {
+        const face = localFaceForWorldDirection(state.facing, dx, dy, dz); if (!connected[face]) continue;
+        const neighborKey = blockKey(x + dx, y + dy, z + dz), neighbor = this.wayworks.get(neighborKey)!;
+        if (transports.has(neighbor.kind)) continue;
+        const otherModel = this.wayworksModels.get(neighborKey); if (!visible.has(neighborKey) || !otherModel) continue;
+        const socket = otherModel.getObjectByName(`port-${localFaceForWorldDirection(neighbor.facing, -dx, -dy, -dz)}`);
+        if (!socket) continue; otherModel.updateMatrixWorld(true);
+        targets[face] = model.worldToLocal(socket.getWorldPosition(new THREE.Vector3())).toArray() as [number, number, number];
+      }
+      updateWayworksModel(model, { connected, connectionTargets: targets });
     }
     for (const key of this.pressureStructures) {
       const [x, y, z] = key.split(",").map(Number), type = this.world.getBlock(x, y, z);
@@ -13650,7 +13671,7 @@ export class VoxelEngine {
         // Window layout is world-axis geometry; saved facing is only the isolated-pane hint.
         model.rotation.set(0, 0, 0);
         updatePressureModel(model, { windowLayout: windowLayout(x, y, z, this.worldBlockFacing(x, y, z),
-          (a, b, c) => this.world.getBlock(a, b, c)), time: performance.now() / 1000 });
+          (a, b, c) => this.world.getBlock(a, b, c), (a, b, c) => this.worldBlockFacing(a, b, c)), time: performance.now() / 1000 });
       } else updatePressureModel(model, { time: performance.now() / 1000 });
     }
     for (const [key] of this.wayworksModels) if (!visible.has(key)) this.clearWayworksModels(key);

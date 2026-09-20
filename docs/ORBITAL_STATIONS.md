@@ -87,6 +87,9 @@ blocks, disabled machines/control and disabled/service ports do not draw joints.
 Empty buffers still show a configured joint. Material backflow rules remain in
 force; existing saved port settings are not rewritten. Placement, removal,
 rotation and port edits rederive presentation without changing any resource store.
+Short right-angle adapters reach the actual off-center socket on adjacent authored
+machines. Shared glazing uses a two-sided surface so transparent internal box
+faces do not leave seams after frames are removed.
 
 Habitation benches use the ordinary non-solid seating policy: the seated pose
 occupies the furniture cell without trapping a standing player or colliding on

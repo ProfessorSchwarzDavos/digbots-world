@@ -43,6 +43,8 @@ test("wall corners/tees join half panes deterministically and isolated facing is
   f.blocks.set("-1,0,0", W); f.blocks.set("0,0,-1", W);
   const corner = f.layout(); assert.equal(corner.flat, false);
   assert.deepEqual(corner.arms, { left: true, right: false, front: true, back: false });
+  f.blocks.delete("0,1,0"); assert.equal(f.layout().flat, false, "a low wall corner supported by a floor stays upright");
+  f.blocks.set("0,1,0", H);
   for (let i = 0; i < 50; i++) assert.deepEqual(f.layout(), corner, "no prior frame/neighbor cache influences inference");
   f.blocks.set("1,0,0", W); assert.equal(f.layout().arms.right, true);
   f.blocks.clear(); assert.equal(f.layout(0).arms.left, true); assert.equal(f.layout(1).arms.front, true);
@@ -54,6 +56,9 @@ test("window renderer switches planes around cell center, hides shared borders, 
   const model = createPressureModel("reinforced-window"), objects: THREE.Object3D[] = [];
   model.traverse(o => objects.push(o)); updatePressureModel(model, { windowLayout: f.layout() });
   const flat = model.getObjectByName("flat-ceiling-pane")!;
+  const glass = model.getObjectByName("thick-laminated-glass") as THREE.Mesh;
+  assert.equal(glass.geometry.type, "PlaneGeometry", "no internal transparent box faces leave ghost seams");
+  assert.equal((glass.material as THREE.Material).side, THREE.DoubleSide);
   assert.equal(flat.visible, true); assert.equal(flat.position.y, .5);
   assert.equal(model.getObjectByName("window-arm-left")!.visible, false);
   assert.equal(model.getObjectByName("ceiling-border-left")!.visible, false);
@@ -64,6 +69,24 @@ test("window renderer switches planes around cell center, hides shared borders, 
   assert.equal(model.getObjectByName("window-corner-mullion")!.visible, true);
   assert.equal(model.getObjectByName("window-arm-front")!.visible, true);
   const after: THREE.Object3D[] = []; model.traverse(o => after.push(o)); assert.deepEqual(after, objects);
+});
+
+test("vertical window joins respect the neighbor's saved isolated orientation", () => {
+  const f = fixture(); f.blocks.set("0,0,0", W); f.blocks.set("0,1,0", W);
+  const layout = windowLayout(0, 0, 0, 0, f.read, (_x, y) => y === 1 ? 1 : 0);
+  assert.equal(layout.arms.left, true); assert.equal(layout.upper.left, false); assert.equal(layout.upper.front, true);
+});
+
+test("off-center machine adapters meet exact authored sockets and disappear on disconnect", () => {
+  const model = createPressureModel("liquid-pipe");
+  updatePressureModel(model, { connected: { left: true }, connectionTargets: { left: [-.552, .18, .025] } });
+  const arm = model.getObjectByName("socket-adapter-left")!; assert.equal(arm.visible, true); model.updateMatrixWorld(true);
+  const last = arm.getObjectByName("socket-adapter-segment-2")!;
+  const end = last.localToWorld(new THREE.Vector3(0, .5, 0));
+  assert.ok(end.distanceTo(new THREE.Vector3(-.552, .18, .025)) < 1e-8);
+  updatePressureModel(model, { connected: { left: false } }); assert.equal(arm.visible, false);
+  updatePressureModel(model, { connected: { left: true }, connectionTargets: {} }); assert.equal(arm.visible, false);
+  updatePressureModel(model, { connected: { left: true }, connectionTargets: { left: [99, 0, 0] } }); assert.equal(arm.visible, false);
 });
 
 for (const kind of ["liquid-pipe", "gasline", "heat-conduit", "grid-cable"] as const) {
@@ -138,5 +161,12 @@ test("actual engine render reflects add/remove, port edits, cold derivation and 
   engine.clearWayworksModels(); engine.renderWayworks();
   assert.equal(models.get("structure:2,1,2")!.getObjectByName("flat-ceiling-pane")!.visible, true);
   assert.deepEqual([...f.machines], before); assert.equal(cable.energyJ, 0);
+  f.put(16, 0, 0, "field-battery"); engine.renderWayworks();
+  const adapter = models.get("15,0,0")!.getObjectByName("socket-adapter-right")!;
+  assert.equal(adapter.visible, true);
+  const last = adapter.getObjectByName("socket-adapter-segment-2")!;
+  const target = models.get("16,0,0")!.getObjectByName("port-left")!;
+  engine.scene.updateMatrixWorld(true);
+  assert.ok(last.localToWorld(new THREE.Vector3(0, .5, 0)).distanceTo(target.getWorldPosition(new THREE.Vector3())) < 1e-8);
   engine.clearWayworksModels();
 });

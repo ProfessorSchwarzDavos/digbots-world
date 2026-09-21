@@ -3,7 +3,9 @@ import test from "node:test";
 import { BlockId, Item } from "../app/game/data";
 import { createAsteroidRegistry } from "../app/game/asteroid-custody";
 import { createAsteroidAttachmentFrame, rebaseAsteroidCell } from "../app/game/asteroid-attachment-frame";
-import { projectAsteroidMachines, captureAsteroidMachines } from "../app/game/asteroid-attachment-machines";
+// These deliberately isolate routing at boundary-adjacent cells. Full physical
+// model selection is independently exercised in workshop-body.test.ts.
+import { projectAsteroidMachineNetworks as projectAsteroidMachines, captureAsteroidMachineNetworks as captureAsteroidMachines } from "../app/game/asteroid-attachment-machines";
 import { homeLocation, locationAddress, universeId } from "../app/game/location-address";
 import { createMachine, localFaceForWorldDirection, MACHINE_FACES, powerTopologyNode, type MachineKind, type MachineState,
   type PortMode, type PowerNode } from "../app/game/wayworks";

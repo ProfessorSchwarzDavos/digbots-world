@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { includeModelFill, includeModelMotion, type ModelMotionEnvelope } from "./model-motion-bounds";
 
 export const SPACEFLIGHT_MODEL_KINDS = [
   "survey-hopper", "launch-pad", "fuel-gantry", "mission-console", "tracking-beacon",
@@ -28,6 +29,21 @@ const unit = (value: number) => Number.isFinite(value) ? Math.min(1, Math.max(0,
  * transfer bounds. These are not collision radii or spacecraft resources. */
 export const SURVEY_HOPPER_MOTION = Object.freeze({ gearBaseY: 1.2, gearLift: .4, gearArc: .7, gearFold: 2.45,
   plumeFlutterFast: .035, plumeFlutterSlow: .025 });
+export const RECOVERY_CRANE_MOTION = Object.freeze({ hookBaseY: .44, liftAmplitude: .17, cableTopY: .82, cableLength: .38 });
+
+/** Infrastructure only; spacecraft use their separate capsule/gear/plume body. */
+export function spaceflightInfrastructureMotionEnvelopes(root: THREE.Group) {
+  const result = new Map<THREE.Object3D, ModelMotionEnvelope>(), rig = rigs.get(root);
+  if (!rig) return result;
+  if (rig.legs.length || rig.flame) throw Error("Spacecraft require their dedicated body envelope.");
+  for (const column of rig.columns) includeModelFill(result, column.object, column.base, column.height);
+  if (rig.hook && rig.cable) {
+    const motion = RECOVERY_CRANE_MOTION, lift = motion.liftAmplitude * 2;
+    includeModelMotion(result, rig.hook, Math.hypot(rig.hook.position.x, motion.hookBaseY + lift, rig.hook.position.z));
+    includeModelMotion(result, rig.cable, Math.hypot(rig.cable.position.x, motion.cableTopY - (motion.cableLength - lift) / 2, rig.cable.position.z));
+  }
+  return result;
+}
 
 /** Floor/center origin, local front -Z. Hopper is approximately 3 x 3 x 4.4;
  * infrastructure fits one cell. Exhaust extends below the hull during thrust.
@@ -351,10 +367,10 @@ export function updateSpaceflightModel(root: THREE.Group, state: SpaceflightMode
   if (rig.arm) rig.arm.rotation.x = rig.active ? 0 : -1.12;
   if (rig.radar) rig.radar.rotation.y = rig.active ? time % (TAU / .65) * .65 : 0;
   if (rig.hook && rig.cable) {
-    const lift = rig.active ? .17 * (1 - Math.cos(time % TAU * 1.5)) : 0;
-    rig.hook.position.y = .44 + lift;
-    rig.cable.scale.y = (.38 - lift) / .38;
-    rig.cable.position.y = .82 - (.38 - lift) / 2;
+    const motion = RECOVERY_CRANE_MOTION, lift = rig.active ? motion.liftAmplitude * (1 - Math.cos(time % TAU * 1.5)) : 0;
+    rig.hook.position.y = motion.hookBaseY + lift;
+    rig.cable.scale.y = (motion.cableLength - lift) / motion.cableLength;
+    rig.cable.position.y = motion.cableTopY - (motion.cableLength - lift) / 2;
   }
   for (const column of rig.columns) {
     column.object.visible = rig.fill > 0;

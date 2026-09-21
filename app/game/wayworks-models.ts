@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { PowerTopologyFace } from "./wayworks-network";
 import { createTransportConnectors, updateTransportConnectors, type TransportTargets } from "./transport-model-connectors";
+import { includeModelFill, includeModelMotion, type ModelMotionEnvelope } from "./model-motion-bounds";
 
 export type WayworksModelKind =
   | "hand-dynamo" | "sunplate-array" | "field-battery" | "charging-pedestal" | "grid-cable"
@@ -40,6 +41,19 @@ type ModelParts = {
 const rigs = new WeakMap<THREE.Group, ModelParts>();
 const TAU = Math.PI * 2;
 const clampFill = (value: number) => Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+
+/** Analytic maxima from this model's actual animation rig, without advancing it. */
+export function wayworksModelMotionEnvelopes(root: THREE.Group) {
+  const result = new Map<THREE.Object3D, ModelMotionEnvelope>(), parts = rigs.get(root);
+  if (!parts) return result;
+  for (const motion of parts.motions) if (motion.stroke !== undefined) {
+    const position = motion.object.position.clone(); position[motion.axis] = motion.base;
+    includeModelMotion(result, motion.object, position.length() + Math.abs(motion.stroke));
+  }
+  for (const column of parts.columns) includeModelFill(result, column.object, column.base, column.height);
+  if (parts.core) includeModelFill(result, parts.core, parts.coreBase!, parts.coreHeight!);
+  return result;
+}
 
 /** Authored one-cell machines. Origin is floor/center; local front is -Z.
  * Resources are owned by this group, never shared with another model. Dispose

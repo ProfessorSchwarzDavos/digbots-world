@@ -2,6 +2,17 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Full machine selection/capture now also checks conservative analytic bounds
+  from the actual workshop/pressure/space-infrastructure geometry and rigs.
+  Hidden alternatives, all rotation phases, piston strokes, crane lift, fill
+  scales, connector reach and maximum legal gates are included. No model/GPU
+  resources are retained by the numeric cache. Existing crane equations,
+  connector reach and gate clamps are shared unchanged.42focused then238expanded
+  tests/static104/lint87PASS: every machine's vertices across poses, all49 gate
+  sizes, inside/outside intrusion refusal and100cold network+body captures.
+  Routing-only helpers are explicitly named; full machine APIs compose both.
+  This leaves environmental queries/pressure and global event/resource authority
+  as separate admission gates; no local travel, build or browser claim.
 - Machine components now use the same exact power/material topology inputs as
   the live runtimes. Selection checks every canonical boundary pair (not the
   loaded256-node slice), all five resources, complete neighbor/voxel custody and

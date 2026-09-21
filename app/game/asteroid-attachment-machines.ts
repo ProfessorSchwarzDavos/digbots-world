@@ -8,6 +8,8 @@ import { MATERIAL_KINDS, workshopRunning } from "./wayworks-stores";
 import { PowerTopologyCache } from "./wayworks-network";
 import { validCustodyItem } from "./wayworks-custody";
 import { canonicalJson, isUniverseRecord } from "./universe-json";
+import { workshopBodyBounds } from "./workshop-body";
+import { asteroidAttachmentVolumeSide } from "./asteroid-attachment-creature-footprint";
 
 /** Complete canonical ORBIT voxel preimage/after-image, not loaded chunks only. */
 export type AsteroidMachineVoxels = (key: string) => BlockId | undefined;
@@ -58,7 +60,7 @@ function validateMachineComponents(frame: AsteroidAttachmentFrame, machines: Rea
  * connections. Does not simulate, refill, consume, or grant item transfers.
  * Environmental queries, pressure links and machine model bounds are separate
  * global preflight obligations; this is not complete frame admission. */
-export function projectAsteroidMachines(frame: AsteroidAttachmentFrame, canonical: Readonly<Record<string, MachineState>>,
+export function projectAsteroidMachineNetworks(frame: AsteroidAttachmentFrame, canonical: Readonly<Record<string, MachineState>>,
   voxel: AsteroidMachineVoxels): Record<string, MachineState> {
   validateMachineComponents(frame, canonical, voxel);
   return projectAsteroidBlocks(frame, canonical, ASTEROID_MACHINE_CODEC);
@@ -66,10 +68,10 @@ export function projectAsteroidMachines(frame: AsteroidAttachmentFrame, canonica
 
 /** Recheck both complete canonical images against their actual voxel images.
  * Changed stores/configuration still require the host event/resource transaction. */
-export function captureAsteroidMachines(frame: AsteroidAttachmentFrame, canonical: Readonly<Record<string, MachineState>>,
+export function captureAsteroidMachineNetworks(frame: AsteroidAttachmentFrame, canonical: Readonly<Record<string, MachineState>>,
   baseline: Readonly<Record<string, MachineState>>, edited: Readonly<Record<string, MachineState>>,
   voxels: Readonly<{ before: AsteroidMachineVoxels; after: AsteroidMachineVoxels }>): Record<string, MachineState> {
-  if (canonicalJson(projectAsteroidMachines(frame, canonical, voxels.before)) !== canonicalJson(baseline))
+  if (canonicalJson(projectAsteroidMachineNetworks(frame, canonical, voxels.before)) !== canonicalJson(baseline))
     throw Error("Stale attached machine projection.");
   const output = captureAsteroidBlocks(frame, canonical, baseline, edited, ASTEROID_MACHINE_CODEC);
   for (const key of Object.keys(canonical)) if (!Object.hasOwn(output, key)) {
@@ -78,4 +80,27 @@ export function captureAsteroidMachines(frame: AsteroidAttachmentFrame, canonica
   }
   validateMachineComponents(frame, output, voxels.after);
   return output;
+}
+
+function assertWholeMachineBodies(frame: AsteroidAttachmentFrame, machines: Readonly<Record<string, MachineState>>) {
+  for (const [key, state] of Object.entries(machines)) {
+    const [x, y, z] = key.split(",").map(Number), expected = asteroidAttachmentContainsCell(frame, key, "orbit");
+    if (asteroidAttachmentVolumeSide(frame, workshopBodyBounds(state.kind, { x, y, z }, state.facing), "orbit") !== expected)
+      throw Error("Machine body crosses its attached ownership boundary.");
+  }
+}
+/** Whole configured networks AND conservative all-phase physical models.
+ * Environmental queries, pressure links and event/resource authority remain
+ * distinct global integration checks, not permissions inferred by this view. */
+export function projectAsteroidMachines(frame: AsteroidAttachmentFrame, canonical: Readonly<Record<string, MachineState>>,
+  voxel: AsteroidMachineVoxels): Record<string, MachineState> {
+  const result = projectAsteroidMachineNetworks(frame, canonical, voxel);
+  assertWholeMachineBodies(frame, canonical); return result;
+}
+export function captureAsteroidMachines(frame: AsteroidAttachmentFrame, canonical: Readonly<Record<string, MachineState>>,
+  baseline: Readonly<Record<string, MachineState>>, edited: Readonly<Record<string, MachineState>>,
+  voxels: Readonly<{ before: AsteroidMachineVoxels; after: AsteroidMachineVoxels }>): Record<string, MachineState> {
+  assertWholeMachineBodies(frame, canonical);
+  const result = captureAsteroidMachineNetworks(frame, canonical, baseline, edited, voxels);
+  assertWholeMachineBodies(frame, result); return result;
 }

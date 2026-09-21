@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { WindowArm, WindowLayout } from "./connected-geometry";
 import { createTransportConnectors, updateTransportConnectors, type TransportTargets } from "./transport-model-connectors";
+import { includeModelFill, includeModelMotion, type ModelMotionEnvelope } from "./model-motion-bounds";
 
 export const PRESSURE_MODEL_KINDS = [
   "liquid-pipe", "gasline", "heat-conduit", "atmospheric-condenser", "electrolyzer",
@@ -39,8 +40,34 @@ type Rig = {
 const rigs = new WeakMap<THREE.Group, Rig>();
 const TAU = Math.PI * 2;
 const unit = (value: number) => Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
-const gateSize = (value: number) => Number.isFinite(value) ? Math.max(3, Math.min(9, Math.round(value))) : 3;
+export const PRESSURE_GATE_SIZE = Object.freeze({ minimum: 3, maximum: 9 });
+const gateSize = (value: number) => Number.isFinite(value)
+  ? Math.max(PRESSURE_GATE_SIZE.minimum, Math.min(PRESSURE_GATE_SIZE.maximum, Math.round(value))) : PRESSURE_GATE_SIZE.minimum;
 const faces: readonly PressureModelFace[] = ["front", "back", "left", "right", "top", "bottom"];
+
+/** All phases at the configured gate size. Configure the maximum supported
+ * size before deriving a bound that must also cover later resizing. */
+export function pressureModelMotionEnvelopes(root: THREE.Group) {
+  const result = new Map<THREE.Object3D, ModelMotionEnvelope>(), rig = rigs.get(root);
+  if (!rig) return result;
+  for (const motion of rig.motions) if (motion.stroke !== undefined) {
+    const position = motion.object.position.clone(); position[motion.axis] = motion.base;
+    includeModelMotion(result, motion.object, position.length() + Math.abs(motion.stroke));
+  }
+  for (const column of rig.columns) includeModelFill(result, column.object, column.base, column.height);
+  for (const flow of rig.flow) includeModelMotion(result, flow, flow.position.length());
+  for (const panel of rig.panels) includeModelMotion(result, panel.object,
+    Math.hypot(Math.abs(panel.base) + Math.abs(panel.travel), panel.object.position.y, panel.object.position.z));
+  for (const panel of rig.dropPanels) includeModelMotion(result, panel.object,
+    Math.hypot(panel.object.position.x, Math.max(Math.abs(panel.closedY), Math.abs(panel.packedY)), panel.object.position.z));
+  if (rig.gate) {
+    const gate = rig.gate, segment = (gate.height - .3) / gate.shutters.length;
+    gate.shutters.forEach((panel, i) => includeModelMotion(result, panel,
+      Math.hypot(panel.position.x, Math.max(.05 + segment * (i + .5), gate.height - .24 + i * .012), .025),
+      Math.max(gate.width - .36, segment, 1)));
+  }
+  return result;
+}
 
 /** Authored pressure hardware, floor/center origin, front -Z. Every GPU resource
  * belongs to this instance; dispose unique traversed geometries/materials on eviction.

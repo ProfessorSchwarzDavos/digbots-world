@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { PowerTopologyFace } from "./wayworks-network";
+import { includeModelMotion, type ModelMotionEnvelope } from "./model-motion-bounds";
 
 export type TransportTargets = Readonly<Partial<Record<PowerTopologyFace, readonly [number, number, number]>>>;
 export type TransportConnectorState = Readonly<{
@@ -11,6 +12,20 @@ const directions = { front: [0, 0, -1], back: [0, 0, 1], left: [-1, 0, 0], right
 type Rig = { signature: string; targets: TransportTargets; connected: TransportConnectorState["connected"];
   arms: Record<PowerTopologyFace, { group: THREE.Group; segments: THREE.Mesh[] }> };
 const rigs = new WeakMap<THREE.Group, Rig>();
+export const TRANSPORT_CONNECTOR_MAX_REACH = 1;
+
+/** Every right-angle segment stays within one reach of its authored face
+ * endpoint. Include all configured socket alternatives, even currently hidden. */
+export function transportConnectorMotionEnvelopes(root: THREE.Group) {
+  const result = new Map<THREE.Object3D, ModelMotionEnvelope>(), rig = rigs.get(root);
+  if (!rig) return result;
+  for (const face of Object.keys(directions) as PowerTopologyFace[]) {
+    const direction = directions[face], startRadius = Math.hypot(direction[0] * .5, .5 + direction[1] * .5, direction[2] * .5);
+    for (const segment of rig.arms[face].segments) includeModelMotion(result, segment, startRadius + TRANSPORT_CONNECTOR_MAX_REACH,
+      Math.max(1, TRANSPORT_CONNECTOR_MAX_REACH));
+  }
+  return result;
+}
 
 /** Reusable, presentation-only elbow stubs bridge off-center machine sockets.
  * Pipes meet one another at cell boundaries and do not need these adapters. */
@@ -36,7 +51,7 @@ export function updateTransportConnectors(root: THREE.Group, state: TransportCon
   for (const face of Object.keys(directions) as PowerTopologyFace[]) {
     const arm = rig.arms[face], end = rig.targets[face], direction = directions[face];
     const start = new THREE.Vector3(direction[0] * .5, .5 + direction[1] * .5, direction[2] * .5);
-    arm.group.visible = !!rig.connected?.[face] && !!end && end.every(Number.isFinite) && start.distanceTo(new THREE.Vector3(...end)) < 1;
+    arm.group.visible = !!rig.connected?.[face] && !!end && end.every(Number.isFinite) && start.distanceTo(new THREE.Vector3(...end)) < TRANSPORT_CONNECTOR_MAX_REACH;
     if (!arm.group.visible || !end) continue;
     // Tangential axes first, face-normal axis last: a right-angle machine elbow.
     const axes = direction[0] ? [1, 2, 0] : direction[2] ? [1, 0, 2] : [0, 2, 1];

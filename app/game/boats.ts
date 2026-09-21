@@ -24,6 +24,18 @@ export type SailboatInput = {
 
 export type SailboatKinematics = Pick<SailboatSave, "x" | "y" | "z" | "yaw" | "velocity">;
 
+/** Shared with conservative whole-vessel attachment bounds. */
+export const SAILBOAT_VISUAL_MOTION = Object.freeze({ maximumBobMultiplier: 1.8, bobAmplitude: .025, pitchAmplitude: .018, rollAmplitude: .025 });
+
+/** Preserve the engine's existing equations and three clock samples in order. */
+export function sailboatVisualPose(boat: Pick<SailboatSave, "x" | "y" | "z" | "yaw">, gravityG: number, sampleTimeMs: () => number) {
+  const bob = Math.min(SAILBOAT_VISUAL_MOTION.maximumBobMultiplier, Math.sqrt(gravityG));
+  const y = boat.y + Math.sin(sampleTimeMs() * .0018 + boat.x) * SAILBOAT_VISUAL_MOTION.bobAmplitude * bob;
+  const pitch = Math.sin(sampleTimeMs() * .0013 + boat.z) * SAILBOAT_VISUAL_MOTION.pitchAmplitude * bob;
+  const roll = Math.sin(sampleTimeMs() * .0016 + boat.x) * SAILBOAT_VISUAL_MOTION.rollAmplitude * bob;
+  return { x: boat.x, y, z: boat.z, pitch, yaw: boat.yaw, roll };
+}
+
 const finite = (value: unknown, fallback = 0) => typeof value === "number" && Number.isFinite(value) ? value : fallback;
 const clamp = (value: number, minimum: number, maximum: number) => Math.max(minimum, Math.min(maximum, value));
 const wrapAngle = (value: number) => Math.atan2(Math.sin(value), Math.cos(value));

@@ -17,7 +17,7 @@ const registry = createAsteroidRegistry(orbit, 902), frame = createAsteroidAttac
 const creature = (id = 1, x = 0): SavedCreature => ({ id, specimenId: `specimen-${id}`, kind: "peelop", x, y: 32, z: 0, yaw: 0, health: 5, age: 42 });
 const actor = (id = "host", x = 0): AsteroidRelationshipActor => ({ id, position: { x, y: 32, z: 0 },
   bounds: { minX: x - .3, maxX: x + .3, minY: 31.5, maxY: 33.4, minZ: -.3, maxZ: .3 }, mountedCreatureId: null, followingCreatureIds: [] });
-const context = (): AsteroidRelationshipContext => ({ localActorId: "host", actors: [actor(), actor("outside", 80)], boats: [], dependencies: [] });
+const context = (): AsteroidRelationshipContext => ({ localActorId: "host", actors: [actor(), actor("outside", 80)], dependencies: [] });
 const fixture = (): AsteroidAttachedEntities => ({ creatures: [creature()], sleepingCreatures: [creature(2, 80)], boats: [], drops: [], leads: [] });
 const select = (input = fixture(), ctx = context()) => asteroidEntityRelationshipPartition(frame, input, "local", ctx);
 function rejectsUnchanged(input: AsteroidAttachedEntities, ctx: AsteroidRelationshipContext, pattern: RegExp) {
@@ -87,13 +87,13 @@ test("segment slab intersection catches diagonal crossings and validates all axe
 });
 function withBoat(): { input: AsteroidAttachedEntities; ctx: AsteroidRelationshipContext } {
   return { input: { ...fixture(), boats: [{ id: "boat", x: 0, y: 32, z: 0, yaw: 0, velocity: 0,
-    ownerId: "outside", passengers: ["host"], inventory: [] }] }, ctx: { ...context(), boats: [{ id: "boat", attached: true }] } };
+    ownerId: "outside", passengers: ["host"], inventory: [] }] }, ctx: context() };
 }
-test("whole boat result and every passenger must agree; historical boat owner is not a passenger", () => {
+test("whole boat body and every passenger must agree; historical boat owner is not a passenger", () => {
   const { input, ctx } = withBoat(); assert.deepEqual(select(input, ctx).boatIds, ["boat"]);
-  rejectsUnchanged(input, { ...ctx, boats: [{ id: "boat", attached: false }] }, /Boat passenger/);
-  rejectsUnchanged(input, { ...ctx, boats: [] }, /unresolved/);
-  rejectsUnchanged(input, { ...ctx, boats: [...ctx.boats, { id: "ghost", attached: true }] }, /Unmatched/);
+  rejectsUnchanged({ ...input, boats: [{ ...input.boats[0], x: 80 }] }, ctx, /Boat passenger/);
+  rejectsUnchanged({ ...input, boats: [{ ...input.boats[0], x: 31.51 }] }, ctx, /boundary/);
+  rejectsUnchanged({ ...input, boats: [input.boats[0], input.boats[0]] }, ctx, /Duplicate/);
   input.boats[0].passengers = ["host", "host"]; rejectsUnchanged(input, ctx, /Duplicate/);
 });
 test("creature mount cannot cross, refer to a missing creature or double-book a boat passenger", () => {

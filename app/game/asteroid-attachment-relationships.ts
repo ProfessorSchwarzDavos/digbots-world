@@ -4,6 +4,7 @@ import { MOB_DEFS } from "./mobs";
 import { SAILBOAT_CAPACITY } from "./boats";
 import { assertKnownAsteroidEntityFields, type AsteroidAttachedEntities } from "./asteroid-attachment-entities";
 import { asteroidAttachmentVolumeSide, asteroidCreatureFootprintSide } from "./asteroid-attachment-creature-footprint";
+import { asteroidSailboatFootprintSide } from "./asteroid-attachment-vehicle-footprint";
 import { asteroidAttachmentContainsCell, asteroidAttachmentPhysicalBounds,
   type AsteroidAttachmentFrame, type AsteroidAttachmentView } from "./asteroid-attachment-frame";
 
@@ -23,8 +24,6 @@ export type AsteroidRelationshipActor = Readonly<{
 export type AsteroidRelationshipContext = Readonly<{
   localActorId: string;
   actors: readonly AsteroidRelationshipActor[];
-  /** Complete physical boat results; this module does not guess a hull radius. */
-  boats: readonly Readonly<{ id: string; attached: boolean }>[];
   dependencies: readonly AsteroidEntityDependency[];
 }>;
 
@@ -88,7 +87,7 @@ function configuredFollowerOwners(creature: SavedCreature): string[] {
 }
 
 /** Validate one proposed partition of a COMPLETE canonical entity collection.
- * Physical creature checks are derived here. Boat/dependency results and actor
+ * Physical creature/boat checks are derived here. Dependency results and actor
  * body/active-link snapshots must come from complete host-owned selectors at the
  * same revision. Missing adapters fail closed; this helper cannot attest those
  * inputs, grant consent, spend resources, capture a save, or open local travel.
@@ -141,17 +140,11 @@ export function asteroidEntityRelationshipPartition(frame: AsteroidAttachmentFra
     return actor;
   };
   actorFor(context.localActorId);
-  const boatSides = new Map<string, boolean>();
-  for (const boat of context.boats) {
-    identifier(boat.id);
-    if (boatSides.has(boat.id) || typeof boat.attached !== "boolean") throw Error("Invalid or duplicate boat partition.");
-    boatSides.set(boat.id, boat.attached);
-  }
   const occupiedActors = new Set<string>(), boatIds: string[] = [], seenBoats = new Set<string>();
   for (const boat of input.boats) {
     identifier(boat.id);
-    if (seenBoats.has(boat.id) || !boatSides.has(boat.id)) throw Error("Duplicate or unresolved attachment boat.");
-    seenBoats.add(boat.id); const side = boatSides.get(boat.id)!;
+    if (seenBoats.has(boat.id)) throw Error("Duplicate attachment boat.");
+    seenBoats.add(boat.id); const side = asteroidSailboatFootprintSide(frame, boat, view);
     if (boat.passengers.length > SAILBOAT_CAPACITY) throw Error("Attachment boat has too many passengers.");
     for (const id of boat.passengers) {
       const actor = actorFor(id);
@@ -160,7 +153,6 @@ export function asteroidEntityRelationshipPartition(frame: AsteroidAttachmentFra
     }
     if (side) boatIds.push(boat.id);
   }
-  if (boatSides.size !== seenBoats.size) throw Error("Unmatched boat partition identity.");
   const mounted = new Set<number>(), followerOwners = new Map<number, string>();
   for (const { value: actor, side } of actors.values()) {
     if (actor.mountedCreatureId !== null) {

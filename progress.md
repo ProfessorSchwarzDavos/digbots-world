@@ -2,6 +2,14 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Whole sailboat footprints derive from the actual authored model, including
+  hull/mast/sail/rails/chest/rudder local rotations, and bound every capped
+  bob/pitch/roll phase around exact yaw. Engine delegates unchanged equations
+  with the original three clock samples. Vertex oracle spans6headings/5gravities/
+  6phases; relationship selection now derives boat sides directly instead of
+  trusting a supplied boolean. Vehicle-r1:43PASS, expanded-r2:220PASS and
+  static87/lint68PASS read before commit. Production build/browser still next;
+  drops/authenticated actor/canonical dependency adapters and travel remain open.
 - Pure relationship partition now rejects split live/sleep social labels, leads,
   mounted/boat passengers, configured/host-declared followers and shoulder pets.
   Explicit canonical-owner endpoints are mandatory for POI/legendary/prime/

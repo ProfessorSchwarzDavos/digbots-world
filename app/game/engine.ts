@@ -564,6 +564,7 @@ import {
   sailboatInventoryIsEmpty,
   sailboatRayPickDistance,
   sailboatSeatOffset,
+  sailboatVisualPose,
   type SailboatSave,
 } from "./boats";
 import {
@@ -26343,9 +26344,9 @@ export class VoxelEngine {
       } else if (remoteInput && !freshRemoteInput) {
         this.multiplayerBoatInputs.delete(driverId);
       }
-      const bob = Math.min(1.8, Math.sqrt(this.bodyContext().environment.gravityG));
-      boat.group.position.set(boat.save.x, boat.save.y + Math.sin(performance.now() * 0.0018 + boat.save.x) * 0.025 * bob, boat.save.z);
-      boat.group.rotation.set(Math.sin(performance.now() * 0.0013 + boat.save.z) * 0.018 * bob, boat.save.yaw, Math.sin(performance.now() * 0.0016 + boat.save.x) * 0.025 * bob);
+      const visualPose = sailboatVisualPose(boat.save, this.bodyContext().environment.gravityG, () => performance.now());
+      boat.group.position.set(visualPose.x, visualPose.y, visualPose.z);
+      boat.group.rotation.set(visualPose.pitch, visualPose.yaw, visualPose.roll);
       if (localSeat >= 0) {
         this.mountedBoatId = boat.save.id;
         const seat = sailboatSeatOffset(localSeat, boat.save.yaw);

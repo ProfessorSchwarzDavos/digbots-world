@@ -108,9 +108,12 @@ an outside rope with both endpoints outside is refused if it intersects the
 frame. Historical idle owner IDs are preserved without fabricating an active
 follower. POI, legendary/Prime/summon, settlement/resident, hive, deployed-orb and
 lair links require explicit results from their canonical whole-owner selectors;
-missing, unused, duplicated or crossing endpoints reject. Actor geometry/active
-links and boat physical results must also come from the authoritative host at
-the same revision. This helper does not establish those inputs or consent. The
+missing, unused, duplicated or crossing endpoints reject. Whole boat footprints
+are derived from the authored hull/mast/sail model and conservatively cover every
+capped bob/pitch/roll phase, not just its origin or forgiving pick radius. The
+engine shares the unchanged visual-motion formulas with this bound. Actor geometry
+and active links must come from the authoritative host at the same revision.
+This helper does not establish those actor/owner inputs or consent. The
 owner adapters are still incomplete, so it is not an admission or travel gate.
 
 Pressure zone IDs are derived from location and membership, so projections must

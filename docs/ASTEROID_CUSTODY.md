@@ -210,6 +210,18 @@ This does not copy, consume or grant ownership of exterior water. The selector
 does not tick production, initialize a station, allocate an orb, or transfer a
 store. Other authored families and whole sites remain separate requirements.
 
+Archive shelves and tome displays also join exact state to their canonical
+installed blocks. Recorded shelves must match their visible zero-to-six-book
+variant, retain book order and contain only their supported item codes. Lossy,
+unknown or orphan state rejects rather than being repaired. A shelf without a
+ledger retains the implicit BoundBook count of its authored variant; selection
+records that provenance without generating an inventory. Missing display state
+remains unmaterialized, distinct from a recorded empty display. The actual
+separate tome mesh fits the unit-cell envelope at the analytic maximum rune
+scale; its fixed tilt is preserved. No book is studied, removed, duplicated or
+allocated by this selector. Whole authored sites and shared Waygrid capacity
+provenance are still separate open requirements.
+
 `VoxelEngine.snapshotAttachmentSource()` adds an exhaustive save-field source
 preimage around the physical slice. This is comparison data, **not a WorldSave**:
 maps retain their raw rows, creature gameplay fields bypass save normalizers,

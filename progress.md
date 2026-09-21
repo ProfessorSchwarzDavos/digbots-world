@@ -2,6 +2,18 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Revision16 book-furniture source now enumerates seven archive-shelf variants
+  and tome displays, matching actual blocks/counts to exact ordered book/spell
+  state. Unopened shelves retain implicit BoundBook provenance without creating
+  stores; missing and recorded-empty displays stay distinct. Full engine source
+  binds these selectors and catches same-revision spell/count changes. The
+  separate tome mesh's maximum rune scale fits one cell in its actual fixed
+  tilt and conservative parent-yaw rotations. Focused r1 retained37PASS/1FAIL:
+  test incorrectly applied a local Euler Y rotation never used by the renderer;
+  corrected without changing the renderer. Focusedr2:38PASS, expandedr3:172PASS,
+  static139/140 and lint118/119PASS; build/browser checkpoint pending.
+  No entry/return permission or complete authored-site claim.
+
 - Revision16 production-station selector covers all installed Golem Forges,
   Alchemy Stands, Distilleries and Sugarworks, including unopened/pages-only
   blocks, all facings and outside ledgers. Pure normalizers serve only as exact
@@ -11,7 +23,9 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
   water sphere and source/flow predicate, including outside-frame waterlogged
   plants. Original liquid rows validate before cloning can erase unknown fields.
   Focused r16-production-r1:40PASS; expanded r2:154PASS. Static137/138 and
-  lint116/117PASS; production build/browser checkpoint pending. Other authored
+  lint116/117PASS. Committedf56bb78/build40 bkSFkMtXuZHH2BgtQByua, exact154repeat
+  and official40PASS; latest station image reviewed, all jobs drained22:44Z.
+  Frozen production-checkpoint432c462d binds9source/36evidence/9receipts. Other authored
   families/sites, inactive owners, light/climate and atomic consent/resource
   entry AND return remain required; local entry stays closed.
 

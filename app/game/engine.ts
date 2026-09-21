@@ -571,6 +571,7 @@ import { planCreatureEncounterRecall, reconcileCreatureEncounterCustody } from "
 import { canonicalJson, cloneUniverseJson, freezeUniverseJson } from "./universe-json";
 import { snapshotAttachmentSaveSources, type AttachmentSaveSources } from "./attachment-source-preimage";
 import { selectAsteroidProductionStations } from "./asteroid-attachment-production";
+import { selectAsteroidBookFurniture } from "./asteroid-attachment-book-furniture";
 import { itemPresentationFamily } from "./item-presentation";
 import {
   boardSailboat,
@@ -22274,10 +22275,14 @@ export class VoxelEngine {
     if (!this.pressureRuntime) throw Error("Attachment source lacks pressure authority.");
     const pressureSource = this.pressureRuntime.snapshotAttachmentSource();
     const physical = this.snapshotAttachmentPhysicalCustodySource(asteroidId);
+    const canonicalWorld = createAsteroidAttachmentWorld(physical.context.world);
     const production = selectAsteroidProductionStations(physical.frame, {
       golemForges: Object.fromEntries(this.golemForges), alchemyStands: Object.fromEntries(this.alchemyStands),
       distilleries: Object.fromEntries(this.distilleries), sugarworks: Object.fromEntries(this.sugarworks),
-    }, createAsteroidAttachmentWorld(physical.context.world), [...this.liquidCells]);
+    }, canonicalWorld, [...this.liquidCells]);
+    const bookFurniture = selectAsteroidBookFurniture(physical.frame, {
+      archiveShelves: Object.fromEntries(this.archiveShelves), tomeDisplays: Object.fromEntries(this.tomeDisplays),
+    }, canonicalWorld);
     const mobs = this.mobs.map(mob => {
       // Rendering object graphs are not source state. Their authoritative body
       // positions are copied explicitly; every other own field is retained.
@@ -22352,7 +22357,7 @@ export class VoxelEngine {
     });
     // Keep already-encoded authority records outside the field encoder: encoding
     // them again would multiply nesting depth for large, valid pressure rooms.
-    return freezeUniverseJson({ physical, source, pressureSource, production });
+    return freezeUniverseJson({ physical, source, pressureSource, production, bookFurniture });
   }
 
   assertAttachmentSourceUnchanged(source: ReturnType<VoxelEngine["snapshotAttachmentSource"]>) {

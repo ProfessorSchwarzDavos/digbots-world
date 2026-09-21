@@ -12,6 +12,7 @@ import { homeLocation, locationAddress, locationId, universeId } from "../app/ga
 import { createDigitalCreatureArchive, createDigitalItemVault } from "../app/game/digital-storage";
 import { canonicalJson } from "../app/game/universe-json";
 import { createGolemForgeState } from "../app/game/v1-cultures";
+import { SPELL_TOME_ITEMS } from "../app/game/dragon-world";
 import type { ChunkEditSave } from "../app/game/world";
 
 const additionalMaps = ["saplings", "veinRegrowth", "roadEvents", "golemForges", "alchemyStands", "distilleries", "sugarworks",
@@ -73,6 +74,28 @@ test("actual exhaustive source binds installed production and detects ledger cha
   engine.assertAttachmentSourceUnchanged(unopened);
 });
 
+test("actual exhaustive source binds implicit shelf counts and exact stored spell identities", () => {
+  const { engine, asteroid, edits } = fixture(), { x, y, z } = asteroid.center;
+  const cx = Math.floor(x / 16), cz = Math.floor(z / 16), cell = `${x},${y},${z}`;
+  const index = (y + 64) * 256 + (z - cz * 16) * 16 + x - cx * 16;
+  edits[`${cx},${cz}`] = [[index, BlockId.ArchiveShelfTwo]];
+  const unopened = engine.snapshotAttachmentSource(asteroid.id);
+  assert.deepEqual(unopened.bookFurniture.installations[0].implicitBooks, { item: Item.BoundBook, count: 2 });
+  assert.equal(engine.archiveShelves.size, 0);
+  engine.archiveShelves.set(cell, { schema: 1, tomes: [Item.BoundBook, SPELL_TOME_ITEMS[0]] });
+  const source = engine.snapshotAttachmentSource(asteroid.id);
+  assert.equal(source.bookFurniture.installations[0].recorded, true);
+  assert.equal(source.bookFurniture.installations[0].implicitBooks, null);
+  engine.assertAttachmentSourceUnchanged(source);
+  engine.archiveShelves.set(cell, { schema: 1, tomes: [Item.BoundBook, SPELL_TOME_ITEMS[1]] });
+  assert.equal(engine.persistenceRevision, 11);
+  assert.throws(() => engine.assertAttachmentSourceUnchanged(source), /Stale attachment source/);
+  engine.archiveShelves.delete(cell);
+  engine.assertAttachmentSourceUnchanged(unopened);
+  edits[`${cx},${cz}`] = [[index, BlockId.ArchiveShelfThree]];
+  assert.throws(() => engine.assertAttachmentSourceUnchanged(unopened), /Stale attachment source/);
+});
+
 test("actual exhaustive engine source is cache/clock/normalization free and detects direct changes", () => {
   const { engine, asteroid } = fixture(), registry = engine.asteroidFields, inventory = engine.inventory;
   const before = canonicalJson({ registry, inventory }), now = Date.now;
@@ -97,6 +120,7 @@ test("actual adapter covers additional raw maps without dirty-counter, decay, cl
     map.set("raw-key", name === "celestialCreatureVelocity" ? new THREE.Vector3(1, 2, 3) : { raw: true, optional: undefined });
     assert.equal(engine.persistenceRevision, 11);
     const expected = ["golemForges", "alchemyStands", "distilleries", "sugarworks"].includes(name) ? /production station key/
+      : ["archiveShelves", "tomeDisplays"].includes(name) ? /book furniture key/
       : name === "liquidCells" ? /canonical storage cell key/ : /Stale attachment source/;
     assert.throws(() => engine.assertAttachmentSourceUnchanged(source), expected, name);
   }

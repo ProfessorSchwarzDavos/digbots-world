@@ -2,6 +2,15 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Attached map views retain original discovery keys, marker identities and
+  world-elevation cave bands. Only already-known local information is projected;
+  host observations merge through the original map reducers.100cold cycles keep
+  fractional markers, outside discoveries/bed binding and all17 travel charges.
+  Forged/stale views, lossy metadata and revision overflow reject.216expanded,
+  static106/lint89PASS. Static105's real coordinate-narrowing type errors are
+  retained and fixed with explicit numeric guards. This private chart is not
+  guest knowledge-sharing, observation proof, fast travel or atomic ownership;
+  complete navigation/capture integration remains. No new build/browser claim.
 - Full machine selection/capture now also checks conservative analytic bounds
   from the actual workshop/pressure/space-infrastructure geometry and rigs.
   Hidden alternatives, all rotation phases, piston strokes, crane lift, fill

@@ -560,6 +560,7 @@ import { PLAYER_HEIGHT, PLAYER_RADIUS, playerBodyHeight } from "./player-body";
 import { snapshotHostAttachmentActorBodies } from "./attachment-actor-bodies";
 import type { AsteroidApiarySources } from "./asteroid-attachment-apiaries";
 import { collectWorldCreatureCustody, type WorldCreatureCustodySource } from "./creature-custody-sources";
+import { planCreatureEncounterRecall, reconcileCreatureEncounterCustody } from "./creature-encounter-custody";
 import { cloneUniverseJson, freezeUniverseJson } from "./universe-json";
 import { itemPresentationFamily } from "./item-presentation";
 import {
@@ -18174,17 +18175,28 @@ export class VoxelEngine {
   }
 
   recallAttunedMob(mob: MobEntity, reason: "manual" | "fainted") {
-    if (!mob.attunedOrbId) return false;
+    if (!mob.attunedOrbId || this.multiplayer && (this.multiplayer.role !== "host" || !["hosting", "connected"].includes(this.multiplayer.state))) return false;
+    const index = this.mobs.indexOf(mob);
+    if (index < 0) return false;
     const orb = this.findCaptureOrbEverywhere(mob.attunedOrbId);
     if (!orb) return false;
     const metadata = this.creatureMetadataForMob(mob);
     if (reason === "fainted") metadata.health = 0;
-    const recalled = recallAttunedCreature(orb, metadata, orb.attunement?.ownerId ?? this.localPlayerId(), reason, Date.now());
+    const now = Date.now();
+    const recalled = recallAttunedCreature(orb, metadata, orb.attunement?.ownerId ?? this.localPlayerId(), reason, now, String(mob.id));
     if (!recalled) return false;
+    let encounters: ReturnType<typeof planCreatureEncounterRecall>;
+    try {
+      encounters = planCreatureEncounterRecall({ id: mob.id, specimenId: mob.specimenId, kind: mob.kind,
+        primeAnchorId: mob.primeAnchorId, legendaryEncounterId: mob.legendaryEncounterId, legendarySiteId: mob.legendarySiteId }, orb,
+      { prime: mob.primeAnchorId ? this.primeEncounters.get(mob.primeAnchorId) ?? null : null,
+        legendary: mob.legendarySiteId ? this.legendaryEncounters.get(mob.legendarySiteId) ?? null : null }, now);
+    } catch { return false; }
     this.replaceCaptureOrbEverywhere(orb.orbId, recalled.orb);
+    if (encounters.prime) this.primeEncounters.set(encounters.prime.anchorId, encounters.prime);
+    if (encounters.legendary) this.legendaryEncounters.set(encounters.legendary.siteId, encounters.legendary);
     this.spawnRecallSparkles(mob, recalled.effect.particleCount);
-    const index = this.mobs.indexOf(mob);
-    if (index >= 0) this.removeMob(index);
+    this.removeMob(index);
     this.audio.play("craft");
     this.events.onToast(reason === "fainted"
       ? `${mob.name} fainted and returned to its attuned orb. Heal it before summoning or unattuning it.`
@@ -22271,7 +22283,11 @@ export class VoxelEngine {
       apiaries: apiary.apiaries, aquariums: Object.fromEntries(this.aquariums), fieldPerches: Object.fromEntries(this.fieldPerches),
       creatures: [...apiary.creatures], sleepingCreatures: [...apiary.sleepingCreatures],
     };
-    return freezeUniverseJson(cloneUniverseJson({ source, custody: collectWorldCreatureCustody(source), apiaryVisuals: apiary.visuals }));
+    const custody = collectWorldCreatureCustody(source);
+    const encounters = reconcileCreatureEncounterCustody(custody.sources, {
+      primeEncounters: Object.fromEntries(this.primeEncounters), legendaryEncounters: Object.fromEntries(this.legendaryEncounters),
+    });
+    return freezeUniverseJson(cloneUniverseJson({ source, custody, encounters, apiaryVisuals: apiary.visuals }));
   }
 
   /** Medium and large ground creatures have horizontal presence without becoming unstable moving platforms. */

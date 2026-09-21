@@ -6,6 +6,7 @@ import { captureIntoOrb, captureOrbInventorySlot, createEmptyCaptureOrb } from "
 import { createDigitalCreatureArchive, createDigitalItemVault } from "../app/game/digital-storage";
 import { createApiary } from "../app/game/apiary";
 import { Item } from "../app/game/data";
+import { createPrimeEncounterState, planPrimeEncounter, transferPrimeEncounterCustody } from "../app/game/creature-rarity";
 
 const blankEquipment = () => ({ head: null, chest: null, legs: null, feet: null, back: null });
 
@@ -23,6 +24,7 @@ function fixture() {
     drops: [{ item: Item.RawIron, count: 3, age: .125, mesh: { position: new THREE.Vector3(1.125, 30.5, -2.25) }, velocity: new THREE.Vector3(.1, .2, .3) }],
     orbRacks: new Map(), healingStations: new Map(), morphLooms: new Map(), digitalItemVault: createDigitalItemVault(),
     digitalCreatureArchive: createDigitalCreatureArchive(), multiplayerPlayerStates: new Map(), spacefleet: { schema: 1, vehicles: {} },
+    primeEncounters: new Map(), legendaryEncounters: new Map(),
     apiaries: new Map([["1,30,2", hive]]), aquariums: new Map(), fieldPerches: new Map(),
     mobs: [{ id: 1, beeHiveKey: "1,30,2" }], sleepingCreatures: [], temporarySummons: new Map(),
     agentBuildJobs: new Map(), agentBuildPreviews: new Map(), agentRuntimeTasks: new Map(), agentInventories: new Map(),
@@ -61,4 +63,22 @@ test("guest/stale-host sessions and active agent jobs, previews or tasks cannot 
     const { engine } = fixture(); Object.assign(engine, { [name]: new Map([["active", {}]]) });
     assert.throws(() => engine.snapshotAttachmentCreatureCustody(), /active agent work/);
   }
+});
+
+test("actual host snapshot reconciles canonical encounter maps and refuses stale body references without repairing history", () => {
+  const { engine } = fixture(), anchor = "prime:petalfox:0:0";
+  engine.inventory = [captureOrbInventorySlot(captureIntoOrb(createEmptyCaptureOrb("prime-orb"), {
+    schema: 1, entityId: "prime-specimen", kind: "petalfox", health: 5, maxHealth: 7, ageTicks: 123, baby: false,
+    temperament: "Gentle", hostile: false, tamed: true, ownerId: "keeper", name: null, geneticSeed: 321, command: null, custom: { primeAnchorId: anchor },
+  }, 42)!)];
+  const state = transferPrimeEncounterCustody(createPrimeEncounterState(planPrimeEncounter("petalfox", { worldSeed: "fixture", x: 0, z: 0, y: 30,
+    surfaceY: 30, biomeName: "Glimmerwood", weather: "clear", daylight: .8 })!, "petalfox", 23, 100), "captured", "prime-specimen", "orb:prime-orb", null, 200);
+  engine.primeEncounters.set(anchor, state);
+  const snapshot = engine.snapshotAttachmentCreatureCustody();
+  assert.deepEqual(snapshot.encounters.primeOwners[0].owner!.path, ["inventory", 0]);
+  assert.equal(snapshot.encounters.primeOwners[0].owner!.body, null);
+  assert.equal(engine.primeEncounters.get(anchor), state);
+  const stale = { ...state, entityId: 23 }; engine.primeEncounters.set(anchor, stale);
+  assert.throws(() => engine.snapshotAttachmentCreatureCustody(), /current body\/specimen/);
+  assert.equal(engine.primeEncounters.get(anchor), stale);
 });

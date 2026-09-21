@@ -197,17 +197,22 @@ export type AttunedRecallEffect = Readonly<{
   durationSeconds: number;
 }>;
 
-/** Returns the current exact creature state to its orb and describes the shared recall visual. */
+/** Returns the current exact creature state to its orb and describes the shared
+ * recall visual. The runtime supplies its committed live body ID separately;
+ * pure deployment previews still use the default permanent specimen ID. Neither
+ * path may replace the stored specimen, species or genetic identity. */
 export function recallAttunedCreature(
   orb: CaptureOrb,
   creature: CreatureMetadata,
   ownerId: string,
   reason: AttunedRecallReason = "manual",
   recalledAt = Date.now(),
+  activeEntityId = creature.entityId,
 ): Readonly<{ orb: CaptureOrb; effect: AttunedRecallEffect }> | null {
   const attunement = orb.attunement;
   if (!attunement || attunement.ownerId !== cleanOwnerId(ownerId) || !attunement.activeEntityId
-    || attunement.activeEntityId !== creature.entityId) return null;
+    || attunement.activeEntityId !== activeEntityId || !orb.creature || orb.creature.entityId !== creature.entityId
+    || orb.creature.kind !== creature.kind || orb.creature.geneticSeed !== creature.geneticSeed) return null;
   const stored = cloneCreatureMetadata(creature);
   stored.custom = { ...stored.custom, attunedOrbId: orb.orbId };
   if (reason === "fainted") stored.health = 0;

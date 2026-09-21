@@ -2,6 +2,20 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Current creature ownership now reconciles with exact Prime/legendary history in
+  the host preflight. Historical regional/site IDs are not current positions;
+  deployed orb/body representations stay one unit. Missing/stale/duplicate owners
+  and lossy history refuse;100cold checks preserve objectives, clues and rewards.
+  The actual recall regression exposed numeric live IDs compared with permanent
+  specimen IDs. Recall now supplies the live ID separately, verifies permanent
+  species/seed/specimen identity, and preflights the existing encounter before any
+  owner write. Prime live links clear and legendary custody returns to the same
+  orb without new resolution/rewards. Ordinary/Prime/legendary manual and fainted
+  paths pass actual-engine tests; wrong identities, stale owners, removed bodies
+  and guest/stale hosts leave state/effects unchanged.59focused/315expanded/
+  static120/lint102PASS. Red recall failure, static118 narrowing and static119
+  fixture-union errors retained/corrected. Full physical owner/site membership,
+  atomic authority and relevant integration build/browser gates remain open.
 - Canonical storage collection now enumerates the explicit world storage slice,
   including guest/agent/fleet holds, housed residents, nested packed machines and
   fitted dragon/leviathan cargo. Deployed orb cargo is historical: the actual

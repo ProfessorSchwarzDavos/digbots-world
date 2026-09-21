@@ -2,6 +2,18 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Drop/human prerequisites now share the exact old engine scale, animation,
+  terrain probe and sex/race/stance height formulas. Conservative drop envelopes
+  cover every vertex of643catalog items plus filled Capture Orb under animation;
+  complete feet-anchored human bodies reject partial frame intersections. Pure
+  full-array drop projection/capture retains outside order/canonical JSON and
+  exact unchanged fractional axes, even with identical drops and reordered live
+  objects. Host-owned selected-source lineage is mandatory; no saved IDs added.
+  Drop-capture-r1:19PASS, expanded drop-human-r2:232PASS, static89/lint70PASS read
+  before commit. Earlier CSS-loader harness failure and lint69 unused-import
+  warning retained; task-only CSS adapter is not visual evidence. Production
+  build/ordinary regression remains next. This is not authenticated actor or
+  resource authority, full cross-field capture, cargo gameplay or local travel.
 - Runtime001a22e passes committed220 regressions, build33p02aSBKdDZHeS7bFWi-3i,
   official33 and ordinary normal/cold Morrow smoke. Both2500ms pause intervals
   retain clock/EVA/workshop/nearby creatures; both saved012 outputs retain18old

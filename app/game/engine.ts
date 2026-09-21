@@ -553,6 +553,8 @@ import {
 } from "./contextual-loot";
 import { normalizeRoadEventState, planRoadEvent, type RoadEdge, type RoadEventState } from "./surface-roads";
 import { applyFirstPersonHeldItemOrientation, createAvatarHeldItemModel } from "./held-items";
+import { WORLD_DROP_VISUAL, worldDropUsesFilledOrb } from "./world-drop-body";
+import { PLAYER_HEIGHT, PLAYER_RADIUS, playerBodyHeight } from "./player-body";
 import { itemPresentationFamily } from "./item-presentation";
 import {
   boardSailboat,
@@ -2165,9 +2167,6 @@ const compareEnvironmentLightCandidates = (a: EnvironmentLightCandidate, b: Envi
  */
 export const ENVIRONMENT_LIGHT_POOL_SIZE = Object.freeze({ desktop: 16, touch: 8 } as const);
 
-const PLAYER_HEIGHT = 1.8;
-const CROUCH_HEIGHT = 1.48;
-const PLAYER_RADIUS = 0.3;
 export const WORLD_DROP_PICKUP_RADIUS = 1.45;
 const WORLD_DROP_PICKUP_LAG_TOLERANCE = 4;
 const PLAYER_BODY_MASS = 1.15;
@@ -22176,9 +22175,10 @@ export class VoxelEngine {
   }
 
   currentPlayerHeight() {
-    return (this.crouching ? CROUCH_HEIGHT : PLAYER_HEIGHT) * playerModelHeightScale(
+    return playerBodyHeight(
       this.playerVariant,
       this.activeCharacterProfile?.appearance.race ?? "wayfarer",
+      this.crouching,
     );
   }
 
@@ -32210,8 +32210,7 @@ export class VoxelEngine {
         if (removableIndex >= 0) this.removeDrop(removableIndex);
       }
       const amount = Math.min(count, stackLimit);
-      const filledCaptureOrb = item === Item.CaptureOrb
-        && Boolean(captureOrbFromInventorySlot({ item, count: 1, ...(metadata ? { metadata } : {}) })?.creature);
+      const filledCaptureOrb = worldDropUsesFilledOrb(item, metadata);
       const templateKey = `${item}:${filledCaptureOrb ? "filled" : "empty"}`;
       // A handful of bounded engine tests construct a partial instance without
       // running class field initializers. Keep the production cache lazy-safe.
@@ -32224,7 +32223,7 @@ export class VoxelEngine {
       }
       const mesh = template.clone(true);
       mesh.name = `dropped-${itemPresentationFamily(item)}`;
-      mesh.scale.multiplyScalar(0.52);
+      mesh.scale.multiplyScalar(WORLD_DROP_VISUAL.scale);
       mesh.position.copy(position);
       if (!options.exactPosition) mesh.position.add(new THREE.Vector3((Math.random() - 0.5) * 0.45, 0.25, (Math.random() - 0.5) * 0.45));
       this.dropGroup.add(mesh);
@@ -32261,7 +32260,7 @@ export class VoxelEngine {
       drop.pickupDelay -= dt;
       drop.velocity.y -= gravityAcceleration(12, this.bodyContext().environment.gravityG) * dt;
       const nextY = drop.mesh.position.y + drop.velocity.y * dt;
-      const groundBlock = this.world.getBlock(Math.floor(drop.mesh.position.x + 0.5), Math.floor(nextY - 0.15 + 0.5), Math.floor(drop.mesh.position.z + 0.5));
+      const groundBlock = this.world.getBlock(Math.floor(drop.mesh.position.x + 0.5), Math.floor(nextY - WORLD_DROP_VISUAL.groundProbeOffset + 0.5), Math.floor(drop.mesh.position.z + 0.5));
       if (groundBlock !== undefined && BLOCKS[groundBlock]?.solid && drop.velocity.y < 0) { drop.velocity.y *= -0.28; drop.velocity.x *= 0.72; drop.velocity.z *= 0.72; }
       else drop.mesh.position.y = nextY;
       drop.mesh.position.x += drop.velocity.x * dt;
@@ -32288,7 +32287,7 @@ export class VoxelEngine {
       drop.mesh.traverse((object) => {
         if (object.userData.jarBug) {
           const baseY = Number(object.userData.baseY) || 0;
-          object.position.y = baseY + Math.sin(drop.age * 2.6 + drop.item) * 0.045;
+          object.position.y = baseY + Math.sin(drop.age * 2.6 + drop.item) * WORLD_DROP_VISUAL.jarBob;
           object.rotation.y = Math.sin(drop.age * 1.7) * 0.48;
         } else if (object.userData.jarBugWing) {
           const side = Number(object.userData.side) || 1;
@@ -32342,7 +32341,7 @@ export class VoxelEngine {
         drop.mesh.traverse((object) => {
           if (!object.userData.eggShimmer) return;
           const phase = Number(object.userData.shimmerPhase ?? 0);
-          object.scale.setScalar(0.88 + Math.sin(drop.age * 3.2 + phase) * 0.14);
+          object.scale.setScalar(WORLD_DROP_VISUAL.eggShimmerBase + Math.sin(drop.age * 3.2 + phase) * WORLD_DROP_VISUAL.eggShimmerAmplitude);
           object.rotation.y += dt * (0.45 + phase * 0.04);
         });
         const x = Math.floor(drop.mesh.position.x + 0.5);

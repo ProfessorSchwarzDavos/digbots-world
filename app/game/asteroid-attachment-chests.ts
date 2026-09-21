@@ -1,6 +1,7 @@
 import { BlockId, type InventorySlot } from "./data";
 import { blockFacingRight, type BlockFacing } from "./block-facing";
-import { chestBodyBounds, validateChestCells, type ChestCell } from "./chest-body";
+import { chestBodyBounds, type ChestCell } from "./chest-body";
+import { chestCustodyOwner } from "./chest-custody-owner";
 import { asteroidAttachmentVolumeSide } from "./asteroid-attachment-creature-footprint";
 import { asteroidAttachmentContainsCell, rebaseAsteroidCell, type AsteroidAttachmentFrame } from "./asteroid-attachment-frame";
 import { canonicalJson, cloneUniverseJson, isUniverseRecord } from "./universe-json";
@@ -13,13 +14,9 @@ export type BlockChestWorld = Readonly<{
   facing(key: string): BlockFacing | undefined;
 }>;
 function parseKey(key: string): readonly ChestCell[] {
-  const cells = key.split("|").map(part => {
-    if (!/^-?\d+,-?\d+,-?\d+$/.test(part)) throw Error("Expected block chest keys, not mobile/exhibit cargo.");
-    const cell = part.split(",").map(Number);
-    if (cell.join(",") !== part || !cell.every(Number.isSafeInteger)) throw Error("Noncanonical chest cell identity.");
-    const [x, y, z] = cell; return [x, y, z] as const;
-  });
-  validateChestCells(cells); return cells;
+  const owner = chestCustodyOwner(key);
+  if (owner.kind !== "block-chest") throw Error("Expected block chest keys, not mobile/exhibit cargo.");
+  return owner.cells;
 }
 const rebaseKey = (frame: AsteroidAttachmentFrame, key: string, from: "orbit" | "local") =>
   // Half order maps directly to inventory slots. Sorting after translation can

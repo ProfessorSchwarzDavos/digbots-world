@@ -43,6 +43,7 @@ test("actual engine custody snapshot reads exact owner tables without serializat
   let snapshot: ReturnType<VoxelEngine["snapshotAttachmentCreatureCustody"]>;
   try { snapshot = engine.snapshotAttachmentCreatureCustody(); } finally { Date.now = now; }
   assert.equal(snapshot.custody.index.stored.length, 1); assert.equal(snapshot.apiaryVisuals.length, 1);
+  assert.deepEqual(snapshot.custody.holders.stored[0].holder, { kind: "player", playerId: "local", storage: "host" });
   assert.equal(snapshot.source.creatures!.length, 0); assert.deepEqual(snapshot.source.inventory[0], filled);
   assert.deepEqual(snapshot.source.drops![0].velocity, [.1, .2, .3]);
   assert.deepEqual(Object.keys(snapshot.source.agentCustody!.agents).sort(), ["equipment-only", "returning-only", "revision-only"]);

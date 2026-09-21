@@ -560,7 +560,8 @@ import { WORLD_DROP_VISUAL, worldDropUsesFilledOrb } from "./world-drop-body";
 import { PLAYER_HEIGHT, PLAYER_RADIUS, playerBodyHeight } from "./player-body";
 import { snapshotHostAttachmentActorBodies } from "./attachment-actor-bodies";
 import type { AsteroidApiarySources } from "./asteroid-attachment-apiaries";
-import { collectWorldCreatureCustody, type WorldCreatureCustodySource } from "./creature-custody-sources";
+import type { WorldCreatureCustodySource } from "./creature-custody-sources";
+import { collectWorldCreatureCustodyHolders } from "./creature-custody-holders";
 import { planCreatureEncounterRecall, reconcileCreatureEncounterCustody } from "./creature-encounter-custody";
 import { cloneUniverseJson, freezeUniverseJson } from "./universe-json";
 import { itemPresentationFamily } from "./item-presentation";
@@ -22265,7 +22266,7 @@ export class VoxelEngine {
       apiaries: apiary.apiaries, aquariums: Object.fromEntries(this.aquariums), fieldPerches: Object.fromEntries(this.fieldPerches),
       creatures: [...apiary.creatures], sleepingCreatures: [...apiary.sleepingCreatures],
     };
-    const custody = collectWorldCreatureCustody(source);
+    const custody = collectWorldCreatureCustodyHolders(source, this.localPlayerId());
     const encounters = reconcileCreatureEncounterCustody(custody.sources, {
       primeEncounters: Object.fromEntries(this.primeEncounters), legendaryEncounters: Object.fromEntries(this.legendaryEncounters),
     });

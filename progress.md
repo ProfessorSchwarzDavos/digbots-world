@@ -2,6 +2,17 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Canonical creature paths now bind to explicit host/guest, agent, block, boat,
+  ship, drop and universe-owned holders. Nested stored cargo retains its outer
+  containment chain; current deployed cargo follows the actual numeric body ID.
+  Shared chest parsing preserves ordered halves and opaque mobile IDs; exhibit
+  anchors do not claim whole habitat geometry. The actual host snapshot supplies
+  its own player ID, with no fabricated positions or transfer authority.
+  37focused/328expanded/static123/lint106PASS, including100cold exact bindings.
+  The r1 test-only inputA typo is retained and corrected to the real input slot.
+  Physical holder/site/environment closure, atomic consent/resource authority
+  and relevant production-build/browser checks remain open. Under the director's
+  bounded-continuation guardrail, no new subsystem/helper or local entry starts.
 - Block chest selection/capture now checks whole single/double components, the
   complete articulated lid sweep and compatible unopened pairing neighbors.
   Rebased compound keys retain half-order: sorting them could exchange which

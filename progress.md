@@ -2,6 +2,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Runtime2996e17 passes committed281 tests, static85/lint66 and isolated build32
+  L0e24VZjLMmaFCa6zFD5S. Unchanged official32 and ordinary Morrow Continue,
+  pause, native SaveQuit and fresh cold reload pass. Both2500ms pause intervals
+  retain clock/EVA/workshop/nearby creatures exactly;18 original creature IDs,
+  species/specimens/genetic seeds and finite fleet/inventory/blocks/containers/
+  inactive locations survive both saves. Three final images personally reviewed.
+  Input is an unchanged historical synthetic checkpoint, not new content or
+  full ecology/cache/performance acceptance. All owned jobs/ports drained.
+  Entity capture/centered bounds/body footprint checkpoint is bounded; complete
+  relationship selectors and local-frame travel remain closed and unfinished.
 - Shared creature-body formulas now serve the engine and saved-record footprint
   checks, preserving exact adult/baby/phenotype/prime/dragon/leviathan/shade
   geometry and existing live override hooks. Whole contact-body AABBs and known

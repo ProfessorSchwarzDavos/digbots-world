@@ -31,6 +31,7 @@ import { bodyEnvironment, gravityAcceleration, gravityGait, contactPushOffSpeed,
 import { localBodyClock, secondsFromLocalClock, sampleCelestialSky, type CelestialSkySample } from "./celestial-ephemeris";
 import { CelestialSkyRenderer } from "./celestial-sky";
 import { EMPTY_LIFE_SUPPORT, normalizeLifeSupportState, stepLifeSupport, operateLifeSupport, maneuverImpulse, constrainTether, validLifeSupportOperation, EVA_TETHER_RENDER_HEIGHT, type LifeSupportState, type LifeSupportHud, type LifeSupportOperation, type EvaTether } from "./life-support";
+import { ROAD_EVENT_HISTORY_LIMIT } from "./authored-history";
 import { craftLifeSupportSupply } from "./life-support-crafting";
 import { isSharedModelGeometry, sharedModelGeometryDiagnostics } from "./shared-model-geometry";
 import { CreatureLodBatcher, type CreatureLodInstance } from "./creature-lod-batcher";
@@ -35599,7 +35600,7 @@ export class VoxelEngine {
         acquiredUniqueIds: [...this.acquiredLootUniqueIds],
         containers: Object.fromEntries(this.contextualLootContainers),
       }),
-      roadEvents: Object.fromEntries([...this.roadEvents.entries()].slice(-4096)),
+      roadEvents: Object.fromEntries([...this.roadEvents.entries()].slice(-ROAD_EVENT_HISTORY_LIMIT)),
       surfaceRoadGraph: this.world.serializeSurfaceRoadGraph(),
       apiaries: Object.fromEntries([...this.apiaries.entries()].map(([key, value]) => [key, cloneApiaryBlockState(value)])),
       morphLooms: Object.fromEntries([...this.morphLooms.entries()].map(([key, value]) => [key, normalizeOrbMorphLoom(value)])),

@@ -2,13 +2,22 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Once-only authored history now retains all original road-event/activation IDs,
+  quiet outcomes, insertion order and the historical starting-settlement binding.
+  Append/retry cannot replace an old event or evict it at the existing4096 save
+  limit.100cold captures preserve absent/null distinctions; explicit undefined
+  history/navigation fields reject instead of disappearing in the shared JSON
+  clone.25focused/200expanded/static110/lint93PASS. The road validator and old
+  serializer limit are shared unchanged. Physical generated geometry, actual
+  spawn/reward/observation proof and atomic authority remain integration gates;
+  this host-private history is not guest knowledge or a new structure owner.
 - Navigation selection/capture now binds the actual host human body, exact
   occupied seats, inertial velocity and the full physics/rendered EVA tether.
   Solid integer anchor custody and both outside-to-outside line crossings are
   checked. Distant spawn points and absent legacy bindings stay exact;100cold
   cycles preserve fractional coordinates. A non-mutating engine snapshot shares
   the existing serializer's binding construction and refuses active cargo lines.
- 36focused/229expanded/static108/lint91PASS. Static107's readonly source/test
+  36focused/229expanded/static108/lint91PASS. Static107's readonly source/test
   mutation errors are retained and corrected without casts. Actual render height
   and save semantics are unchanged. Respawn actions, guest maps, whole vehicle/
   follower closure and atomic owner/resource/consent authority remain separate;

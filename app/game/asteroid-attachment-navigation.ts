@@ -30,6 +30,8 @@ function validateSource(frame: AsteroidAttachmentFrame, source: AsteroidNavigati
   actor: AttachmentActorBody, voxel: AsteroidNavigationVoxels): boolean {
   canonicalJson(source); canonicalJson(actor);
   assertExactKeys(source, ["player", "spawn", ...(Object.hasOwn(source, "locationPlayerState") ? ["locationPlayerState"] : [])], "Attached navigation source");
+  if (Object.hasOwn(source, "locationPlayerState") && source.locationPlayerState === undefined)
+    throw Error("Navigation binding must be absent or an explicit supported state.");
   validPoint(source.player, ["x", "y", "z", "yaw", "pitch"]); validPoint(source.spawn);
   if (!actor.id || actor.kind !== "human" || actor.connectionId !== null || actor.poseTick !== null || actor.agentUpdatedAt !== null
     || canonicalJson(point(source.player)) !== canonicalJson(actor.position)) throw Error("Navigation requires the actual current local human body.");

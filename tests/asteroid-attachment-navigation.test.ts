@@ -61,6 +61,7 @@ test("absent legacy binding remains absent and a selected spawn is only a read-o
   assert.equal(view.locationPlayerState, null); assert.notEqual(view.spawn, null);
   const result = captureAsteroidNavigation(frame, source, view, view, context(actor));
   assert.deepEqual(result, source); assert(!Object.hasOwn(result, "locationPlayerState"));
+  assert.throws(() => projectAsteroidNavigation(frame, { ...source, locationPlayerState: undefined }, actor, solid), /absent or/);
   assert.throws(() => captureAsteroidNavigation(frame, source, view, { ...view, spawn: point() }, context(actor)), /spawn binding/);
 });
 

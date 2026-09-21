@@ -1,6 +1,7 @@
 import type { SavedCreature } from "./engine";
 import { GUILD_NPCS, GUILDS, normalizeGuildBook, type GuildBookState, type PlayerGuildState } from "./guilds";
-import { normalizeRoadEventState, type RoadEventState } from "./surface-roads";
+import type { RoadEventState } from "./surface-roads";
+import { validateRoadEventHistory } from "./authored-history";
 import { GUILD_RECRUIT_COMPANIONS, ROAD_EVENT_RESIDENTS, historicalResidentReference } from "./authored-residents";
 import type { AsteroidEntityDependency } from "./asteroid-attachment-relationships";
 import { assertExactKeys, canonicalJson, freezeUniverseJson, isUniverseRecord } from "./universe-json";
@@ -10,7 +11,6 @@ export type AsteroidResidentHistorySources = Readonly<{
   /** The current host's canonical player book, not a copied destination book. */
   guildBook: GuildBookState;
 }>;
-const roadFields = { schema: true, anchorId: true, kind: true, status: true, triggeredDay: true, revision: true } satisfies Record<keyof RoadEventState, true>;
 const bookFields = { schema: true, guilds: true, worldQuestOutcomes: true, revision: true } satisfies Record<keyof GuildBookState, true>;
 const guildFields = { guildId: true, membership: true, standing: true, rankId: true, completedQuestIds: true, activeQuestIds: true,
   objectiveProgress: true, completedDemonstrationIds: true, doctrineChoiceId: true, hallDiscoveryIds: true, serviceFlags: true,
@@ -20,12 +20,7 @@ function record(value: unknown, label: string): asserts value is Record<string, 
 }
 function validateSources(sources: AsteroidResidentHistorySources) {
   canonicalJson(sources); assertExactKeys(sources, ["roadEvents", "guildBook"], "Resident history sources");
-  record(sources.roadEvents, "resident road history");
-  for (const [anchor, event] of Object.entries(sources.roadEvents)) {
-    record(event, "resident road event"); assertExactKeys(event, Object.keys(roadFields), "Resident road event");
-    if (!anchor || anchor.trim() !== anchor || !Number.isSafeInteger(event.triggeredDay) || !Number.isSafeInteger(event.revision)
-      || canonicalJson(normalizeRoadEventState(event, anchor)) !== canonicalJson(event)) throw Error("Resident road history requires lossy normalization.");
-  }
+  validateRoadEventHistory(sources.roadEvents);
   const book = sources.guildBook;
   record(book, "resident guild book"); assertExactKeys(book, Object.keys(bookFields), "Resident guild book");
   record(book.guilds, "resident guilds"); assertExactKeys(book.guilds, Object.keys(GUILDS), "Resident guilds");

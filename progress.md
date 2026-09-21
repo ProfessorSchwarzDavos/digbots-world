@@ -2,6 +2,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Machine components now use the same exact power/material topology inputs as
+  the live runtimes. Selection checks every canonical boundary pair (not the
+  loaded256-node slice), all five resources, complete neighbor/voxel custody and
+  physical Waygrid terminal export coupling. Capture rechecks the whole merged
+  after-image and refuses missing-state machine voxels.100cold cycles retain
+  buffers, paid cycles, remainders and opaque cargo.238expanded/static102/lint86
+  PASS, including connected-window/pipe regressions. R1 Gasline-name and r2
+  installation-ID fixture errors retained/corrected. Physical model envelopes,
+  environmental queries, pressure links and atomic resource authority remain
+  separate integration gates; no local entry or new build/browser claimed.
 - Apiary selection now reconciles canonical hives, saved free/sleeping bees and
   the live hive visuals omitted by normal serialization. Whole foraging queries
   and visual bodies must stay with their hive; duplicate bees/orbs and stale or

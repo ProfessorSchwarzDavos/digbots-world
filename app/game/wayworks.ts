@@ -1,4 +1,4 @@
-import { PowerTopologyCache } from "./wayworks-network";
+import { PowerTopologyCache, type PowerTopologyNode } from "./wayworks-network";
 import { createWorkshop, normalizeWorkshop, workshopRunning, type WorkshopState } from "./wayworks-stores";
 import { PRESSURE_CATALOG, type PressureMachineKind } from "./pressure-catalog";
 import { SPACEFLIGHT_CATALOG, type SpaceflightMachineKind } from "./spaceflight-catalog";
@@ -36,6 +36,13 @@ export type MachineOperation = { kind: "port"; face: LocalFace; mode: PortMode }
   | { kind: "rotate" } | { kind: "toggle" } | { kind: "crank" };
 export type MachineResult = { ok: boolean; state: MachineState; reason: string };
 export type PowerNode = { key: string; x: number; y: number; z: number; state: MachineState; solarExposure: number; windExposure?: number; waterFlow?: number };
+/** Shared exact routing input; contains no finite buffers or generation grant. */
+export function powerTopologyNode(node: PowerNode): PowerTopologyNode {
+  const state = node.state;
+  return { key: node.key, x: node.x, y: node.y, z: node.z, kind: state.kind, locationId: state.locationId,
+    ownerId: state.ownerId, facing: state.facing, ports: state.ports, channel: state.workshop.channel,
+    enabled: state.enabled && workshopRunning(state.workshop) && state.revision < Number.MAX_SAFE_INTEGER };
+}
 export const MACHINE_FACES: readonly LocalFace[] = ["front", "back", "left", "right", "top", "bottom"];
 export const MAX_POWER_NODES = 256;
 export const MAX_POWER_STEP_MS = 1000;
@@ -229,12 +236,7 @@ export function advancePowerGrid(nodes: PowerNode[], elapsedMs: number, topology
     state.status = state.energyJ >= machineCapacity(state.kind, state.workshop) ? "buffer-full" : exposure === 0
       ? state.kind === "wind-rotor" ? "no-wind" : state.kind === "waterwheel-generator" ? "no-water" : "no-sun" : "generating";
   }
-  const graph = topology.get(ordered.map((node) => {
-    const state = states.get(node.key)!;
-    return { key: node.key, x: node.x, y: node.y, z: node.z, kind: state.kind, locationId: state.locationId,
-      ownerId: state.ownerId, facing: state.facing, ports: state.ports, channel: state.workshop.channel,
-      enabled: state.enabled && workshopRunning(state.workshop) && state.revision < Number.MAX_SAFE_INTEGER };
-  }));
+  const graph = topology.get(ordered.map(node => powerTopologyNode({ ...node, state: states.get(node.key)! })));
   if (!graph.ok) return { ...result, elapsedMs: 0, discardedMs: requestedMs, reason: graph.reason === "revision-exhausted" ? "invalid-node" : graph.reason };
   const edges = graph.edges;
   result.topologyRevision = graph.revision;

@@ -5,22 +5,26 @@ import { machineEndpoint, machineSlots, withMachineEndpoint, type MachineResourc
 import { machineRecipes } from "./wayworks-recipes";
 import { transferResource } from "./wayworks-resources";
 import { workshopRunning, type MaterialKind, type MaterialPortMode, type WorkshopSlot } from "./wayworks-stores";
-import { PowerTopologyCache, type PowerTopologyResult } from "./wayworks-network";
+import { PowerTopologyCache, type PowerTopologyNode, type PowerTopologyResult } from "./wayworks-network";
 import { chemistryAcceptsItem, chemistryReservoirs, type ChemicalReservoir } from "./pressure-chemistry";
 import { pressureMachineKind } from "./pressure-catalog";
 
 const MATERIALS: readonly MaterialKind[] = ["item", "fluid", "chemical", "heat"];
 const RATES = { item: 4, fluid: 1000, chemical: 2000, heat: 8000 } as const;
+/** Exact configured routing, independent of today's stored quantities/recipes. */
+export function materialTopologyNode(node: PowerNode, resource: MaterialKind): PowerTopologyNode {
+  return { key: node.key, x: node.x, y: node.y, z: node.z,
+    kind: node.state.kind, locationId: node.state.locationId, ownerId: node.state.ownerId, facing: node.state.facing,
+    enabled: node.state.enabled && workshopRunning(node.state.workshop), channel: node.state.workshop.channel,
+    ports: Object.fromEntries(Object.entries(node.state.workshop.resourcePorts[resource]).map(([face, mode]) => [face,
+      mode === "both" && node.state.workshop.process?.backflow === false ? "input" : mode])) as Record<keyof MachineState["ports"], MaterialPortMode> };
+}
 /** Cached adjacency only. All quantities, residuals and throughput budgets remain in physical nodes. */
 export class MaterialTopologyCache {
   private readonly caches = Object.fromEntries(MATERIALS.map(resource => [resource, new PowerTopologyCache()])) as Record<MaterialKind, PowerTopologyCache>;
   clear() { for (const cache of Object.values(this.caches)) cache.clear(); }
   get(nodes: readonly PowerNode[], resource: MaterialKind): PowerTopologyResult {
-    return this.caches[resource].get(nodes.map(node => ({ key: node.key, x: node.x, y: node.y, z: node.z,
-      kind: node.state.kind, locationId: node.state.locationId, ownerId: node.state.ownerId, facing: node.state.facing,
-      enabled: node.state.enabled && workshopRunning(node.state.workshop), channel: node.state.workshop.channel,
-      ports: Object.fromEntries(Object.entries(node.state.workshop.resourcePorts[resource]).map(([face, mode]) => [face,
-        mode === "both" && node.state.workshop.process?.backflow === false ? "input" : mode])) as Record<keyof MachineState["ports"], MaterialPortMode> })));
+    return this.caches[resource].get(nodes.map(node => materialTopologyNode(node, resource)));
   }
 }
 function materialRate(state: MachineState, resource: MaterialKind) {

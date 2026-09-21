@@ -24,6 +24,10 @@ type Rig = {
 const rigs = new WeakMap<THREE.Group, Rig>();
 const TAU = Math.PI * 2;
 const unit = (value: number) => Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
+/** Shared unchanged animation constants for rendering and conservative full-body
+ * transfer bounds. These are not collision radii or spacecraft resources. */
+export const SURVEY_HOPPER_MOTION = Object.freeze({ gearBaseY: 1.2, gearLift: .4, gearArc: .7, gearFold: 2.45,
+  plumeFlutterFast: .035, plumeFlutterSlow: .025 });
 
 /** Floor/center origin, local front -Z. Hopper is approximately 3 x 3 x 4.4;
  * infrastructure fits one cell. Exhaust extends below the hull during thrust.
@@ -335,14 +339,14 @@ export function updateSpaceflightModel(root: THREE.Group, state: SpaceflightMode
   const time = Number.isFinite(state.time) ? state.time! : 0;
   if (rig.flame) {
     rig.flame.visible = rig.thrust > 0 && !root.userData.spaceflightCockpit;
-    const flutter = Math.sin(time % TAU * 19) * .035 + Math.sin(time % TAU * 31) * .025;
+    const flutter = Math.sin(time % TAU * 19) * SURVEY_HOPPER_MOTION.plumeFlutterFast + Math.sin(time % TAU * 31) * SURVEY_HOPPER_MOTION.plumeFlutterSlow;
     rig.flame.scale.set(.65 + .35 * rig.thrust, (.3 + rig.thrust * .7) * (1 + flutter), .65 + .35 * rig.thrust);
   }
   for (const leg of rig.legs) {
-    leg.rotation.z = -2.45 * (1 - rig.landingGear);
+    leg.rotation.z = -SURVEY_HOPPER_MOTION.gearFold * (1 - rig.landingGear);
     // The hinge first lifts on its carriage before folding inward, so the
     // outside edge of each broad foot cannot sweep through the floor.
-    leg.position.y = 1.2 + .4 * (1 - rig.landingGear) + .7 * Math.sin(Math.PI * rig.landingGear);
+    leg.position.y = SURVEY_HOPPER_MOTION.gearBaseY + SURVEY_HOPPER_MOTION.gearLift * (1 - rig.landingGear) + SURVEY_HOPPER_MOTION.gearArc * Math.sin(Math.PI * rig.landingGear);
   }
   if (rig.arm) rig.arm.rotation.x = rig.active ? 0 : -1.12;
   if (rig.radar) rig.radar.rotation.y = rig.active ? time % (TAU / .65) * .65 : 0;

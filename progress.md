@@ -2,6 +2,17 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Full Survey Hopper bounds now derive from its actual capsule/gear/cockpit/
+  plume model under arbitrary rotations and conservative all-phase sweeps.
+  Rendering shares unchanged gear/flutter constants, checked against original
+  equations and actual vertices. Fleet display remains a transient non-save
+  view: canonical location/journal/trip/resource owner is not copied or rebased.
+  Whole hull/dock/passenger relations, literal local alias and active-flight
+  refusal are explicit; consent/access use original canonical reducer/revision/
+  replay rules.35focused/176expanded/static96/lint78PASS. Static95 test-only
+  readonly tuple-union spread error retained/corrected. No resource/boarding/
+  flight attachment action or durable capture authority, fresh build/browser,
+  or local-entry opening is claimed; integrated gates remain next.
 - Liquid exact-array selection/capture preserves original slots/flow flags and
   checks complete voxel before/after images, waterlogged flora, cross-frame
   tracked/untracked source adjacency and duplicate/unknown state. Removing a

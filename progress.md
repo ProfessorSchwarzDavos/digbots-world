@@ -2,6 +2,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Live actor-body preflight now reads the engine's actual transport/model/seat
+  maps, checks current host identity/peer tokens/drone admission, derives human
+  or full animated drone bounds, and refuses active agent tasks/build/previews.
+  It copies no cargo/capabilities and grants no consent or transition. Drone
+  hover/scanner/lens equations remain exact; actual visible vertices fit initial
+  and animated poses across variants/races/headings. Focused40 then46/47PASS;
+  expanded agent/multiplayer148PASS, static91/lint71PASS. Static90 nullable-role
+  type and readonly-test assignment failures retained/corrected. No fresh build
+  or browser claim for this increment. Next integrate complete entity selection/
+  capture, canonical owners/agent/fleet and atomic gates; entry remains closed.
 - Runtimeeea6415 passes committed232 regressions and productionbuild34
   HAjF9PsEvRWj0yZZxC5aR. Official34 and normal/fresh-cold Morrow audits pass;
   both2500ms pauses retain clock/EVA/workshop/nearby creatures, both012 saves

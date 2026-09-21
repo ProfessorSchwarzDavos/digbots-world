@@ -555,6 +555,7 @@ import { normalizeRoadEventState, planRoadEvent, type RoadEdge, type RoadEventSt
 import { applyFirstPersonHeldItemOrientation, createAvatarHeldItemModel } from "./held-items";
 import { WORLD_DROP_VISUAL, worldDropUsesFilledOrb } from "./world-drop-body";
 import { PLAYER_HEIGHT, PLAYER_RADIUS, playerBodyHeight } from "./player-body";
+import { snapshotHostAttachmentActorBodies } from "./attachment-actor-bodies";
 import { itemPresentationFamily } from "./item-presentation";
 import {
   boardSailboat,
@@ -22180,6 +22181,26 @@ export class VoxelEngine {
       this.activeCharacterProfile?.appearance.race ?? "wayfarer",
       this.crouching,
     );
+  }
+
+  /** Synchronous host-owned body/connection/seat snapshot for future attachment
+   * preflight. No guest payload, actor consent, cargo transfer or save is issued.
+   * Complete follower/owner/location and revision gates remain separate. */
+  snapshotAttachmentActorBodies() {
+    const session = this.multiplayer;
+    return snapshotHostAttachmentActorBodies({
+      local: { id: this.localPlayerId(), position: this.position,
+        body: { variant: this.playerVariant, race: this.activeCharacterProfile?.appearance.race ?? "wayfarer", crouching: this.crouching },
+        boatId: this.mountedBoatId, mountedCreatureId: this.mountedCreatureId, mountedCreatureSeat: this.mountedCreatureSeat },
+      session: session ? { role: session.role, state: session.state, identityId: session.identity.id, peers: session.getPeers() } : null,
+      remotes: [...this.remotePlayers].map(([id, remote]) => ({ id, pose: remote.target, modelKind: remote.model.modelKind })),
+      agents: this.agentAuthority.list(),
+      boats: [...this.boats.values()].map(boat => boat.save),
+      mounts: [...this.creatureMountSeats].map(([creatureId, passengers]) => ({ creatureId, passengers })),
+      liveCreatureIds: this.mobs.map(mob => mob.id),
+      activeWorkAgents: [...new Set([...this.agentRuntimeTasks.keys(), ...this.agentBuildJobs.keys(),
+        ...[...this.agentBuildPreviews.values()].map(preview => preview.agentId)])],
+    });
   }
 
   /** Medium and large ground creatures have horizontal presence without becoming unstable moving platforms. */

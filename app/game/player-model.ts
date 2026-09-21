@@ -9,6 +9,14 @@ export type PlayerLocomotion = "idle" | "walk" | "run";
 export type PlayerAction = "none" | "mine" | "use";
 export type Vector3Tuple = [number, number, number];
 
+/** Existing drone motion shared with conservative transfer geometry. */
+export const DRONE_VISUAL_MOTION = Object.freeze({ initialY: 1.28, hoverY: 1.3, hoverAmplitude: .055, rollAmplitude: .025, lensAmplitude: .08 });
+export function droneVisualPose(time: number, scannerYaw: number, delta: number) {
+  return { y: DRONE_VISUAL_MOTION.hoverY + Math.sin(time * 2.1) * DRONE_VISUAL_MOTION.hoverAmplitude,
+    roll: Math.sin(time * 1.35) * DRONE_VISUAL_MOTION.rollAmplitude,
+    scannerYaw: wrapAngle(scannerYaw + delta * 1.7), pulse: 1 + Math.sin(time * 4.8) * DRONE_VISUAL_MOTION.lensAmplitude };
+}
+
 /**
  * JSON-safe animation state. Phases are normalized cycles in [0, 1), while
  * crouch and jump are blend weights in [0, 1]. This lets locomotion and a hand
@@ -751,7 +759,7 @@ export class BlockPlayerModel {
     });
     this.extraMaterials.push(glass);
     this.droneRoot.name = "agent-drone-rig";
-    this.droneRoot.position.y = 1.28;
+    this.droneRoot.position.y = DRONE_VISUAL_MOTION.initialY;
     this.group.add(this.droneRoot);
 
     const body = new THREE.Group();
@@ -807,11 +815,11 @@ export class BlockPlayerModel {
 
   private animateDrone(delta: number) {
     this.droneTime += delta;
-    this.droneRoot.position.y = 1.3 + Math.sin(this.droneTime * 2.1) * 0.055;
-    this.droneRoot.rotation.z = Math.sin(this.droneTime * 1.35) * 0.025;
-    this.droneScanner.rotation.y = wrapAngle(this.droneScanner.rotation.y + delta * 1.7);
-    const pulse = 1 + Math.sin(this.droneTime * 4.8) * 0.08;
-    this.droneCore.scale.set(pulse, pulse, 1);
+    const pose = droneVisualPose(this.droneTime, this.droneScanner.rotation.y, delta);
+    this.droneRoot.position.y = pose.y;
+    this.droneRoot.rotation.z = pose.roll;
+    this.droneScanner.rotation.y = pose.scannerYaw;
+    this.droneCore.scale.set(pose.pulse, pose.pulse, 1);
   }
 
   private isMeshDisplayed(mesh: THREE.Mesh): boolean {

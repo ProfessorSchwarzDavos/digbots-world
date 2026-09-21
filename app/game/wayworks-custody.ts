@@ -28,7 +28,7 @@ const record = (value: unknown): value is Record<string, unknown> => Boolean(val
   && !Array.isArray(value) && [Object.prototype, null].includes(Object.getPrototypeOf(value)));
 
 /** Order-independent, bounded JSON identity; reject accessors, exotic objects and cycles. */
-function signature(value: unknown): string {
+export function custodyJsonIdentity(value: unknown): string {
   let nodes = 0, characters = 0;
   const ancestors = new Set<object>();
   const encode = (input: unknown, depth: number): string => {
@@ -104,7 +104,7 @@ function validItem(slot: unknown, depth: number): slot is InventorySlot {
     // Missing workshop is the supported historical migration. Present malformed data
     // must not pass merely because normalization discarded/clamped its contents.
     const migrated = raw.workshop === undefined ? { ...raw, workshop: normalized.workshop } : raw;
-    if (signature(migrated) !== signature(normalized)) return false;
+    if (custodyJsonIdentity(migrated) !== custodyJsonIdentity(normalized)) return false;
     for (const name of WORKSHOP_SLOTS) {
       const child = normalized.workshop.slots[name];
       if (child !== null && !validItem(child, depth + 1)) return false;
@@ -128,7 +128,7 @@ export function validCustodyItem(value: unknown): value is InventorySlot {
     if (!record(value)) return false;
     const descriptors = Object.getOwnPropertyDescriptors(value);
     if (Reflect.ownKeys(value).some(key => typeof key !== "string" || !Object.hasOwn(descriptors[key], "value"))) return false;
-    signature(Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)));
+    custodyJsonIdentity(Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)));
     return validItem(value, 0);
   } catch { return false; }
 }
@@ -148,7 +148,7 @@ function lifeSupportClaim(slot: InventorySlot): LifeSupportClaim {
     return { ...itemShell(item, metadata), leak: store.leak,
       sockets: store.sockets.map(child => child ? shell(child) : null) };
   };
-  return { identity: signature(shell(slot)), resources };
+  return { identity: custodyJsonIdentity(shell(slot)), resources };
 }
 
 function ledger(slots: readonly unknown[]): CustodyLedger | null {
@@ -163,7 +163,7 @@ function ledger(slots: readonly unknown[]): CustodyLedger | null {
         const state = metadata.wayworks as MachineState;
         metadata.wayworks = normalizeMachine(state, state.kind, state.locationId, state.ownerId);
       }
-      const key = signature(itemShell(slot, metadata));
+      const key = custodyJsonIdentity(itemShell(slot, metadata));
       result.exact.set(key, (result.exact.get(key) ?? 0) + slot.count);
     } else if (ITEMS[slot.item].lifeSupportKind) {
       const claim = lifeSupportClaim(slot);

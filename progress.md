@@ -2,6 +2,15 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- The provided-vessel identity index reconciles exact canonical slot/orb paths
+  with live and sleeping bodies. A deployed orb and its matching keeper/specimen/
+  species/seed-linked body remain one unit; duplicates, orphan bodies, temporary
+  deployment IDs and mismatched owners reject. Historical metadata stays opaque;
+ 100cold inspections do not read the clock or allocate IDs.40focused/262expanded/
+  static113/lint96PASS. The existing bounded strict custody JSON identity is now
+  shared unchanged. This indexes the supplied owners, not proof that all owners
+  were enumerated: nested cargo, housed residents, whole physical membership and
+  atomic transfer remain integration gates. No travel/build/browser claim.
 - Read-only stored-creature inspection now preserves exact orb/cage/jar payloads
   and legacy mirrors without clock reads, new IDs, stock migration, lens removal
   or lossy normalization. Apiary preflight uses this reader instead of the

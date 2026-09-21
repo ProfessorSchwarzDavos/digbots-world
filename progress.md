@@ -2,6 +2,21 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Revision15 bounded guest recall fix3eed2e8: actual host handler reproduced
+  live-ID rejection and missing current encounter preflight/update. Reuses the
+  solo custody planner before mutation;87focused tests pass twice, static124,
+  lint107, build36 OalvIOq6a_8tyxxULy26j and unchanged official36 PASS.
+  Generated tsconfig restored exactly. Guest fix remains isolated.
+  Normal synthetic attune/deploy/recall shows body1 and white sparkles, but
+  post-recall/cold orb persists7health/6max: browser acceptance FAILED. The
+  provisioned7/7/custom{} petalfox lacks normal progression supporting that
+  maximum. Source trace supports inconsistent synthetic precondition, not a
+  proved normal-user capture defect; fail-closed hardening/legacy uncertainty
+  remains. Both audit failures retained (legacy edit arrays, then facings);
+  classification stopped at final drain, no repair/new fixture/retry.
+  All jobs closed; Windows/WSL4338/4339 absent08:15:35-43UTC. See
+  CF6/r15-recall-closeout/HANDOFF.md and exact recall-manifest.json. FullCF6/CFV
+  incomplete, entryclosed/CF7gated. STOP pending authority; no automatic resume.
 - Final bounded verification was superseded by the director's clean drain.
   The one serial invocation selected232 source test files and retained369 completed
   passing subtests/0 failing subtests before deliberate termination; exit1 and no

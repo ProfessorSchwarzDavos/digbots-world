@@ -31,6 +31,15 @@ function supported(value: object, fields: object) {
   if (Object.keys(value).some(key => !Object.hasOwn(fields, key))) throw Error("Unsupported attached entity field.");
 }
 
+/** Shared additive-field guard. Does not normalize or authorize saved metadata. */
+export function assertKnownAsteroidEntityFields(input: AsteroidAttachedEntities): void {
+  supported(input, ENTITY_COLLECTIONS);
+  for (const creature of [...input.creatures, ...input.sleepingCreatures]) supported(creature, CREATURE_FIELDS);
+  for (const boat of input.boats) supported(boat, BOAT_FIELDS);
+  for (const drop of input.drops) supported(drop, DROP_FIELDS);
+  for (const lead of input.leads) supported(lead, LEAD_FIELDS);
+}
+
 /** Pure whole-unit transform, not entity selection, travel consent or a save.
  * movingActorIds comes from the authenticated transition, never guest claims.
  * Reject cross-unit leads/passengers before changing any input. The full selector

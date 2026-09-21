@@ -2,6 +2,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Pure relationship partition now rejects split live/sleep social labels, leads,
+  mounted/boat passengers, configured/host-declared followers and shoulder pets.
+  Explicit canonical-owner endpoints are mandatory for POI/legendary/prime/
+  summon/settlement/resident/apiary/orb/lair references, including outside entities.
+  Historical idle ownership alone does not force movement. Whole outside ropes
+  use slab intersection: two outside endpoints cannot hide a segment through the
+  selected frame. Relationship-r1 fixture import failure retained; corrected
+  expanded-r3:107PASS, static86/lint67PASS. This is not the missing canonical
+  owner/boat/actor adapter or authenticated revision/consent proof; no runtime
+  travel or browser acceptance is claimed for this unconnected prerequisite.
 - Runtime2996e17 passes committed281 tests, static85/lint66 and isolated build32
   L0e24VZjLMmaFCa6zFD5S. Unchanged official32 and ordinary Morrow Continue,
   pause, native SaveQuit and fresh cold reload pass. Both2500ms pause intervals

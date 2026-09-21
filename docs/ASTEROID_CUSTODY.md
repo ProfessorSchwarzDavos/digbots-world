@@ -102,6 +102,17 @@ partial overlaps from either side reject. Authored/social/lead/passenger/agent
 relationship closure and the remaining fleet/physical-field selectors are still
 separate requirements; body containment alone does not admit an entity unit.
 
+The pure relationship partition checks complete live/sleep social labels, lead
+segments, riders, passengers, configured followers and shoulder creatures. Even
+an outside rope with both endpoints outside is refused if it intersects the
+frame. Historical idle owner IDs are preserved without fabricating an active
+follower. POI, legendary/Prime/summon, settlement/resident, hive, deployed-orb and
+lair links require explicit results from their canonical whole-owner selectors;
+missing, unused, duplicated or crossing endpoints reject. Actor geometry/active
+links and boat physical results must also come from the authoritative host at
+the same revision. This helper does not establish those inputs or consent. The
+owner adapters are still incomplete, so it is not an admission or travel gate.
+
 Pressure zone IDs are derived from location and membership, so projections must
 remap their station/airlock references together. Gas, heat, installation identities,
 airlock deadlines and finite cargo cannot change merely because coordinates do.

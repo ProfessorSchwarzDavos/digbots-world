@@ -44,6 +44,16 @@ function command(overrides: Partial<AgentCommandEnvelope> = {}): AgentCommandEnv
 }
 
 describe("agent platform contracts", () => {
+  test("task creation retains valid waypoint and preview IDs without treating array indices as length limits", () => {
+    const ids = ["first-reference", "second-reference", "bad reference", "", "third-reference"];
+    const task = createAgentTask({ agentId: "agent_test", title: "Linked task", waypointIds: ids, previewIds: ids }, 100);
+    assert.deepEqual(task.waypointIds, ["first-reference", "second-reference", "third-reference"]);
+    assert.deepEqual(task.previewIds, task.waypointIds);
+    assert.equal(ids.length, 5);
+    const many = Array.from({ length: 40 }, (_, i) => `reference-${i}`);
+    assert.deepEqual(createAgentTask({ agentId: "agent_test", title: "Bounded", waypointIds: many, previewIds: many }, 100).waypointIds, many.slice(0, 32));
+  });
+
   test("local test-admin advancement progresses a paused synthetic world without unpausing it", () => {
     let playerUpdates = 0;
     let renderedFrames = 0;

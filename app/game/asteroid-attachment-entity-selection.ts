@@ -5,7 +5,8 @@ import { asteroidEntityRelationshipPartition, type AsteroidRelationshipContext }
 import { asteroidAttachmentVolumeSide, asteroidCreatureFootprintSide } from "./asteroid-attachment-creature-footprint";
 import { asteroidSailboatFootprintSide } from "./asteroid-attachment-vehicle-footprint";
 import { asteroidAttachedDropIndices, captureAsteroidDrops, projectAsteroidDrops } from "./asteroid-attachment-drops";
-import { canonicalJson, cloneUniverseJson } from "./universe-json";
+import { canonicalJson } from "./universe-json";
+import { mergeSelectedAttachmentRecords } from "./attachment-array-merge";
 
 export type AsteroidEntityProjection = Readonly<{
   entities: AsteroidAttachedEntities;
@@ -32,22 +33,6 @@ export function projectAsteroidEntityCollection(frame: AsteroidAttachmentFrame, 
     drops: drops.sourceIndices.map(index => canonical.drops[index]) };
   return { entities: rebaseAsteroidEntities(frame, unit, "orbit", moving, context.localActorId), actorIds: moving,
     dropSourceIndices: drops.sourceIndices, relationshipBaseline: canonicalJson(context) };
-}
-
-/** Preserve old same-list slots and every outside record. New records and
- * creatures moving between live/sleep lists append in the edited list's order.
- * An incoming ID colliding with an outside record is NOT used as a replacement;
- * the complete merged identity validator will reject the duplicate. */
-function mergeIdentified<T, K extends string | number>(canonical: readonly T[], incoming: readonly T[],
-  selected: ReadonlySet<K>, key: (value: T) => K): T[] {
-  const changes = new Map(incoming.map(value => [key(value), value])), used = new Set<K>(), output: T[] = [];
-  for (const value of canonical) {
-    const id = key(value);
-    if (!selected.has(id)) output.push(cloneUniverseJson(value));
-    else if (changes.has(id)) { output.push(changes.get(id)!); used.add(id); }
-  }
-  for (const value of incoming) if (!used.has(key(value))) output.push(value);
-  return output;
 }
 
 /** Exact full-array capture, not a durable write. Before/after contexts are
@@ -77,10 +62,10 @@ export function captureAsteroidEntityCollection(frame: AsteroidAttachmentFrame, 
   const moving = [...new Set([...expected.actorIds, ...actorIds(frame, contexts.after)])];
   const captured = captureAsteroidEntityUnit(frame, original, expected.entities, edited, moving, dropOrigins, contexts.before.localActorId);
   const output: AsteroidAttachedEntities = {
-    creatures: mergeIdentified(canonical.creatures, captured.creatures, creatures, value => value.id),
-    sleepingCreatures: mergeIdentified(canonical.sleepingCreatures, captured.sleepingCreatures, creatures, value => value.id),
-    boats: mergeIdentified(canonical.boats, captured.boats, boats, value => value.id),
-    leads: mergeIdentified(canonical.leads, captured.leads, leads, value => value.mobId),
+    creatures: mergeSelectedAttachmentRecords(canonical.creatures, captured.creatures, creatures, value => value.id),
+    sleepingCreatures: mergeSelectedAttachmentRecords(canonical.sleepingCreatures, captured.sleepingCreatures, creatures, value => value.id),
+    boats: mergeSelectedAttachmentRecords(canonical.boats, captured.boats, boats, value => value.id),
+    leads: mergeSelectedAttachmentRecords(canonical.leads, captured.leads, leads, value => value.mobId),
     drops: captureAsteroidDrops(frame, canonical.drops, { drops: expected.entities.drops, sourceIndices: expected.dropSourceIndices }, edited.drops, dropOrigins),
   };
   // Full global validation catches new/outside ID collisions, split social units,

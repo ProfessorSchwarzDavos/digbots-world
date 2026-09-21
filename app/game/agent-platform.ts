@@ -907,8 +907,8 @@ export function createAgentTask(input: Partial<AgentTaskRecord> & Pick<AgentTask
     note: (input.note ?? "").trim().slice(0, 320),
     createdAt: input.createdAt ?? now,
     updatedAt: now,
-    waypointIds: Object.freeze([...(input.waypointIds ?? [])].filter(isId).slice(0, 32)),
-    previewIds: Object.freeze([...(input.previewIds ?? [])].filter(isId).slice(0, 32)),
+    waypointIds: Object.freeze([...(input.waypointIds ?? [])].filter(entry => isId(entry)).slice(0, 32)),
+    previewIds: Object.freeze([...(input.previewIds ?? [])].filter(entry => isId(entry)).slice(0, 32)),
   });
 }
 

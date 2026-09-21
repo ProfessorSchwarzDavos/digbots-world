@@ -2,6 +2,18 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Agent task/waypoint/custody selection and same-membership capture now preserve
+  exact records, old array slots, opaque inventory metadata and unchanged
+  fractional axes through100cold cycles. Whole waypoint groups cannot straddle
+  frames; unanchored tasks/cargo follow only authenticated selected drone bodies.
+  Reconnect/join/leave, outside identities, global enablement changes and lossy
+  normalization reject. Shared stable-slot merge is extracted without changing
+  entity behavior. Regression uncovered and fixed createAgentTask.filter(isId)
+  passing array indices as ID length limits and silently losing references.
+  Focused32/expanded143/static93/lint74PASS read before commit; r1 invalid Stone
+  test fixture and r2 real reference-loss failures retained. No new build/browser
+  or local entry claim; actor consent/resource authority and full canonical
+  authored/fleet/environment integration remain required.
 - Complete entity-array selection/capture now composes physical bounds, actor/
   dependency relationship partition and exact unit/drop codecs. It preserves
   outside rows and old slots, handles live/sleep moves, appends new records, and

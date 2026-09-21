@@ -2,6 +2,19 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Revision16 production-station selector covers all installed Golem Forges,
+  Alchemy Stands, Distilleries and Sugarworks, including unopened/pages-only
+  blocks, all facings and outside ledgers. Pure normalizers serve only as exact
+  validity oracles: lossy state rejects without repair, ticking, orb allocation
+  or resource transfer. Actual engine source binds these ledgers and detects
+  unchanged-revision mutations. Alchemy shares the ordinary 515-cell radius-five
+  water sphere and source/flow predicate, including outside-frame waterlogged
+  plants. Original liquid rows validate before cloning can erase unknown fields.
+  Focused r16-production-r1:40PASS; expanded r2:154PASS. Static137/138 and
+  lint116/117PASS; production build/browser checkpoint pending. Other authored
+  families/sites, inactive owners, light/climate and atomic consent/resource
+  entry AND return remain required; local entry stays closed.
+
 - Revision16 exhaustive source preimage now observes every save-field family
   without serializer normalization/history truncation/clock reconciliation.
   Exact tagged raw data preserves absent/undefined/null/-0, raw maps and creature

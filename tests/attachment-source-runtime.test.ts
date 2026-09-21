@@ -11,6 +11,8 @@ import { createWaystarCatalog } from "../app/game/celestial-catalog";
 import { homeLocation, locationAddress, locationId, universeId } from "../app/game/location-address";
 import { createDigitalCreatureArchive, createDigitalItemVault } from "../app/game/digital-storage";
 import { canonicalJson } from "../app/game/universe-json";
+import { createGolemForgeState } from "../app/game/v1-cultures";
+import type { ChunkEditSave } from "../app/game/world";
 
 const additionalMaps = ["saplings", "veinRegrowth", "roadEvents", "golemForges", "alchemyStands", "distilleries", "sugarworks",
   "archiveShelves", "tomeDisplays", "settlements", "merchants", "liquidCells", "ecologySectors", "multiplayerPlayerProgressions",
@@ -26,6 +28,7 @@ function fixture() {
     "agentEquipment", "agentReturningMaterials", "agentInventoryRevisions", "remotePlayers", "creatureMountSeats",
     "temporarySpellBlocks"].map(name => [name, new Map()]));
   const pressure = { schema: 1, nextInstallation: 1, zones: [], devices: {} };
+  const edits: ChunkEditSave = {};
   const engine = Object.assign(Object.create(VoxelEngine.prototype), maps, { multiplayer: null, persistenceRevision: 11,
     inventory: [{ item: Item.RawIron, count: 9, metadata: { opaque: { x: 999 } } }], cursor: null, trash: null, craftGrid: [],
     equipment: { head: null, chest: null, legs: null, feet: null, back: null }, offhand: null,
@@ -37,7 +40,7 @@ function fixture() {
     orbitalStations: null, worldStorage: { currentStamp: stamp, currentManifest: { currentLocationId: stamp.locationId, revision: 5 }, currentCatalog: createWaystarCatalog() },
     asteroidFields: { schema: 1, fields: { [stamp.locationId]: registry } },
     world: { locationScope: stamp, celestialTerrain: createCelestialTerrain({ location: orbit, seed: 953 }),
-      generationOptions: { profile: "world-below-v15" }, seedText: "source-fixture", serializeEdits: () => ({}), serializeBlockFacings: () => ({}),
+      generationOptions: { profile: "world-below-v15" }, seedText: "source-fixture", serializeEdits: () => structuredClone(edits), serializeBlockFacings: () => ({}),
       serializeSurfaceRoadGraph: () => ({ schema: 1, edges: [] }), getBlock: () => { throw Error("No loaded chunks"); } },
     bodyContext: () => { throw Error("No mutable body cache"); }, serialize: () => { throw Error("No mutating serialization"); },
     saveSoon: () => { throw Error("No persistence"); }, advanceUniverseClock: () => { throw Error("No clock reconciliation"); },
@@ -47,8 +50,28 @@ function fixture() {
     selected: 0, xp: 0, level: 1, day: 1, worldTime: .2, weather: "clear", weatherState: { kind: "clear" },
     saveExtensions: {}, worldOptions: { dayLengthMinutes: 20 }, bestiary: {}, lifeSupportState: {},
   }) as VoxelEngine;
-  return { engine, asteroid, pressure };
+  return { engine, asteroid, pressure, edits };
 }
+
+test("actual exhaustive source binds installed production and detects ledger changes at the same revision", () => {
+  const { engine, asteroid, edits } = fixture(), { x, y, z } = asteroid.center;
+  const cx = Math.floor(x / 16), cz = Math.floor(z / 16), key = `${x},${y},${z}`;
+  edits[`${cx},${cz}`] = [[(y + 64) * 256 + (z - cz * 16) * 16 + x - cx * 16, BlockId.GolemForge]];
+  const unopened = engine.snapshotAttachmentSource(asteroid.id);
+  assert.equal(unopened.production.installations.length, 1);
+  assert.equal(unopened.production.installations[0].recorded, false);
+  assert.equal(engine.golemForges.size, 0);
+  engine.golemForges.set(key, { ...createGolemForgeState(), storedMana: 17, completed: ["copper-scout"] });
+  const source = engine.snapshotAttachmentSource(asteroid.id);
+  assert.equal(source.production.installations[0].recorded, true);
+  assert.deepEqual(source.production.installations[0].state, engine.golemForges.get(key));
+  engine.assertAttachmentSourceUnchanged(source);
+  engine.golemForges.set(key, { ...engine.golemForges.get(key)!, storedMana: 18 });
+  assert.equal(engine.persistenceRevision, 11);
+  assert.throws(() => engine.assertAttachmentSourceUnchanged(source), /Stale attachment source/);
+  engine.golemForges.delete(key);
+  engine.assertAttachmentSourceUnchanged(unopened);
+});
 
 test("actual exhaustive engine source is cache/clock/normalization free and detects direct changes", () => {
   const { engine, asteroid } = fixture(), registry = engine.asteroidFields, inventory = engine.inventory;
@@ -73,7 +96,9 @@ test("actual adapter covers additional raw maps without dirty-counter, decay, cl
     const map = (engine as unknown as Record<string, unknown>)[name] as Map<unknown, unknown>;
     map.set("raw-key", name === "celestialCreatureVelocity" ? new THREE.Vector3(1, 2, 3) : { raw: true, optional: undefined });
     assert.equal(engine.persistenceRevision, 11);
-    assert.throws(() => engine.assertAttachmentSourceUnchanged(source), /Stale attachment source/, name);
+    const expected = ["golemForges", "alchemyStands", "distilleries", "sugarworks"].includes(name) ? /production station key/
+      : name === "liquidCells" ? /canonical storage cell key/ : /Stale attachment source/;
+    assert.throws(() => engine.assertAttachmentSourceUnchanged(source), expected, name);
   }
   const { engine, asteroid } = fixture();
   for (let index = 0; index < 4200; index++) engine.roadEvents.set(`history-${index}`, { raw: index } as never);

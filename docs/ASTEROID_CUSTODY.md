@@ -192,6 +192,24 @@ gameplay light requires an explicit canonical provider; missing light remains
 unknown. This adapter does not create a second ticking pressure/fluid/light owner
 or establish that provider's same-revision availability or climate provenance.
 
+Production-station selection covers Golem Forge, Alchemy Stand, Distillery and
+Sugarworks blocks from the complete authored voxel source, including unopened
+and finite-pages-only installations. Each recorded ledger must match its actual
+block on either side of the frame. Canonical state is compared to the existing
+pure normalizer, but any repair, dropped field, clamp or truncation **rejects**;
+the original ledger is never replaced. Jobs, committed mana, fractional progress
+and completed outputs remain unchanged. Unopened state stays unmaterialized.
+All four models fit their unit voxel in every facing; these ledgers are not
+inventories of already-created creature identities.
+
+Alchemy binds the full 515-cell radius-five spherical water query, using the
+same source predicate as normal gameplay. Waterlogged plants count as implicit
+sources; explicitly tracked flow does not. Queries may read outside the owned
+frame, and those blocks/source bits remain part of the comparison baseline.
+This does not copy, consume or grant ownership of exterior water. The selector
+does not tick production, initialize a station, allocate an orb, or transfer a
+store. Other authored families and whole sites remain separate requirements.
+
 `VoxelEngine.snapshotAttachmentSource()` adds an exhaustive save-field source
 preimage around the physical slice. This is comparison data, **not a WorldSave**:
 maps retain their raw rows, creature gameplay fields bypass save normalizers,

@@ -1,7 +1,7 @@
 import { CELESTIAL_MAX_Y, CELESTIAL_MIN_Y, type CelestialPoint } from "./celestial-terrain";
 import { createAsteroidAttachmentFrame, type AsteroidAttachmentFrame } from "./asteroid-attachment-frame";
 import type { createAsteroidAttachmentWorld } from "./asteroid-attachment-world";
-import { effectiveLiquidAt, greenhouseSkyVisible, machineEnvironmentInputs, pumpHasWaterSource, type MachineEnvironmentContext } from "./environment-queries";
+import { alchemyHasWaterSource, effectiveLiquidAt, greenhouseSkyVisible, machineEnvironmentInputs, pumpHasWaterSource, type MachineEnvironmentContext } from "./environment-queries";
 import { liquidKindForBlock, type LiquidCell } from "./liquids";
 import { parseCustodyCellKey } from "./chest-custody-owner";
 import { assertExactKeys, canonicalJson, cloneUniverseJson, freezeUniverseJson } from "./universe-json";
@@ -25,8 +25,10 @@ export function createAsteroidEnvironmentQueries(inputFrame: AsteroidAttachmentF
   const frame = freezeUniverseJson(cloneUniverseJson(inputFrame));
   if (canonicalJson(frame) !== canonicalJson(createAsteroidAttachmentFrame(world.source.registry, frame.asteroidId)))
     throw Error("Environment frame differs from its canonical world.");
-  const rows = freezeUniverseJson(cloneUniverseJson(liquidRows)), liquids = new Map<string, LiquidCell>();
-  for (const row of rows) {
+  const liquids = new Map<string, LiquidCell>();
+  // Validate the actual rows before cloning: canonical JSON would otherwise
+  // silently drop an unsupported own-undefined field before this exact check.
+  for (const row of liquidRows) {
     if (!Array.isArray(row) || row.length !== 2) throw Error("Invalid canonical environment liquid row.");
     const [key, value] = row; parseCustodyCellKey(key);
     assertExactKeys(value, ["kind", "level", "source", "falling"], "Environment liquid");
@@ -34,8 +36,9 @@ export function createAsteroidEnvironmentQueries(inputFrame: AsteroidAttachmentF
       || !Number.isSafeInteger(value.level) || typeof value.source !== "boolean" || typeof value.falling !== "boolean"
       || (value.source ? value.level !== 0 || value.falling : value.level < 1 || value.level > 15)
       || liquidKindForBlock(world.block(key)) !== value.kind) throw Error("Invalid canonical environment liquid state.");
-    liquids.set(key, value);
+    liquids.set(key, freezeUniverseJson(cloneUniverseJson(value)));
   }
+  const rows = freezeUniverseJson(cloneUniverseJson(liquidRows));
   const orbitPoint = (point: CelestialPoint): CelestialPoint => {
     const result = { x: point.x + frame.offset.x, y: point.y + frame.offset.y, z: point.z + frame.offset.z };
     if (![point.x, point.y, point.z, result.x, result.y, result.z].every(Number.isSafeInteger))
@@ -54,6 +57,7 @@ export function createAsteroidEnvironmentQueries(inputFrame: AsteroidAttachmentF
     },
     effectiveLiquidAt: (point: CelestialPoint) => effectiveLiquidAt(reads, point),
     pumpHasWaterSource: (point: CelestialPoint) => pumpHasWaterSource(reads, point),
+    alchemyHasWaterSource(point: CelestialPoint): boolean { orbitPoint(point); return alchemyHasWaterSource(reads, point); },
     greenhouseSkyVisible(point: CelestialPoint): boolean {
       orbitPoint(point); return greenhouseSkyVisible(reads, point);
     },

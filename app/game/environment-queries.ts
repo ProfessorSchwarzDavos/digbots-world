@@ -1,4 +1,5 @@
-import { BLOCKS, BlockId } from "./data";
+import { BLOCKS, BlockId, blockContainsWater } from "./data";
+import { hasAlchemyWaterSourceWithin } from "./alchemy";
 import { liquidKindForBlock, type LiquidCell } from "./liquids";
 import type { CelestialPoint } from "./celestial-terrain";
 import type { MachineKind } from "./wayworks";
@@ -36,6 +37,24 @@ export function effectiveLiquidAt(world: Pick<EnvironmentVoxelQueries, "blockAt"
 
 export function pumpHasWaterSource(world: Pick<EnvironmentVoxelQueries, "blockAt" | "trackedLiquidAt">, point: CelestialPoint): boolean {
   return world.blockAt(point) === BlockId.Water && world.trackedLiquidAt(point)?.source !== false;
+}
+
+export const ALCHEMY_WATER_SOURCE_RADIUS = 5;
+export function alchemyWaterSourceAt(world: Pick<EnvironmentVoxelQueries, "blockAt" | "trackedLiquidAt">, point: CelestialPoint): boolean {
+  return blockContainsWater(world.blockAt(point)) && world.trackedLiquidAt(point)?.source !== false;
+}
+/** Actual catalyst query: implicit waterlogged sources count, tracked flow does
+ * not. This intentionally differs from a pump's Water-only intake rule. */
+export function alchemyHasWaterSource(world: Pick<EnvironmentVoxelQueries, "blockAt" | "trackedLiquidAt">, point: CelestialPoint): boolean {
+  return hasAlchemyWaterSourceWithin(point, ALCHEMY_WATER_SOURCE_RADIUS,
+    (x, y, z) => alchemyWaterSourceAt(world, { x, y, z }));
+}
+/** Visit the complete exact domain without early success, for source binding.
+ * Reuses the runtime sphere enumerator rather than approximating it by a box. */
+export function alchemyWaterQueryCells(point: CelestialPoint): CelestialPoint[] {
+  const cells: CelestialPoint[] = [];
+  hasAlchemyWaterSourceWithin(point, ALCHEMY_WATER_SOURCE_RADIUS, (x, y, z) => { cells.push({ x, y, z }); return false; });
+  return cells;
 }
 
 export type MachineEnvironmentContext = Readonly<{

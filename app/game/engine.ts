@@ -569,6 +569,7 @@ import type { WorldCreatureCustodySource } from "./creature-custody-sources";
 import { collectWorldCreatureCustodyHolders } from "./creature-custody-holders";
 import { planCreatureEncounterRecall, reconcileCreatureEncounterCustody } from "./creature-encounter-custody";
 import { canonicalJson, cloneUniverseJson, freezeUniverseJson } from "./universe-json";
+import { snapshotAttachmentSaveSources, type AttachmentSaveSources } from "./attachment-source-preimage";
 import { itemPresentationFamily } from "./item-presentation";
 import {
   boardSailboat,
@@ -22245,7 +22246,8 @@ export class VoxelEngine {
       originalRegistry: voxels.originalRegistry, persistenceRevision: this.persistenceRevision,
       hostPlayerId, source: custody.source, encounters: custody.encounters, context, physical,
       navigation: { player: { x: this.position.x, y: this.position.y, z: this.position.z, yaw: this.yaw, pitch: this.pitch },
-        spawn: { x: this.spawn.x, y: this.spawn.y, z: this.spawn.z }, locationPlayerState: this.locationPlayerSnapshot() } }));
+        spawn: { x: this.spawn.x, y: this.spawn.y, z: this.spawn.z },
+        locationPlayerState: this.locationPlayerSnapshot(this.attachmentBodyEnvironment().gravityG) } }));
   }
 
   /** Prospective async commit boundary: counters alone do not cover direct
@@ -22254,6 +22256,111 @@ export class VoxelEngine {
   assertAttachmentPhysicalCustodySourceUnchanged(source: ReturnType<VoxelEngine["snapshotAttachmentPhysicalCustodySource"]>) {
     if (canonicalJson(source) !== canonicalJson(this.snapshotAttachmentPhysicalCustodySource(source.frame.asteroidId)))
       throw Error("Stale attachment physical custody source.");
+  }
+
+  private attachmentBodyEnvironment() {
+    const address = parseLocationId(this.world.locationScope.locationId), catalog = this.worldStorage.currentCatalog;
+    const body = catalog?.bodies.find(value => value.id === address.bodyId);
+    if (!body) throw Error("Attachment source lacks its canonical body environment.");
+    return bodyEnvironment(body, address.kind);
+  }
+
+  /** All save-field source families, observed without serialize() normalization,
+   * history limits, clock reconciliation, loot allocation or save side effects.
+   * Comparison preimage only: it is not a save payload, simulation pause, actor
+   * consent, inactive-owner proof or an atomic admission/transfer grant. */
+  snapshotAttachmentSource(asteroidId: string) {
+    if (this.fastTravelChannel || this.rangedReloadItem !== null || this.fallingTrees.length || this.projectiles.length
+      || this.dragonEffects.length || this.temporarySummons.size || this.activeSpellFields.length
+      || this.temporarySpellBlocks.size || this.playerCombatStatuses.length || this.stormstepDashSeconds > 0)
+      throw Error("Finish active effects and travel before attachment source capture.");
+    if (!this.liquidSimulator || this.liquidSimulator.pendingCount !== 0)
+      throw Error("Finish pending liquid propagation before attachment source capture.");
+    if (!this.pressureRuntime) throw Error("Attachment source lacks pressure authority.");
+    const pressureSource = this.pressureRuntime.snapshotAttachmentSource();
+    const physical = this.snapshotAttachmentPhysicalCustodySource(asteroidId);
+    const mobs = this.mobs.map(mob => {
+      // Rendering object graphs are not source state. Their authoritative body
+      // positions are copied explicitly; every other own field is retained.
+      const visuals = { group: true, presentationRoot: true, visual: true, sentientLod: true,
+        parts: true, shadeSaddle: true, scaleAttachments: true } satisfies Partial<Record<keyof MobEntity, true>>;
+      const raw: Record<string, unknown> = {};
+      if (Object.getOwnPropertySymbols(mob).length) throw Error("Attachment creature source cannot contain hidden symbols.");
+      for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(mob))) {
+        if (Object.hasOwn(visuals, key)) continue;
+        if (!("value" in descriptor)) throw Error("Attachment creature source cannot contain accessors.");
+        const value: unknown = descriptor.value;
+        raw[key] = value instanceof THREE.Vector3 || value instanceof THREE.Vector2 ? value.toArray() : value;
+      }
+      return { fields: raw, position: mob.group.position.toArray() };
+    });
+    const fields: AttachmentSaveSources = {
+      version: 2, generatorVersion: GENERATOR_VERSION, generatorProfile: this.world.generationOptions.profile,
+      lastSavedGameVersion: GAME_VERSION, seed: this.world.seedText, mode: this.mode,
+      edits: physical.context.world.edits, blockFacings: physical.context.world.blockFacings,
+      player: physical.navigation.player, spawn: physical.navigation.spawn, startingSettlementId: this.startingSettlementId,
+      inventory: this.inventory, cursor: this.cursor, trash: this.trash, craftGrid: this.craftGrid,
+      equipment: this.equipment, lifeSupport: this.lifeSupportState, offhand: this.offhand, bestiary: this.bestiary,
+      saplings: [...this.saplings], veinRegrowth: [...this.veinRegrowth], selected: this.selected,
+      health: this.health, hunger: this.hunger, xp: this.xp, level: this.level, time: this.worldTime, day: this.day,
+      universeTimeSeconds: this.universeTimeSeconds, weather: this.weather, furnaces: [...this.furnaces],
+      wheatMills: [...this.wheatMills], wayworks: [...this.wayworks], pressure: physical.context.stations.pressure, spacefleet: this.spacefleet,
+      orbitalStations: this.orbitalStations, asteroidFields: this.asteroidFields, chests: [...this.chests],
+      contextualLoot: { acquiredUniqueIds: [...this.acquiredLootUniqueIds], containers: [...this.contextualLootContainers] },
+      roadEvents: [...this.roadEvents], surfaceRoadGraph: this.world.serializeSurfaceRoadGraph(), apiaries: [...this.apiaries],
+      morphLooms: [...this.morphLooms], orbRacks: [...this.orbRacks], healingStations: [...this.healingStations],
+      aquariums: [...this.aquariums], fieldPerches: [...this.fieldPerches], summonContracts: this.summonContractState,
+      guildBook: this.guildBook, legendaryEncounters: [...this.legendaryEncounters], primeEncounters: [...this.primeEncounters],
+      digitalItemVault: this.digitalItemVault, digitalCreatureArchive: this.digitalCreatureArchive,
+      golemForges: [...this.golemForges], alchemyStands: [...this.alchemyStands], distilleries: [...this.distilleries],
+      sugarworks: [...this.sugarworks], mapKnowledge: this.mapKnowledge, questBook: this.questBook,
+      sideQuestDefinitions: this.sideQuestDefinitions, blueprints: this.blueprints, plantBestiary: this.plantBestiary,
+      goldWallet: this.goldWallet, factionRelations: this.factionRelations, settlements: [...this.settlements],
+      merchants: [...this.merchants], bankAccount: this.bankAccount, stockMarket: this.stockMarket,
+      potionBuffs: this.potionBuffs, rangedLoaded: [...this.rangedLoaded], magicState: this.magicState,
+      spellWorldState: { ironwakeWard: this.ironwakeWard, tidemendSites: [...this.tidemendSites] }, skillState: this.skillState,
+      archiveShelves: [...this.archiveShelves], tomeDisplays: [...this.tomeDisplays],
+      drops: this.drops.map(drop => ({ id: drop.id, item: drop.item, count: drop.count, durability: drop.durability,
+        metadata: drop.metadata, position: drop.mesh.position.toArray(), age: drop.age, velocity: drop.velocity.toArray(),
+        pickupDelay: drop.pickupDelay, ownsVisual: drop.ownsVisual, networkTarget: drop.networkTarget?.toArray(),
+        networkVelocity: drop.networkVelocity?.toArray(), networkSnapshotAge: drop.networkSnapshotAge
+      } satisfies Record<Exclude<keyof DropEntity, "mesh">, unknown> & { position: number[] })),
+      options: this.worldOptions, playerVariant: this.playerVariant, liquidLevels: [...this.liquidCells],
+      weatherState: this.weatherState, creatures: mobs, sleepingCreatures: this.sleepingCreatures,
+      ecologySectors: [...this.ecologySectors], activatedStructureMarkers: [...this.activatedStructureMarkers],
+      boats: [...this.boats].map(([key, boat]) => [key, boat.save]), leads: [...this.leadAnchors],
+      multiplayerPlayers: [...this.multiplayerPlayerStates], multiplayerProgressions: [...this.multiplayerPlayerProgressions],
+      multiplayerWallets: [...this.multiplayerPlayerWallets], cardforge: this.cardforgeState, agentPlatform: this.agentWorldState,
+      agentCustody: { inventories: [...this.agentInventories], equipment: [...this.agentEquipment],
+        returning: [...this.agentReturningMaterials], revisions: [...this.agentInventoryRevisions] },
+      locationPlayerState: physical.navigation.locationPlayerState, agentWorldFingerprint: this.agentWorldFingerprint,
+      agentTestWorld: this.agentTestWorld,
+    };
+    const source = snapshotAttachmentSaveSources(fields, this.saveExtensions, {
+      clockLocalTime: this.clockLocalTime, clockLocalDay: this.clockLocalDay,
+      bodyEnvironment: this.attachmentBodyEnvironment(), generationOptions: this.world.generationOptions,
+      velocity: this.velocity.toArray(), crouching: this.crouching, grounded: this.grounded,
+      playerProfile: this.activeCharacterProfile, race: this.activeCharacterProfile?.appearance.race,
+      liquidTickAccumulator: this.liquidTickAccumulator, persistentMachineTimer: this.persistentMachineTimer,
+      persistentMachineCursor: this.persistentMachineCursor, persistentMachineLastStep: [...this.persistentMachineLastStep],
+      apiaryFlowerCache: [...this.apiaryFlowerCache], creatureWorkTimer: this.creatureWorkTimer,
+      creatureWorkCursor: this.creatureWorkCursor, socialMotionTimer: this.socialMotionTimer, socialMotions: [...this.socialMotions],
+      sleepingCreatureWakeTimer: this.sleepingCreatureWakeTimer, ecologyTick: this.day + this.worldTime,
+      celestialCreatureVelocity: [...this.celestialCreatureVelocity].map(([id, value]) => [id, value.toArray()]),
+      multiplayerBoatInputs: [...this.multiplayerBoatInputs], capturePacification: [...this.capturePacification],
+      nextMobId: this.nextMobId, nextDropId: this.nextDropId, nextBoatId: this.nextBoatId,
+      nextProjectileId: this.nextProjectileId, nextDragonEffectId: this.nextDragonEffectId,
+    });
+    // Keep already-encoded authority records outside the field encoder: encoding
+    // them again would multiply nesting depth for large, valid pressure rooms.
+    return freezeUniverseJson({ physical, source, pressureSource });
+  }
+
+  assertAttachmentSourceUnchanged(source: ReturnType<VoxelEngine["snapshotAttachmentSource"]>) {
+    // Every component is already detached, ordered and frozen by its producer.
+    // Do not apply raw-data depth/node limits again to the expanded tag tree.
+    if (JSON.stringify(source) !== JSON.stringify(this.snapshotAttachmentSource(source.physical.frame.asteroidId)))
+      throw Error("Stale attachment source.");
   }
 
   /** Synchronous host-owned body/connection/seat snapshot for future attachment
@@ -22288,11 +22395,11 @@ export class VoxelEngine {
     } }));
   }
 
-  private locationPlayerSnapshot(): LocationPlayerState {
+  private locationPlayerSnapshot(gravityG = this.bodyContext().environment.gravityG): LocationPlayerState {
     return { schema: 1, creativeFlying: this.creativeFlying, boatId: this.mountedBoatId,
       creatureId: this.mountedCreatureId, creatureSeat: this.mountedCreatureSeat,
       ...(this.evaTether ? { tether: structuredClone(this.evaTether) } : {}),
-      ...(this.bodyContext().environment.gravityG === 0 ? { velocity: this.velocity.toArray() as [number, number, number] } : {}) };
+      ...(gravityG === 0 ? { velocity: this.velocity.toArray() as [number, number, number] } : {}) };
   }
 
   /** Read the live hive and omitted display bodies together without invoking

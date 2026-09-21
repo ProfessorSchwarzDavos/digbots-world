@@ -1,6 +1,8 @@
 import { airCellKey, airZoneIntersectsEdit, isAirTopologyResultCurrent, normalizeAirZoneState, parseAirCellKey,
   remapAirZones, type AirDenseSection, type AirEpochs, type AirPoint, type AirSnapshotCell, type AirTopologyResult, type AirZoneState } from "./airzone";
 import type { AirZoneWorkerRequest, AirZoneWorkerResponse } from "./airzone-worker-protocol";
+import { encodeAttachmentSource } from "./attachment-source-preimage";
+import { freezeUniverseJson } from "./universe-json";
 
 export type PressureWorldView = {
   /** Undefined is unloaded. A defined byte uses AirDenseSection's exact flag layout. */
@@ -256,6 +258,34 @@ export class PressureTopology {
       for (const field of ["oxygenMilliMoles", "inertMilliMoles", "co2MilliMoles", "thermalEnergyMilliJ"] as const) this.lost[field] += remapped.lost[field];
       this.lastError = null;
     } catch (error) { this.lastError = error instanceof Error ? error.message : "remap-failed"; }
+  }
+  /** Exact comparison preimage only: does not pump, audit, cancel, or acquire a
+   * pause/lease. The caller must compare again after any asynchronous boundary.
+   * Pending discovery is rejected even when its revision looks unchanged. */
+  snapshotAttachmentSource() {
+    if (this.inFlight !== null || this.batch !== null || this.dirty.size || this.pending.size || this.integritySections !== null
+      || [...this.zones.values()].some(zone => zone.status === "checking")) throw new Error("pressure-attachment-topology-pending");
+    const neverUsed = this.revision === 0 && this.requestId === 0 && !this.zones.size && !this.topologies.size && !this.cellZones.size
+      && !this.diagnostics.size && !this.checkedAt.size && !this.cache.size && !this.controllers.size && !this.vents.size
+      && this.sourceSignature === "" && this.loadedSignature === "" && this.nowMs === 0 && this.nextIntegrityAt === null
+      && Object.values(this.lost).every(value => value === 0);
+    if (this.lastError !== null && !(neverUsed && this.lastError === "discovery-worker-unavailable"))
+      throw new Error(`pressure-attachment-topology-error:${this.lastError}`);
+    return freezeUniverseJson({
+      quiescent: true as const, neverUsed,
+      source: encodeAttachmentSource({
+        locationId: this.locationId, generation: this.generation, revision: this.revision, requestId: this.requestId,
+        lastError: this.lastError, lost: this.lost, zones: [...this.zones], topologies: [...this.topologies],
+        cellZones: [...this.cellZones], diagnostics: [...this.diagnostics], checkedAt: [...this.checkedAt],
+        // Fixed-width hex preserves every byte and its position without a
+        // multi-million-node array at the cache's 1024-section limit.
+        cache: [...this.cache].map(([key, section]) => [key, { origin: section.origin,
+          flagsHex: Array.from(section.flags, byte => byte.toString(16).padStart(2, "0")).join("") }]),
+        controllers: [...this.controllers], vents: [...this.vents], sourceSignature: this.sourceSignature,
+        loadedSignature: this.loadedSignature, nowMs: this.nowMs, nextIntegrityAt: this.nextIntegrityAt,
+        inFlight: this.inFlight, batch: this.batch, dirty: [...this.dirty], pending: [...this.pending], integritySections: this.integritySections,
+      }),
+    });
   }
   snapshot() { return [...this.zones.values()].map(zone => ({ ...zone, cellKeys: [...zone.cellKeys], controllerIds: [...zone.controllerIds] })); }
   dispose() { this.retire(); this.cache.clear(); this.integritySections = null; }

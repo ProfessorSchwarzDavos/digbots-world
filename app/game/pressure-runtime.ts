@@ -13,6 +13,8 @@ import type { MachineState } from "./wayworks";
 import type { BodyEnvironment } from "./celestial-environment";
 import { stationSealMask, stationStructureMeta } from "./station-kit";
 import { greenhouseSkyVisible } from "./environment-queries";
+import { encodeAttachmentSource } from "./attachment-source-preimage";
+import { freezeUniverseJson } from "./universe-json";
 
 type BoundaryFlux = { oxygenMilliMoles: number; inertMilliMoles: number; co2MilliMoles: number; thermalEnergyMilliJ: number };
 export type PressureSave = { schema: 1; nextInstallation: number; zones: AirZoneState[]; devices: Record<string, PressureDevice>;
@@ -547,6 +549,30 @@ export class PressureRuntime {
       occupants: zone ? this.consumers.get(zone.zoneId) ?? 0 : 0, capacity: topology?.capacity ?? 0, bounds: topology?.bounds ?? null,
       leak: topology?.leaks[0] ?? topology?.unknownBoundaries[0] ?? null, checkAgeMs: zone ? this.now - (this.topology.checkedAt.get(zone.zoneId) ?? this.now) : 0,
       topologyRevision: this.topology.revision, error: this.host.machines.get(key)?.kind === "airlock-controller" && !this.chamberVentIntact(device!) ? "link-chamber-vent" : this.gateErrors.get(key) ?? this.topology.lastError };
+  }
+  /** Detached, exact comparison preimage; no ticking, gate refresh, world reads,
+   * worker messages, pause, lease, or transfer authority. Capture and recompare
+   * around asynchronous attachment preparation. Pending work fails closed. */
+  snapshotAttachmentSource() {
+    // Even completed/expired holds remain source state until updateHolds removes
+    // them. Inspection must neither expire them nor silently discard their owner.
+    if (this.holds.size) throw new Error("pressure-attachment-hold-pending");
+    const topology = this.topology.snapshotAttachmentSource();
+    const workerAvailable = this.worker !== null;
+    if (!workerAvailable && !(topology.neverUsed && this.devices.size === 0 && this.gates.size === 0 && this.gateErrors.size === 0))
+      throw new Error("pressure-attachment-worker-unavailable");
+    // Keep independently encoded owners adjacent: re-encoding topology's tagged
+    // tree multiplies structural depth and node count for large discovered rooms.
+    return freezeUniverseJson({ topology, source: encodeAttachmentSource({
+      durable: { schema: 1, nextInstallation: this.nextInstallation, zones: [...this.topology.zones.values()],
+        devices: Object.fromEntries(this.devices), boundary: { admitted: this.boundary.admitted, released: this.boundary.released, topologyLost: this.topology.lost } },
+      quiescence: { quiescent: true, activeHolds: 0, workerAvailable, topologyNeverUsed: topology.neverUsed },
+      runtime: { locationId: this.host.locationId, generation: this.host.generation,
+        devices: [...this.devices], gates: [...this.gates], gateErrors: [...this.gateErrors], consumers: [...this.consumers],
+        rates: [...this.rates], powerDraw: [...this.powerDraw], nextInstallation: this.nextInstallation, roof: [...this.roof],
+        holds: [...this.holds], alarms: [...this.alarms], staticConsumers: [...this.staticConsumers],
+        elapsed: this.elapsed, now: this.now, gateSignature: this.gateSignature, boundary: this.boundary },
+    }) });
   }
   snapshot(): PressureSave { return { schema: 1, nextInstallation: this.nextInstallation, zones: this.topology.snapshot(), boundary: { ...structuredClone(this.boundary), topologyLost: { ...this.topology.lost } }, devices: Object.fromEntries([...this.devices].map(([key, value]) => [key, structuredClone(value)])) }; }
   dispose() { this.holds.clear(); this.topology.dispose(); this.worker?.terminate(); this.worker = null; }

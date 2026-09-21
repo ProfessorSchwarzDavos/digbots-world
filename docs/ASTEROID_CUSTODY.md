@@ -192,6 +192,31 @@ gameplay light requires an explicit canonical provider; missing light remains
 unknown. This adapter does not create a second ticking pressure/fluid/light owner
 or establish that provider's same-revision availability or climate provenance.
 
+`VoxelEngine.snapshotAttachmentSource()` adds an exhaustive save-field source
+preimage around the physical slice. This is comparison data, **not a WorldSave**:
+maps retain their raw rows, creature gameplay fields bypass save normalizers,
+histories are not capped, ecology is not decayed, and lead anchors are not
+filtered or clamped. Every WorldSave field requires an explicit source except
+`savedAt`, which belongs to a later commit. Optional undefined fields, absent
+keys, null and negative zero remain distinct in the bounded tagged encoding.
+Unknown extensions are observed exactly; observation does not permit their
+admission. Body environment lookup does not warm or clear celestial caches.
+
+Pending travel, projectiles, temporary effects, active agent work and liquid
+propagation refuse capture. Pressure authority supplies its own exact preimage,
+including topology caches, gas, devices, gates, holds and worker state. Pending
+discovery, dirty topology, integrity scans and holds refuse capture rather than
+being ticked or discarded. A missing worker is explicitly tolerated only for an
+empty, never-used pressure authority. The raw field and pressure encodings stay
+separate so large rooms are not repeatedly re-encoded. Structural overflow
+fails closed. Direct changes with unchanged persistence counters invalidate the
+snapshot on reinspection.
+
+This preimage does not itself pause shared simulation, lease storage, settle
+inactive owners, authenticate/consent actors, prove all authored footprints or
+establish canonical propagated-light/climate authority. Those gates still have
+to be joined to the same immutable proposal and existing atomic journal.
+
 This remains a prerequisite, not a complete admission gate. Exhaustive authored
 sites/environment integration, inactive location owners, transition consent and
 atomic finite-resource transfer still require their integration checks.

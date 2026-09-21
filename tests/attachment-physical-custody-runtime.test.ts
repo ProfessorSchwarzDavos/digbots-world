@@ -9,12 +9,13 @@ import { homeLocation, locationAddress, locationId, universeId } from "../app/ga
 import { createDigitalCreatureArchive, createDigitalItemVault } from "../app/game/digital-storage";
 import type { ChunkEditSave } from "../app/game/world";
 import { canonicalJson } from "../app/game/universe-json";
+import { createWaystarCatalog } from "../app/game/celestial-catalog";
 
 function fixture() {
   const orbit = locationAddress({ ...homeLocation(universeId("runtime-physical-custody")), kind: "orbit", instanceId: "low" });
   const registry = createAsteroidRegistry(orbit, 953), asteroid = registry.asteroids[0].descriptor;
   const stamp = { locationId: locationId(orbit), epoch: 3, revision: 7 }, edits: ChunkEditSave = {};
-  const manifest = { currentLocationId: stamp.locationId, revision: 5 }, catalog = { schema: 1, source: "fixture-catalog" };
+  const manifest = { currentLocationId: stamp.locationId, revision: 5 }, catalog = createWaystarCatalog();
   const pressure = { schema: 1, nextInstallation: 1, zones: [], devices: {} };
   const emptyMaps = Object.fromEntries(["furnaces", "wheatMills", "wayworks", "chests", "boats", "orbRacks", "healingStations", "morphLooms",
     "multiplayerPlayerStates", "apiaries", "aquariums", "fieldPerches", "temporarySummons", "primeEncounters", "legendaryEncounters",
@@ -32,7 +33,7 @@ function fixture() {
     asteroidFields: { schema: 1, fields: { [stamp.locationId]: registry } },
     world: { locationScope: stamp, celestialTerrain: createCelestialTerrain({ location: orbit, seed: 953 }),
       serializeEdits: () => structuredClone(edits), serializeBlockFacings: () => ({}), getBlock: () => { throw Error("No loaded chunks"); } },
-    bodyContext: () => ({ environment: { gravityG: 0 } }),
+    bodyContext: () => { throw Error("No mutable celestial context cache"); },
     serialize: () => { throw Error("No mutating serialization"); }, saveSoon: () => { throw Error("No persistence"); },
   }) as VoxelEngine;
   return { engine, asteroid, edits, manifest, catalog, pressure };
@@ -59,7 +60,7 @@ test("unchanged dirty counters cannot conceal inventory, edit, actor pose, press
     if (fault === "pose") engine.position.x += .125;
     if (fault === "pressure") pressure.nextInstallation++;
     if (fault === "manifest") manifest.revision++;
-    if (fault === "catalog") catalog.source = "changed";
+    if (fault === "catalog") Object.assign(engine.worldStorage, { currentCatalog: { ...catalog, source: "changed" } });
     if (fault === "edit") {
       const { x, y, z } = asteroid.center, cx = Math.floor(x / 16), cz = Math.floor(z / 16);
       edits[`${cx},${cz}`] = [[(y + 64) * 256 + (z - cz * 16) * 16 + x - cx * 16, BlockId.Air]];

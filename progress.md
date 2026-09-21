@@ -2,6 +2,19 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Revision16 exhaustive source preimage now observes every save-field family
+  without serializer normalization/history truncation/clock reconciliation.
+  Exact tagged raw data preserves absent/undefined/null/-0, raw maps and creature
+  gameplay state; current body lookup is cache-free. Pressure snapshots reject
+  pending workers/topology/holds and bind exact settled gas/device/cache state,
+  including a 16,384-cell room regression. Source is comparison data, not a save,
+  pause, consent, inactive-owner proof or transfer grant. Focused47PASS,
+  expanded73PASS and explicit pressure-integrity expansion81PASS;
+  static136/lint115PASS. r1 retained43PASS/2fixtureFAIL (frozen catalog mutation and strict
+  invalid inventory metadata); r2/static134 retained a multiline satisfies
+  parse error, corrected. Entry remains closed; complete site/light-climate/
+  inactive-owner/atomic entry AND return integration remains mandatory.
+
 - Revision16 accepted physical checkpoint bc4e040/build37 is frozen in
   CF6/r16-resume/physical-checkpoint.json (13cbd1d5;18source/57evidence).
   Exact committed136PASS, static129/lint110/build37/official37PASS; gameplay
@@ -12,7 +25,9 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
   r1 wrong error regex and r2 nonexistent fixture flora,
   static130 closure narrowing and static131 readonly test fixture retained.
   A bounded review found skipped coordinate validation in empty scans/missing
-  light, corrected with regression tests. Fresh build/browser pending.
+  light, corrected with regression tests. Commit387ee97/build38
+  Ug93BI1SvvSVQ8gZYnzN7 / exact166PASS / official38PASS and reviewed image accepted
+  by director; query-checkpoint0f5011f5 binds17source/48evidence files.
   Full authored-site/source/inactive-owner/light-availability and atomic
   actor-consent-resource integration remain open; local entry stays closed.
 

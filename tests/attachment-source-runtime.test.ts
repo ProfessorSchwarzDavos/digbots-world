@@ -1,0 +1,158 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import * as THREE from "three";
+import { VoxelEngine } from "../app/game/engine";
+import { BlockId, Item } from "../app/game/data";
+import { PressureRuntime } from "../app/game/pressure-runtime";
+import { bodyEnvironment } from "../app/game/celestial-environment";
+import { createAsteroidRegistry } from "../app/game/asteroid-custody";
+import { createCelestialTerrain } from "../app/game/celestial-terrain";
+import { createWaystarCatalog } from "../app/game/celestial-catalog";
+import { homeLocation, locationAddress, locationId, universeId } from "../app/game/location-address";
+import { createDigitalCreatureArchive, createDigitalItemVault } from "../app/game/digital-storage";
+import { canonicalJson } from "../app/game/universe-json";
+
+const additionalMaps = ["saplings", "veinRegrowth", "roadEvents", "golemForges", "alchemyStands", "distilleries", "sugarworks",
+  "archiveShelves", "tomeDisplays", "settlements", "merchants", "liquidCells", "ecologySectors", "multiplayerPlayerProgressions",
+  "multiplayerPlayerWallets", "rangedLoaded", "tidemendSites", "leadAnchors", "contextualLootContainers", "persistentMachineLastStep",
+  "apiaryFlowerCache", "socialMotions", "celestialCreatureVelocity", "multiplayerBoatInputs", "capturePacification"] as const;
+function fixture() {
+  const orbit = locationAddress({ ...homeLocation(universeId("runtime-complete-source")), kind: "orbit", instanceId: "low" });
+  const registry = createAsteroidRegistry(orbit, 953), asteroid = registry.asteroids[0].descriptor;
+  const stamp = { locationId: locationId(orbit), epoch: 3, revision: 7 };
+  const maps = Object.fromEntries([...additionalMaps, "furnaces", "wheatMills", "wayworks", "chests", "boats", "orbRacks",
+    "healingStations", "morphLooms", "multiplayerPlayerStates", "apiaries", "aquariums", "fieldPerches", "temporarySummons",
+    "primeEncounters", "legendaryEncounters", "agentBuildJobs", "agentBuildPreviews", "agentRuntimeTasks", "agentInventories",
+    "agentEquipment", "agentReturningMaterials", "agentInventoryRevisions", "remotePlayers", "creatureMountSeats",
+    "temporarySpellBlocks"].map(name => [name, new Map()]));
+  const pressure = { schema: 1, nextInstallation: 1, zones: [], devices: {} };
+  const engine = Object.assign(Object.create(VoxelEngine.prototype), maps, { multiplayer: null, persistenceRevision: 11,
+    inventory: [{ item: Item.RawIron, count: 9, metadata: { opaque: { x: 999 } } }], cursor: null, trash: null, craftGrid: [],
+    equipment: { head: null, chest: null, legs: null, feet: null, back: null }, offhand: null,
+    digitalItemVault: createDigitalItemVault(), digitalCreatureArchive: createDigitalCreatureArchive(), spacefleet: { schema: 1, vehicles: {} },
+    drops: [], mobs: [], sleepingCreatures: [], mountedBoatId: null, mountedCreatureId: null, mountedCreatureSeat: null,
+    position: new THREE.Vector3(asteroid.center.x, asteroid.center.y, asteroid.center.z), spawn: new THREE.Vector3(0, 32, 0),
+    yaw: .2, pitch: .1, velocity: new THREE.Vector3(.1, .2, .3), playerVariant: "male", crouching: false, creativeFlying: false,
+    agentAuthority: { list: () => [] }, pressureRuntime: { snapshot: () => structuredClone(pressure), snapshotAttachmentSource: () => structuredClone(pressure) },
+    orbitalStations: null, worldStorage: { currentStamp: stamp, currentManifest: { currentLocationId: stamp.locationId, revision: 5 }, currentCatalog: createWaystarCatalog() },
+    asteroidFields: { schema: 1, fields: { [stamp.locationId]: registry } },
+    world: { locationScope: stamp, celestialTerrain: createCelestialTerrain({ location: orbit, seed: 953 }),
+      generationOptions: { profile: "world-below-v15" }, seedText: "source-fixture", serializeEdits: () => ({}), serializeBlockFacings: () => ({}),
+      serializeSurfaceRoadGraph: () => ({ schema: 1, edges: [] }), getBlock: () => { throw Error("No loaded chunks"); } },
+    bodyContext: () => { throw Error("No mutable body cache"); }, serialize: () => { throw Error("No mutating serialization"); },
+    saveSoon: () => { throw Error("No persistence"); }, advanceUniverseClock: () => { throw Error("No clock reconciliation"); },
+    fastTravelChannel: null, rangedReloadItem: null, fallingTrees: [], projectiles: [], dragonEffects: [], activeSpellFields: [],
+    playerCombatStatuses: [], stormstepDashSeconds: 0, liquidSimulator: { pendingCount: 0 },
+    acquiredLootUniqueIds: new Set(), activatedStructureMarkers: new Set(), mode: "survival", health: 10, hunger: 10,
+    selected: 0, xp: 0, level: 1, day: 1, worldTime: .2, weather: "clear", weatherState: { kind: "clear" },
+    saveExtensions: {}, worldOptions: { dayLengthMinutes: 20 }, bestiary: {}, lifeSupportState: {},
+  }) as VoxelEngine;
+  return { engine, asteroid, pressure };
+}
+
+test("actual exhaustive engine source is cache/clock/normalization free and detects direct changes", () => {
+  const { engine, asteroid } = fixture(), registry = engine.asteroidFields, inventory = engine.inventory;
+  const before = canonicalJson({ registry, inventory }), now = Date.now;
+  Date.now = () => { throw Error("No clock"); };
+  let source: ReturnType<VoxelEngine["snapshotAttachmentSource"]>;
+  try { source = engine.snapshotAttachmentSource(asteroid.id); engine.assertAttachmentSourceUnchanged(source); }
+  finally { Date.now = now; }
+  assert(Object.isFrozen(source.source)); assert.equal(engine.asteroidFields, registry); assert.equal(engine.inventory, inventory);
+  assert.equal(canonicalJson({ registry, inventory }), before);
+  engine.inventory[0]!.metadata!.opaque = { x: 998 };
+  assert.equal(engine.persistenceRevision, 11);
+  assert.throws(() => engine.assertAttachmentSourceUnchanged(source), /Stale attachment source/);
+  const fresh = fixture(), unchanged = fresh.engine.snapshotAttachmentSource(fresh.asteroid.id);
+  Object.assign(fresh.engine, { saveExtensions: { ownUndefined: undefined } });
+  assert.throws(() => fresh.engine.assertAttachmentSourceUnchanged(unchanged), /Stale attachment source/);
+});
+
+test("actual adapter covers additional raw maps without dirty-counter, decay, clamp or history truncation", () => {
+  for (const name of additionalMaps) {
+    const { engine, asteroid } = fixture(), source = engine.snapshotAttachmentSource(asteroid.id);
+    const map = (engine as unknown as Record<string, unknown>)[name] as Map<unknown, unknown>;
+    map.set("raw-key", name === "celestialCreatureVelocity" ? new THREE.Vector3(1, 2, 3) : { raw: true, optional: undefined });
+    assert.equal(engine.persistenceRevision, 11);
+    assert.throws(() => engine.assertAttachmentSourceUnchanged(source), /Stale attachment source/, name);
+  }
+  const { engine, asteroid } = fixture();
+  for (let index = 0; index < 4200; index++) engine.roadEvents.set(`history-${index}`, { raw: index } as never);
+  for (let index = 0; index < 600; index++) engine.tidemendSites.set(`site-${index}`, index);
+  const source = engine.snapshotAttachmentSource(asteroid.id);
+  engine.roadEvents.delete("history-0");
+  assert.throws(() => engine.assertAttachmentSourceUnchanged(source), /Stale/);
+  assert.equal(engine.tidemendSites.size, 600);
+});
+
+test("raw scalar, optional, set and owner-extension changes invalidate the exact preimage", () => {
+  const names = ["startingSettlementId", "bestiary", "selected", "health", "hunger", "xp", "level", "worldTime", "day",
+    "universeTimeSeconds", "clockLocalTime", "clockLocalDay", "weather", "weatherState", "summonContractState", "guildBook",
+    "mapKnowledge", "questBook", "sideQuestDefinitions", "blueprints", "plantBestiary", "magicState", "skillState", "goldWallet",
+    "factionRelations", "bankAccount", "stockMarket", "potionBuffs", "cardforgeState", "agentWorldState", "lifeSupportState",
+    "worldOptions", "saveExtensions", "ironwakeWard", "agentWorldFingerprint", "agentTestWorld", "persistentMachineTimer",
+    "persistentMachineCursor", "liquidTickAccumulator", "nextMobId", "nextDropId", "nextBoatId"];
+  for (const name of names) {
+    const { engine, asteroid } = fixture(), source = engine.snapshotAttachmentSource(asteroid.id);
+    Object.assign(engine, { [name]: { mutation: true } });
+    assert.throws(() => engine.assertAttachmentSourceUnchanged(source), /Stale attachment source|numbers must be finite/, name);
+    assert.equal(engine.persistenceRevision, 11);
+  }
+  for (const name of ["activatedStructureMarkers", "acquiredLootUniqueIds"] as const) {
+    const { engine, asteroid } = fixture(), source = engine.snapshotAttachmentSource(asteroid.id);
+    engine[name].add("unrecorded-new-value");
+    assert.throws(() => engine.assertAttachmentSourceUnchanged(source), /Stale/);
+  }
+});
+
+test("active effect, travel, liquid and pressure work cannot be captured as quiescent", () => {
+  const pending: Record<string, unknown> = { fastTravelChannel: {}, rangedReloadItem: Item.RawIron,
+    fallingTrees: [{}], projectiles: [{}], dragonEffects: [{}], activeSpellFields: [{}], playerCombatStatuses: [{}],
+    temporarySummons: new Map([[1, {}]]), temporarySpellBlocks: new Map([["x", {}]]), stormstepDashSeconds: .1,
+    liquidSimulator: { pendingCount: 1 } };
+  for (const [name, value] of Object.entries(pending)) {
+    const { engine, asteroid } = fixture(); Object.assign(engine, { [name]: value });
+    assert.throws(() => engine.snapshotAttachmentSource(asteroid.id), /Finish/);
+  }
+  const { engine, asteroid } = fixture();
+  Object.assign(engine.pressureRuntime!, { snapshotAttachmentSource() { throw Error("pending-pressure"); } });
+  assert.throws(() => engine.snapshotAttachmentSource(asteroid.id), /pending-pressure/);
+});
+
+test("raw creature projection never filters or normalizes own gameplay fields", () => {
+  const { engine, asteroid } = fixture(), physical = engine.snapshotAttachmentPhysicalCustodySource(asteroid.id);
+  // Isolate raw projection from the already-tested physical selector. This is
+  // not a fixture claiming admission for an incomplete test creature body.
+  engine.snapshotAttachmentPhysicalCustodySource = () => physical;
+  const mob = { id: 1, group: { position: new THREE.Vector3(1, 2, 3) }, health: 5, maxHealth: 6,
+    milkCooldown: -2, outOfRangeSeconds: -1, morrowExposure: { optional: undefined },
+    pushVelocity: new THREE.Vector2(.1, .2), newGameplayField: { finite: 7 }, visual: new THREE.Group() };
+  engine.mobs = [mob] as never;
+  const source = engine.snapshotAttachmentSource(asteroid.id);
+  assert.equal(mob.milkCooldown, -2); assert.equal(mob.outOfRangeSeconds, -1);
+  assert.match(JSON.stringify(source.source), /newGameplayField/);
+  mob.newGameplayField.finite++;
+  assert.throws(() => engine.assertAttachmentSourceUnchanged(source), /Stale attachment source/);
+  mob.newGameplayField.finite--;
+  mob.pushVelocity.x += .1;
+  assert.throws(() => engine.assertAttachmentSourceUnchanged(source), /Stale attachment source/);
+});
+
+test("full engine source binds real pressure authority and rejects later pending topology", () => {
+  const { engine, asteroid } = fixture(); let callbacks = 0;
+  const runtime = new PressureRuntime({ locationId: engine.world.locationScope.locationId, generation: 3, minY: -64, maxY: 127,
+    blockAt: () => { callbacks++; return BlockId.Air; }, skyTopAt: () => { callbacks++; return -65; }, loadedColumns: () => [],
+    machines: engine.wayworks, environment: () => bodyEnvironment(createWaystarCatalog().bodies.find(body => body.id === "blockwild")!, "orbit"),
+    daylight: () => 0, occupants: () => [], obstructed: () => false, actorStillHolding: () => false,
+    changed: () => { callbacks++; }, alarm: () => { callbacks++; } });
+  engine.pressureRuntime = runtime;
+  try {
+    const before = callbacks, source = engine.snapshotAttachmentSource(asteroid.id);
+    engine.assertAttachmentSourceUnchanged(source); assert.equal(callbacks, before);
+    runtime.boundary.admitted.oxygenMilliMoles++;
+    assert.throws(() => engine.assertAttachmentSourceUnchanged(source), /Stale/);
+    runtime.topology.invalidate({ x: 0, y: 0, z: 0 });
+    // Without a worker, an authority that is no longer pristine cannot be
+    // relabelled as a safe empty source after an edit.
+    assert.throws(() => engine.snapshotAttachmentSource(asteroid.id), /pressure-attachment/);
+  } finally { runtime.dispose(); }
+});

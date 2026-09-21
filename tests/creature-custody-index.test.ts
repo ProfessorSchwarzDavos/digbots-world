@@ -20,7 +20,7 @@ function body(id = 23, specimenId = "specimen"): SavedCreature {
   return { id, specimenId, kind: "peelop", x: 1000.125, y: 30.25, z: -789.875, yaw: .3,
     health: 4, age: 130, geneticSeed: 321, creatureOwnerId: "keeper" };
 }
-function empty(): CreatureCustodySources { return { inventorySlots: [], orbRecords: [], creatures: [], sleepingCreatures: [] }; }
+function empty(): CreatureCustodySources { return { inventorySlots: [], orbRecords: [], residents: [], creatures: [], sleepingCreatures: [] }; }
 function deployed(): CreatureCustodySources {
   const value = { ...orb(), attunement: { ownerId: "keeper", attunedAt: 50, activeEntityId: "23", recalledAt: 0, recallCount: 0, fainted: false } };
   return { ...empty(), inventorySlots: [{ path: ["host", "inventory", 0], slot: captureOrbInventorySlot(value) }],
@@ -117,4 +117,17 @@ test("direct orb records cannot silently lose nested undefined, accessors or uns
   assert.equal(getterReads, 0);
   const bodies = [body(-1), { ...body(), health: -1 }, { ...body(), x: Infinity }];
   for (const creature of bodies) assert.throws(() => indexCreatureCustody({ ...empty(), creatures: [creature] }));
+});
+
+test("housed residents and encoded hive orbs retain their real storage form without synthesizing a vessel", () => {
+  const encoded = JSON.stringify(orb(), null, 2);
+  const sources = { ...empty(), orbRecords: [{ path: ["hive", "worker", "storedOrb"], orb: encoded }],
+    residents: [{ path: ["aquarium", "resident"], creature: metadata("fish") }] };
+  const result = indexCreatureCustody(sources);
+  assert.equal(result.stored[0].custody.encoded, encoded);
+  assert.deepEqual(result.residents[0], sources.residents[0]);
+  assert(!Object.hasOwn(result.residents[0], "containerId"));
+  assert.throws(() => indexCreatureCustody({ ...sources, residents: [{ path: ["perch"], creature: metadata() }] }));
+  assert.throws(() => indexCreatureCustody({ ...sources, creatures: [body(77, "fish")] }));
+  assert.throws(() => indexCreatureCustody({ ...sources, residents: [...sources.residents, { path: ["other"], creature: metadata("fish") }] }));
 });

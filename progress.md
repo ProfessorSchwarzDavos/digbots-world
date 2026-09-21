@@ -2,6 +2,19 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Canonical storage collection now enumerates the explicit world storage slice,
+  including guest/agent/fleet holds, housed residents, nested packed machines and
+  fitted dragon/leviathan cargo. Deployed orb cargo is historical: the actual
+  creature-keyed chest remains its sole live hold. Boat chest aliases must agree
+  exactly and count once. Unknown/missing owner tables, orphan cargo, lossy
+  metadata and duplicate specimens reject. The host snapshot reads actual maps
+  without calling either mutating serializer; active agent work refuses.
+  51focused/273expanded/static117/lint100PASS.100cold passes preserve canonical
+  ordering and exact finite quantities. Retained failures: r1 insertion-order
+  mismatch fixed by sorting table traversal, static114 narrowing corrected, and
+  runtime-r3 test-only private-helper import replaced with an explicit fixture.
+  This is storage enumeration, not complete physical owner membership, encounter
+  closure or atomic travel authority. No new production build/browser claim.
 - The provided-vessel identity index reconciles exact canonical slot/orb paths
   with live and sleeping bodies. A deployed orb and its matching keeper/specimen/
   species/seed-linked body remain one unit; duplicates, orphan bodies, temporary

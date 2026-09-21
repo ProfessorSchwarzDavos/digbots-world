@@ -559,6 +559,7 @@ import { WORLD_DROP_VISUAL, worldDropUsesFilledOrb } from "./world-drop-body";
 import { PLAYER_HEIGHT, PLAYER_RADIUS, playerBodyHeight } from "./player-body";
 import { snapshotHostAttachmentActorBodies } from "./attachment-actor-bodies";
 import type { AsteroidApiarySources } from "./asteroid-attachment-apiaries";
+import { collectWorldCreatureCustody, type WorldCreatureCustodySource } from "./creature-custody-sources";
 import { cloneUniverseJson, freezeUniverseJson } from "./universe-json";
 import { itemPresentationFamily } from "./item-presentation";
 import {
@@ -22238,6 +22239,39 @@ export class VoxelEngine {
       sleepingCreatures: this.sleepingCreatures,
       visuals: this.mobs.filter(mob => mob.beeHiveKey).map(mob => ({ hiveKey: mob.beeHiveKey!, creature: this.serializeCreature(mob) })),
     }));
+  }
+
+  /** Host-only finite storage preimage. Unlike serialize(), this does not migrate
+   * stock, capture pages, advance clocks or convert active build reservations.
+   * Current actors, inactive location owners and atomic authority remain separate.
+   * Apiary display bodies accompany their canonical hive, not a second inventory. */
+  snapshotAttachmentCreatureCustody() {
+    if (this.multiplayer && (this.multiplayer.role !== "host" || !["hosting", "connected"].includes(this.multiplayer.state)))
+      throw Error("Creature custody sources require the current host.");
+    if (this.agentBuildJobs.size || this.agentBuildPreviews.size || this.agentRuntimeTasks.size)
+      throw Error("Finish active agent work before inspecting attachment custody.");
+    const apiary = this.snapshotAttachmentApiarySources();
+    const agents: Record<string, AgentCustodySave["agents"][string]> = Object.create(null);
+    for (const id of new Set([...this.agentInventories.keys(), ...this.agentEquipment.keys(),
+      ...this.agentReturningMaterials.keys(), ...this.agentInventoryRevisions.keys()])) {
+      agents[id] = { inventory: this.agentInventories.get(id) ?? [], equipment: this.agentEquipment.get(id) ?? {},
+        revision: this.agentInventoryRevisions.get(id) ?? 0, returning: this.agentReturningMaterials.get(id) ?? [] };
+    }
+    const source: WorldCreatureCustodySource = {
+      inventory: this.inventory, cursor: this.cursor, trash: this.trash, craftGrid: this.craftGrid,
+      equipment: this.equipment, offhand: this.offhand,
+      furnaces: Object.fromEntries(this.furnaces), wheatMills: Object.fromEntries(this.wheatMills), wayworks: Object.fromEntries(this.wayworks),
+      chests: Object.fromEntries(this.chests), boats: [...this.boats.values()].map(boat => boat.save),
+      drops: this.drops.map(drop => ({ item: drop.item, count: drop.count,
+        ...(drop.durability !== undefined ? { durability: drop.durability } : {}), ...(drop.metadata !== undefined ? { metadata: drop.metadata } : {}),
+        x: drop.mesh.position.x, y: drop.mesh.position.y, z: drop.mesh.position.z, age: drop.age, velocity: drop.velocity.toArray() as [number, number, number] })),
+      orbRacks: Object.fromEntries(this.orbRacks), healingStations: Object.fromEntries(this.healingStations), morphLooms: Object.fromEntries(this.morphLooms),
+      digitalItemVault: this.digitalItemVault, digitalCreatureArchive: this.digitalCreatureArchive,
+      multiplayerPlayers: Object.fromEntries(this.multiplayerPlayerStates), agentCustody: { schema: 1, agents }, spacefleet: this.spacefleet,
+      apiaries: apiary.apiaries, aquariums: Object.fromEntries(this.aquariums), fieldPerches: Object.fromEntries(this.fieldPerches),
+      creatures: [...apiary.creatures], sleepingCreatures: [...apiary.sleepingCreatures],
+    };
+    return freezeUniverseJson(cloneUniverseJson({ source, custody: collectWorldCreatureCustody(source), apiaryVisuals: apiary.visuals }));
   }
 
   /** Medium and large ground creatures have horizontal presence without becoming unstable moving platforms. */

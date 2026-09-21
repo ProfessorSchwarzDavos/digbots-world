@@ -1,9 +1,10 @@
 import type { InventorySlot } from "./data";
 import type { CaptureOrb } from "./capture-orbs";
+import type { CreatureMetadata } from "./creature-cage";
 import type { SavedCreature } from "./engine";
 import { MOB_DEFS } from "./mobs";
 import { assertKnownAsteroidEntityFields } from "./asteroid-attachment-entities";
-import { readExactEncodedCaptureOrb, readStoredCreatureCustody, type StoredCreatureCustody } from "./stored-creature-custody";
+import { readExactCreatureMetadata, readExactEncodedCaptureOrb, readStoredCreatureCustody, type StoredCreatureCustody } from "./stored-creature-custody";
 import { custodyJsonIdentity } from "./wayworks-custody";
 import { assertExactKeys, canonicalJson, cloneUniverseJson, freezeUniverseJson, isUniverseRecord } from "./universe-json";
 
@@ -12,7 +13,8 @@ import { assertExactKeys, canonicalJson, cloneUniverseJson, freezeUniverseJson, 
 export type CreatureCustodyPath = readonly (string | number)[];
 export type CreatureCustodySources = Readonly<{
   inventorySlots: readonly Readonly<{ path: CreatureCustodyPath; slot: InventorySlot | null }>[];
-  orbRecords: readonly Readonly<{ path: CreatureCustodyPath; orb: CaptureOrb | null }>[];
+  orbRecords: readonly Readonly<{ path: CreatureCustodyPath; orb: CaptureOrb | string | null }>[];
+  residents: readonly Readonly<{ path: CreatureCustodyPath; creature: CreatureMetadata }>[];
   creatures: readonly SavedCreature[];
   sleepingCreatures: readonly SavedCreature[];
 }>;
@@ -28,6 +30,7 @@ export type CreatureCustodyIndex = Readonly<{
     /** One deployed representation of this same specimen, never a second owner. */
     body: CreatureCustodyBody | null;
   }>[];
+  residents: readonly Readonly<{ path: CreatureCustodyPath; creature: CreatureMetadata }>[];
   freeBodies: readonly CreatureCustodyBody[];
 }>;
 
@@ -44,9 +47,9 @@ function pathKey(path: CreatureCustodyPath): string {
   }
   return canonicalJson(path);
 }
-function directOrb(orb: CaptureOrb | null): StoredCreatureCustody | null {
+function directOrb(orb: CaptureOrb | string | null): StoredCreatureCustody | null {
   if (orb === null) return null;
-  const encoded = custodyJsonIdentity(orb), read = readExactEncodedCaptureOrb(encoded);
+  const encoded = typeof orb === "string" ? orb : custodyJsonIdentity(orb), read = readExactEncodedCaptureOrb(encoded);
   if (!read.creature) return null;
   return { format: "capture-orb", containerId: read.orbId, capturedAt: read.capturedAt,
     creature: read.creature, attunement: read.attunement ?? null, encoded };
@@ -58,8 +61,8 @@ function directOrb(orb: CaptureOrb | null): StoredCreatureCustody | null {
  * spatial membership, an ownership transfer, or permission to move a creature. */
 export function indexCreatureCustody(sources: CreatureCustodySources): CreatureCustodyIndex {
   if (!isUniverseRecord(sources)) throw Error("Invalid creature custody sources.");
-  assertExactKeys(sources, ["inventorySlots", "orbRecords", "creatures", "sleepingCreatures"], "Creature custody sources");
-  if (![sources.inventorySlots, sources.orbRecords, sources.creatures, sources.sleepingCreatures].every(Array.isArray))
+  assertExactKeys(sources, ["inventorySlots", "orbRecords", "residents", "creatures", "sleepingCreatures"], "Creature custody sources");
+  if (![sources.inventorySlots, sources.orbRecords, sources.residents, sources.creatures, sources.sleepingCreatures].every(Array.isArray))
     throw Error("Invalid creature custody source collections.");
   const paths = new Set<string>(), containers = new Set<string>(), specimens = new Set<string>();
   const stored: { path: CreatureCustodyPath; custody: StoredCreatureCustody; body: CreatureCustodyBody | null }[] = [];
@@ -83,6 +86,15 @@ export function indexCreatureCustody(sources: CreatureCustodySources): CreatureC
     assertExactKeys(value, ["path", "orb"], "Creature custody orb source");
     register(value.path, directOrb(value.orb));
   }
+  const residents = sources.residents.map(value => {
+    if (!isUniverseRecord(value)) throw Error("Invalid housed creature custody source.");
+    assertExactKeys(value, ["path", "creature"], "Housed creature custody source");
+    register(value.path, null);
+    const creature = readExactCreatureMetadata(value.creature);
+    if (specimens.has(creature.entityId)) throw Error("Duplicate housed creature custody.");
+    specimens.add(creature.entityId);
+    return { path: value.path, creature };
+  });
   assertKnownAsteroidEntityFields({ creatures: sources.creatures, sleepingCreatures: sources.sleepingCreatures, boats: [], drops: [], leads: [] });
   const bodies = new Map<number, CreatureCustodyBody>(), bodySpecimens = new Set<string>();
   for (const collection of ["creatures", "sleepingCreatures"] as const) for (const creature of sources[collection]) {
@@ -102,6 +114,8 @@ export function indexCreatureCustody(sources: CreatureCustodySources): CreatureC
     bodies.set(creature.id, { collection, creature });
   }
   const deployed = new Set<number>();
+  for (const resident of residents) if (bodySpecimens.has(resident.creature.entityId))
+    throw Error("Housed creature also has a free physical body.");
   for (const entry of stored) {
     const { custody } = entry, activeId = custody.attunement?.activeEntityId;
     if (!activeId) {
@@ -123,5 +137,5 @@ export function indexCreatureCustody(sources: CreatureCustodySources): CreatureC
     if (body.creature.attunedOrbId) throw Error("Attuned body has no unique canonical orb owner.");
     freeBodies.push(body);
   }
-  return freezeUniverseJson(cloneUniverseJson({ sourceBaseline: canonicalJson(sources), stored, freeBodies }));
+  return freezeUniverseJson(cloneUniverseJson({ sourceBaseline: canonicalJson(sources), stored, residents, freeBodies }));
 }

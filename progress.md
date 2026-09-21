@@ -2,6 +2,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Liquid exact-array selection/capture preserves original slots/flow flags and
+  checks complete voxel before/after images, waterlogged flora, cross-frame
+  tracked/untracked source adjacency and duplicate/unknown state. Removing a
+  flow record while retaining a liquid voxel refuses implicit source creation.
+  Ecology history retains canonical sector keys with translated local queries:
+  the half-sector offset and fractional negative border must never split or
+  duplicate hunting history.100cold cycles preserve exact unnormalized state;
+  sector clocks cannot rewind.26tests/static94/lint76PASS; r1 nonexistent flora
+  fixture failure retained/corrected to actual Lumen Kelp. These are pure
+  adapters, not engine/event/resource/atomic authority; full integration remains.
 - Agent task/waypoint/custody selection and same-membership capture now preserve
   exact records, old array slots, opaque inventory metadata and unchanged
   fractional axes through100cold cycles. Whole waypoint groups cannot straddle

@@ -2,6 +2,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Runtime001a22e passes committed220 regressions, build33p02aSBKdDZHeS7bFWi-3i,
+  official33 and ordinary normal/cold Morrow smoke. Both2500ms pause intervals
+  retain clock/EVA/workshop/nearby creatures; both saved012 outputs retain18old
+  identities/specimens/seeds and exact checked finite stores/inactive locations.
+  Final boat model pose sheet and3browser images personally reviewed. Visual
+  script-r1 import path failure and r1 generic creature caption retained; r3
+  generates correctly labeled finalsheet-r2. Browser smoke contains no boat
+  journey: boat coverage is unchanged-formula/actual-vertex tests plus model
+  inspection, not normal docking/travel. Jobs/ports drained; selectors/authority/
+  drops/actors remain incomplete, fullCF6/CFV open and CF7 gated.
 - Whole sailboat footprints derive from the actual authored model, including
   hull/mast/sail/rails/chest/rudder local rotations, and bound every capped
   bob/pitch/roll phase around exact yaw. Engine delegates unchanged equations

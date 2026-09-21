@@ -2,6 +2,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Complete entity-array selection/capture now composes physical bounds, actor/
+  dependency relationship partition and exact unit/drop codecs. It preserves
+  outside rows and old slots, handles live/sleep moves, appends new records, and
+  revalidates the complete merged identities/social/passenger/lead/dependency
+  graph. Undefined legacy lead keepers use the explicit local actor, preserving
+  the stored record. Focused32PASS incl100cold whole-array cycles; expanded274,
+  static92/lint72PASS before commit. This remains a pure entity-collection layer:
+  canonical authored/agent/fleet adapters, authentic host preimage/resource/consent
+  binding and durable local capture are still required. No build/browser/entry
+  opening or fullCF6 handoff for this intermediate increment.
 - Live actor-body preflight now reads the engine's actual transport/model/seat
   maps, checks current host identity/peer tokens/drone admission, derives human
   or full animated drone bounds, and refuses active agent tasks/build/previews.

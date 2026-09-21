@@ -46,7 +46,7 @@ export function assertKnownAsteroidEntityFields(input: AsteroidAttachedEntities)
  * still needs collider/guard-region/POI and agent relationship checks.
  */
 export function rebaseAsteroidEntities(frame: AsteroidAttachmentFrame, input: AsteroidAttachedEntities,
-  from: AsteroidAttachmentView, movingActorIds: readonly string[]): AsteroidAttachedEntities {
+  from: AsteroidAttachmentView, movingActorIds: readonly string[], localActorId = "local"): AsteroidAttachedEntities {
   supported(input, ENTITY_COLLECTIONS);
   const output = cloneUniverseJson(input), ids = new Set<number>(), specimens = new Set<string>(), boats = new Set<string>();
   const moving = new Set(movingActorIds), seated = new Set<string>();
@@ -84,7 +84,7 @@ export function rebaseAsteroidEntities(frame: AsteroidAttachmentFrame, input: As
       if (![lead.fence.x, lead.fence.y, lead.fence.z].every(Number.isSafeInteger)) throw Error("Invalid attached lead fence.");
       return { ...lead, fence: point(lead.fence) };
     }
-    if (!moving.has(lead.ownerId ?? "local")) throw Error("Attached lead keeper is outside the moving unit.");
+    if (!moving.has(lead.ownerId ?? localActorId)) throw Error("Attached lead keeper is outside the moving unit.");
     return lead;
   });
   return { ...output, leads };

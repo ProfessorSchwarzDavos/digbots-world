@@ -47,8 +47,8 @@ function retainCreatureAnchors(canonical: SavedCreature, baseline: SavedCreature
  */
 export function captureAsteroidEntityUnit(frame: AsteroidAttachmentFrame, canonical: AsteroidAttachedEntities,
   baseline: AsteroidAttachedEntities, edited: AsteroidAttachedEntities, movingActorIds: readonly string[],
-  dropOrigins: AsteroidDropOrigins): AsteroidAttachedEntities {
-  const projected = rebaseAsteroidEntities(frame, canonical, "orbit", movingActorIds);
+  dropOrigins: AsteroidDropOrigins, localActorId = "local"): AsteroidAttachedEntities {
+  const projected = rebaseAsteroidEntities(frame, canonical, "orbit", movingActorIds, localActorId);
   if (canonicalJson(projected) !== canonicalJson(baseline)) throw Error("Stale asteroid entity projection.");
   if (dropOrigins.length !== edited.drops.length) throw Error("Missing attached drop lineage.");
   const used = new Set<number>();
@@ -58,7 +58,7 @@ export function captureAsteroidEntityUnit(frame: AsteroidAttachmentFrame, canoni
       throw Error("Invalid or duplicate attached drop lineage.");
     used.add(origin);
   }
-  const output = rebaseAsteroidEntities(frame, edited, "local", movingActorIds);
+  const output = rebaseAsteroidEntities(frame, edited, "local", movingActorIds, localActorId);
   const creatures = (unit: AsteroidAttachedEntities) => new Map([...unit.creatures, ...unit.sleepingCreatures].map(value => [value.id, value]));
   const originals = creatures(canonical), before = creatures(projected), changes = creatures(edited);
   for (const captured of [...output.creatures, ...output.sleepingCreatures]) {
@@ -78,6 +78,6 @@ export function captureAsteroidEntityUnit(frame: AsteroidAttachmentFrame, canoni
       projected.drops[origin], edited.drops[index], output.drops[index]));
   }
   // Retained originals must still satisfy the canonical frame/identity contract.
-  rebaseAsteroidEntities(frame, output, "orbit", movingActorIds);
+  rebaseAsteroidEntities(frame, output, "orbit", movingActorIds, localActorId);
   return output;
 }

@@ -2,6 +2,15 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Read-only stored-creature inspection now preserves exact orb/cage/jar payloads
+  and legacy mirrors without clock reads, new IDs, stock migration, lens removal
+  or lossy normalization. Apiary preflight uses this reader instead of the
+  stateful inventory migration path. Legacy species stock requires explicit
+  migration before admission.40focused/212expanded/static112/lint95PASS; lint94's
+  three unused test bindings are retained and corrected.100reads preserve old
+  absent optional fields and opaque metadata. Global container enumeration,
+  deployed-body reconciliation and atomic custody remain integration gates;
+  no local entry, production build or browser acceptance is claimed here.
 - Once-only authored history now retains all original road-event/activation IDs,
   quiet outcomes, insertion order and the historical starting-settlement binding.
   Append/retry cannot replace an old event or evict it at the existing4096 save

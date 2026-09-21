@@ -1,7 +1,8 @@
 import { APIARY_FORAGING_SCAN, APIARY_HONEY_CAP, APIARY_JELLY_CAP, APIARY_NECTAR_CAP, APIARY_WORKER_CAP,
   type ApiaryBee, type ApiaryBlockState } from "./apiary";
 import { Item } from "./data";
-import { captureOrbFromInventorySlot, decodeCaptureOrb, type CaptureOrb } from "./capture-orbs";
+import type { CaptureOrb } from "./capture-orbs";
+import { readExactEncodedCaptureOrb, readStoredCreatureCustody } from "./stored-creature-custody";
 import { validCustodyItem } from "./wayworks-custody";
 import { assertKnownAsteroidEntityFields } from "./asteroid-attachment-entities";
 import { asteroidAttachmentContainsCell, type AsteroidAttachmentFrame } from "./asteroid-attachment-frame";
@@ -57,6 +58,10 @@ function validateBee(bee: ApiaryBee, role: ApiaryBee["role"]): void {
   }
 }
 function beeKind(bee: ApiaryBee) { return bee.role === "queen" ? "hive-queen" : "honeybee"; }
+function readApiaryOrb<T>(read: () => T): T {
+  try { return read(); }
+  catch (cause) { throw Error("Invalid attached apiary orb custody.", { cause }); }
+}
 
 function selection(frame: AsteroidAttachmentFrame, sources: AsteroidApiarySources) {
   canonicalJson(sources); assertExactKeys(sources, ["apiaries", "creatures", "sleepingCreatures", "visuals"], "Apiary sources");
@@ -65,7 +70,7 @@ function selection(frame: AsteroidAttachmentFrame, sources: AsteroidApiarySource
     sleepingCreatures: sources.sleepingCreatures, boats: [], drops: [], leads: [] });
   const bees = new Map<string, { bee: ApiaryBee; side: boolean; hiveKey: string | null }>(), hiveSides = new Map<string, boolean>();
   const orbIds = new Set<string>(), storedSpecimens = new Set<string>();
-  const registerOrb = (orb: CaptureOrb | null, bee: ApiaryBee, queenSlot = false) => {
+  const registerOrb = (orb: Pick<CaptureOrb, "orbId" | "creature" | "attunement"> | null, bee: ApiaryBee, queenSlot = false) => {
     // The encoded custody payload remains byte-for-byte opaque; decoding here
     // establishes only its existing identity, species and non-deployed state.
     const customBee = orb?.creature?.custom.apiaryBee;
@@ -77,7 +82,7 @@ function selection(frame: AsteroidAttachmentFrame, sources: AsteroidApiarySource
   const registerBee = (bee: ApiaryBee, side: boolean, hiveKey: string | null) => {
     if (bees.has(bee.id)) throw Error("Duplicate attached bee custody.");
     bees.set(bee.id, { bee, side, hiveKey });
-    if (bee.storedOrb) registerOrb(decodeCaptureOrb(bee.storedOrb.captureOrb), bee);
+    if (bee.storedOrb) registerOrb(readApiaryOrb(() => readExactEncodedCaptureOrb(bee.storedOrb!.captureOrb)), bee);
   };
   for (const [key, hive] of Object.entries(sources.apiaries)) {
     record(hive); assertExactKeys(hive, Object.keys(fields), "Attached apiary");
@@ -99,7 +104,8 @@ function selection(frame: AsteroidAttachmentFrame, sources: AsteroidApiarySource
       validateBee(hive.queen, "queen"); registerBee(hive.queen, side, key);
       if (hive.queenOrb !== null) {
         if (!validCustodyItem(hive.queenOrb)) throw Error("Invalid attached queen inventory custody.");
-        registerOrb(captureOrbFromInventorySlot(hive.queenOrb), hive.queen, true);
+        const stored = readApiaryOrb(() => readStoredCreatureCustody(hive.queenOrb));
+        registerOrb(stored ? { orbId: stored.containerId, creature: stored.creature, attunement: stored.attunement } : null, hive.queen, true);
       }
     }
     for (const worker of hive.workers) { validateBee(worker, "worker"); registerBee(worker, side, key); }

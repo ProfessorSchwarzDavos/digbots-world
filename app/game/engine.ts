@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { effectiveLiquidAt, machineEnvironmentInputs, pumpHasWaterSource } from "./environment-queries";
 import { advancePowerGrid, createMachine, localFaceForWorldDirection, machineCapacity, machineRate, normalizeMachine, type MachineState } from "./wayworks";
 import { applyWorkshopAction, machineKindForBlock, parseWorkshopAction, placedWorkshopMachine, restoreWorkshop, WAYWORKS_BLOCKS, type WorkshopAction, type WorkshopClipboard } from "./wayworks-integration";
 import { PowerTopologyCache } from "./wayworks-network";
@@ -4678,12 +4679,8 @@ export class VoxelEngine {
         return type !== undefined && (type === BlockId.Air || Boolean(BLOCKS[type]?.replaceable));
       },
       getLiquid: ({ x, y, z }) => {
-        const key = blockKey(x, y, z);
-        const tracked = this.liquidCells.get(key);
-        if (tracked) return tracked;
-        const type = this.world.getBlock(x, y, z);
-        const kind = liquidKindForBlock(type);
-        return kind ? { kind, level: 0, source: true, falling: false } : undefined;
+        return effectiveLiquidAt({ blockAt: point => this.world.getBlock(point.x, point.y, point.z),
+          trackedLiquidAt: point => this.liquidCells.get(blockKey(point.x, point.y, point.z)) }, { x, y, z });
       },
       setLiquid: ({ x, y, z }, next) => {
         const key = blockKey(x, y, z);
@@ -13823,36 +13820,28 @@ export class VoxelEngine {
     if (this.wayworksAccumulator < .25) { this.renderWayworks(); return; }
     const elapsedMs = Math.min(1000, Math.floor(this.wayworksAccumulator * 1000)); this.wayworksAccumulator = 0;
     const radius = this.settings.simulationDistance * CHUNK_SIZE;
+    const environmentQueries = { maxY: MAX_Y,
+      blockAt: (point: { x: number; y: number; z: number }) => this.world.getBlock(point.x, point.y, point.z),
+      trackedLiquidAt: (point: { x: number; y: number; z: number }) => this.liquidCells.get(blockKey(point.x, point.y, point.z)) };
     const nodes = [...this.wayworks].flatMap(([key, state]) => {
       const [x, y, z] = key.split(",").map(Number);
       const block = this.world.getBlock(x, y, z);
       if (block !== undefined && machineKindForBlock(block) !== state.kind) { this.wayworks.delete(key); return []; }
       if (block === undefined || Math.hypot(x - this.position.x, z - this.position.z) > radius) return [];
-      let exposed = true;
-      if (state.kind === "sunplate-array" || state.kind === "wind-rotor") for (let skyY = y + 1; skyY <= MAX_Y; skyY++) {
-        const overhead = this.world.getBlock(x, skyY, z);
-        if (overhead === undefined || BLOCKS[overhead]?.solid) { exposed = false; break; }
-      }
       const { body, environment } = this.bodyContext();
-      const solarExposure = exposed ? this.daylightAmount() * (1 - (this.celestialSample?.eclipse ?? 0)) * (this.weatherState.kind === "clear" ? 1 : .35) / Math.max(1, (body.orbit?.semiMajorAxisAu ?? 1) ** 2) : 0;
-      const biomeName = String(BIOME_NAMES[this.world.biomeAt(x, z)] ?? "").toLowerCase();
-      const biomeWind = /forest|wood|jungle/.test(biomeName) ? .55 : /mountain|peak|cliff/.test(biomeName) ? 1.2 : 1;
-      const clearRotor = [[1, 0], [-1, 0], [0, 1], [0, -1]].every(([dx, dz]) => {
-        const neighbor = this.world.getBlock(x + dx, y + 1, z + dz); return neighbor !== undefined && !BLOCKS[neighbor]?.solid;
-      });
-      const windExposure = exposed && clearRotor && environment.pressureKPa > 0 ? Math.min(1, environment.wind * biomeWind * Math.max(.1, this.weatherState.windSpeed) / 2.5) : 0;
-      const flowingNeighbors = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0], [0, -1, 0]].filter(([dx, dy, dz]) => {
-        const cell = this.liquidCells.get(blockKey(x + dx, y + dy, z + dz));
-        return this.world.getBlock(x + dx, y + dy, z + dz) === BlockId.Water && cell?.kind === "water" && !cell.source && (cell.falling || cell.level > 0);
-      }).length;
-      return [{ key, x, y, z, state, solarExposure, windExposure, waterFlow: Math.min(1, flowingNeighbors / 2) }];
+      const inputs = machineEnvironmentInputs(environmentQueries, { x, y, z }, state.kind, {
+        daylight: this.daylightAmount(), eclipse: this.celestialSample?.eclipse ?? 0,
+        weatherKind: this.weatherState.kind, weatherWindSpeed: this.weatherState.windSpeed,
+        orbitDistanceAu: body.orbit?.semiMajorAxisAu ?? 1, biomeName: String(BIOME_NAMES[this.world.biomeAt(x, z)] ?? ""),
+        pressureKPa: environment.pressureKPa, wind: environment.wind });
+      return [{ key, x, y, z, state, ...inputs }];
     }).slice(0, 256);
     const result = advancePowerGrid(nodes, elapsedMs, this.wayworksTopology);
     this.wayworksNetworks = result.networks; this.wayworksTopologyRevision = result.topologyRevision;
     for (const [key, state] of Object.entries(result.states)) this.wayworks.set(key, state);
     if (result.reason === "ok") for (const node of nodes) {
       const sourceKey = blockKey(node.x, node.y - 1, node.z);
-      const hasSource = this.world.getBlock(node.x, node.y - 1, node.z) === BlockId.Water && this.liquidCells.get(sourceKey)?.source !== false;
+      const hasSource = pumpHasWaterSource(environmentQueries, { x: node.x, y: node.y - 1, z: node.z });
       const { body, environment } = this.bodyContext();
       const intake = { x: node.x, y: node.y + 1, z: node.z };
       const stepped = advanceMachine(this.wayworks.get(node.key)!, elapsedMs, { waterAvailableMl: hasSource ? 1000 : 0,

@@ -18,6 +18,7 @@ import type { AttachmentActorBody } from "../app/game/attachment-actor-bodies";
 import type { WorldCreatureCustodySource } from "../app/game/creature-custody-sources";
 import type { ChunkEditSave } from "../app/game/world";
 import { canonicalJson } from "../app/game/universe-json";
+import { createEmptyApiaryBlock } from "../app/game/apiary";
 
 const orbit = locationAddress({ ...homeLocation(universeId("physical-custody")), kind: "orbit", instanceId: "low" });
 const registry = createAsteroidRegistry(orbit, 953), frame = createAsteroidAttachmentFrame(registry, registry.asteroids[0].descriptor.id);
@@ -97,4 +98,12 @@ test("source/frame/fleet and unresolved habitat sources fail before mutation", (
   assert.throws(() => selectAsteroidCreatureCustody(frame, { ...source, drops: [{ item: Item.RawIron, count: 1, age: 0,
     ...point, x: frame.orbitBounds.maxX + .49 }] }, "host", context), /boundary/);
   assert.equal(canonicalJson({ source, context }), before);
+});
+
+test("recorded wild beehives bind to their actual block family without creating new bees", () => {
+  const { source, context } = fixture(), key = `${point.x},${point.y},${point.z}`;
+  const next = { ...source, apiaries: { [key]: createEmptyApiaryBlock() } }, before = canonicalJson(next);
+  const result = selectAsteroidCreatureCustody(frame, next, "host", withBlock(context, key, BlockId.WildBeehive));
+  assert.deepEqual(result.installations, [{ kind: "apiary", key, cellKeys: [key], attached: true, recorded: true }]);
+  assert.equal(canonicalJson(next), before);
 });

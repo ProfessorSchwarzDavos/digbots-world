@@ -56,6 +56,28 @@ function completeComponent(originKey: string, expected: BlockId, cap: number, wo
   return cells;
 }
 
+/** World-rooted discovery also finds never-opened habitats. The origin is a
+ * physical seed, NOT a fabricated inventory owner; no saved state is created.
+ * Callers must provide every authored habitat cell from the canonical image. */
+export function discoverAsteroidHabitats(frame: AsteroidAttachmentFrame, origins: readonly string[], world: AsteroidHabitatWorld) {
+  const components: { kind: "aquarium" | "exhibit"; originKey: string; cellKeys: string[]; attached: boolean }[] = [];
+  const seen = new Set<string>();
+  for (const originKey of [...origins].sort()) {
+    if (seen.has(originKey)) continue;
+    const block = world.block(originKey);
+    if (block !== BlockId.GlassAquarium && block !== BlockId.ButterflyExhibit) throw Error("Invalid authored habitat seed.");
+    const kind = block === BlockId.GlassAquarium ? "aquarium" : "exhibit";
+    const cells = completeComponent(originKey, block, kind === "aquarium" ? AQUARIUM_MAX_BLOCKS : MAX_EXHIBIT_BLOCKS, world);
+    const cellKeys = cells.sort((a, b) => a.y - b.y || a.z - b.z || a.x - b.x).map(cellKey);
+    const attached = asteroidAttachmentContainsCell(frame, originKey, "orbit");
+    if (cellKeys.some(key => asteroidAttachmentContainsCell(frame, key, "orbit") !== attached))
+      throw Error("Habitat component crosses the asteroid frame boundary.");
+    for (const key of cellKeys) seen.add(key);
+    components.push({ kind, originKey, cellKeys, attached });
+  }
+  return freezeUniverseJson(components);
+}
+
 /** Read-only physical custody classification, not projection, travel admission,
  * actor authority, or a save operation. Derives whole face-connected voxel
  * components from every actual ledger root, including roots outside the frame.

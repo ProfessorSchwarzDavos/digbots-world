@@ -2,6 +2,20 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Revision16 accepted physical checkpoint bc4e040/build37 is frozen in
+  CF6/r16-resume/physical-checkpoint.json (13cbd1d5;18source/57evidence).
+  Exact committed136PASS, static129/lint110/build37/official37PASS; gameplay
+  image reviewed, not entry/return or performance proof. Follow-on enumerates
+  unopened covered holders without initializing stores, checks full chest/habitat
+  bodies and components, and extracts shared canonical environment queries.
+  Combined118PASS (r3), expanded166PASS (r4), static132/lint111-112PASS;
+  r1 wrong error regex and r2 nonexistent fixture flora,
+  static130 closure narrowing and static131 readonly test fixture retained.
+  A bounded review found skipped coordinate validation in empty scans/missing
+  light, corrected with regression tests. Fresh build/browser pending.
+  Full authored-site/source/inactive-owner/light-availability and atomic
+  actor-consent-resource integration remain open; local entry stays closed.
+
 - Revision16 physical-custody checkpoint in progress: complete detached orbital
   voxel lookup, actual host source collection, six basic holder model bounds,
   complete recorded habitat closure and all-phase habitat bodies, physical

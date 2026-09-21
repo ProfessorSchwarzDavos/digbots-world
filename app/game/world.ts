@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { blocksSky } from "./environment-queries";
 import { FURNACE_FRONT_PLATE } from "./custody-block-body";
 import { stationPanelFace } from "./station-kit";
 import { homeLocation, locationId, parseLocationId, universeId, locationStamp as validateLocationStamp, type LocationStamp } from "./location-address";
@@ -1268,11 +1269,6 @@ export function createAtlasTilePlaneGeometry(type: BlockId, width = 0.72, height
   return geometry;
 }
 
-function blocksSky(type: BlockId) {
-  const definition = BLOCKS[type];
-  const fullCube = !definition?.shape || definition.shape === "cube";
-  return Boolean(definition?.solid && fullCube && definition.layer !== "transparent" && definition.layer !== "cutout");
-}
 
 /**
  * Natural surface plants require a real dry supporting block and an empty

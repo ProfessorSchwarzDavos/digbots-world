@@ -174,10 +174,28 @@ storage, actor/session bodies, pressure and navigation. Before a future async
 commit it must be reread and compared exactly: dirty counters alone do not catch
 all direct inventory, terrain or pose changes.
 
-This remains a prerequisite, not a complete admission gate. Unrecorded empty
-installations, all authored-site/environmental dependencies, inactive location
-owners, transition consent and atomic finite-resource transfer still require
-their integration checks. Conservative all-phase model spheres may refuse an
+Covered holders are now enumerated from all canonical finite pages and
+construction edits, not only saved inventories. Unopened chests receive the
+complete lid/potential-pair checks; unopened habitats receive full component and
+static-body checks; basic holders and hives retain their full physical/query
+bounds. Missing inventories remain explicitly **unmaterialized**, not empty.
+Missing machine configuration rejects instead of fabricating default resources
+or ports. Recorded wild hives use their real block family. Other authored object
+families still need their explicit physical and finite-state closure.
+
+Canonical sky columns use the same opaque-full-cube predicate as the world.
+Translated read-only environment queries can see outside the ownership box,
+including roofs clipped from the local Y range. Shared actual simulation rules
+preserve greenhouse versus solar obstruction, rotor clearance, eclipse/weather,
+and explicit-flow versus implicit/waterlogged-source distinctions. Propagated
+gameplay light requires an explicit canonical provider; missing light remains
+unknown. This adapter does not create a second ticking pressure/fluid/light owner
+or establish that provider's same-revision availability or climate provenance.
+
+This remains a prerequisite, not a complete admission gate. Exhaustive authored
+sites/environment integration, inactive location owners, transition consent and
+atomic finite-resource transfer still require their integration checks.
+Conservative all-phase model spheres may refuse an
 installation very close to the frame boundary. There is no new local-entry UI,
 save mutation or travel permission in this preflight.
 

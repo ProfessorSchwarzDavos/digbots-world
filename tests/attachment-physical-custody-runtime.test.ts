@@ -79,3 +79,14 @@ test("pending transitions and missing durable/pressure sources never create an a
     assert.equal(canonicalJson(engine.asteroidFields), before);
   }
 });
+
+test("actual host preflight finds never-opened canonical installations without initializing stores", () => {
+  const { engine, asteroid, edits } = fixture(), { x, y, z } = asteroid.center;
+  const cx = Math.floor(x / 16), cz = Math.floor(z / 16);
+  edits[`${cx},${cz}`] = [[(y + 64) * 256 + (z - cz * 16) * 16 + x - cx * 16, BlockId.Chest]];
+  const fields = engine.asteroidFields, before = canonicalJson({ fields, edits });
+  const result = engine.snapshotAttachmentPhysicalCustodySource(asteroid.id);
+  assert.deepEqual(result.physical.installations, [{ kind: "chest", key: `${x},${y},${z}`, cellKeys: [`${x},${y},${z}`], attached: true, recorded: false }]);
+  assert.equal(engine.chests.size, 0); assert.equal(engine.asteroidFields, fields);
+  assert.equal(canonicalJson({ fields, edits }), before);
+});

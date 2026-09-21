@@ -12,6 +12,7 @@ import { workshopAuthorized, workshopGasCapacity, workshopRunning, workshopStore
 import type { MachineState } from "./wayworks";
 import type { BodyEnvironment } from "./celestial-environment";
 import { stationSealMask, stationStructureMeta } from "./station-kit";
+import { greenhouseSkyVisible } from "./environment-queries";
 
 type BoundaryFlux = { oxygenMilliMoles: number; inertMilliMoles: number; co2MilliMoles: number; thermalEnergyMilliJ: number };
 export type PressureSave = { schema: 1; nextInstallation: number; zones: AirZoneState[]; devices: Record<string, PressureDevice>;
@@ -127,12 +128,7 @@ export class PressureRuntime {
   private greenhouseSkyVisible(point: AirPoint): boolean {
     // A glazed roof passes sunlight, not pressure. Scan the real loaded column;
     // unknown cells and opaque ceilings fail closed, even in a bright orbit.
-    for (let y = point.y + 1; y <= this.host.maxY; y++) {
-      const block = this.host.blockAt({ ...point, y });
-      if (block === undefined) return false;
-      if (block !== BlockId.ReinforcedWindow && (BLOCKS[block]?.lightDampening ?? 15) >= 15) return false;
-    }
-    return true;
+    return greenhouseSkyVisible(this.host, point);
   }
   radiateMachineHeat(key: string, joules: number): number {
     if (!Number.isSafeInteger(joules) || joules <= 0) return 0;

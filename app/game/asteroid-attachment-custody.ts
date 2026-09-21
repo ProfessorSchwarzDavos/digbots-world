@@ -12,6 +12,7 @@ import { projectAsteroidFleet } from "./asteroid-attachment-fleet";
 import type { AsteroidStationSources } from "./asteroid-attachment-stations";
 import { selectAsteroidCustodyBlocks } from "./asteroid-attachment-custody-blocks";
 import { selectAsteroidHabitats } from "./asteroid-attachment-habitats";
+import { selectAsteroidInstallations } from "./asteroid-attachment-installations";
 import { createAsteroidAttachmentWorld, type AsteroidAttachmentWorldSource } from "./asteroid-attachment-world";
 import { parseCustodyCellKey } from "./chest-custody-owner";
 import { buildAquariumTopology } from "./aquarium";
@@ -62,7 +63,7 @@ export function selectAsteroidCreatureCustody(frame: AsteroidAttachmentFrame, so
     .map(value => [value.key, source.chests[value.key]]));
   projectAsteroidBlockChests(frame, blockChests, world);
   projectAsteroidMachines(frame, source.wayworks ?? {}, world.block);
-  for (const key of Object.keys(source.apiaries ?? {})) if (world.block(key) !== BlockId.Apiary)
+  for (const key of Object.keys(source.apiaries ?? {})) if (![BlockId.Apiary, BlockId.WildBeehive].includes(world.block(key)))
     throw Error("Apiary holder differs from its canonical voxel.");
   const apiary = projectAsteroidApiaries(frame, { apiaries: source.apiaries ?? {}, creatures: source.creatures ?? [],
     sleepingCreatures: source.sleepingCreatures ?? [], visuals: context.apiaryVisuals });
@@ -84,6 +85,7 @@ export function selectAsteroidCreatureCustody(frame: AsteroidAttachmentFrame, so
       throw Error("Habitat display body crosses its attached ownership boundary.");
     habitatSides.set(`${habitat.kind}:${habitat.rootKey}`, side(habitat.attached));
   }
+  const installations = selectAsteroidInstallations(frame, source, world, habitats);
 
   const required = <K>(map: ReadonlyMap<K, AsteroidCustodySide>, key: K) => {
     const value = map.get(key); if (!value) throw Error("Unresolved physical custody holder."); return value;
@@ -136,5 +138,5 @@ export function selectAsteroidCreatureCustody(frame: AsteroidAttachmentFrame, so
   return freezeUniverseJson(cloneUniverseJson({ sourceBaseline: canonicalJson({ frame, source, hostPlayerId, context }),
     bindings: [...bindings.values()], stored, residents,
     freeBodies: custody.holders.freeBodies.map(value => ({ ...value, side: required(bodies, value.id) })),
-    apiaryDependencies: apiary.dependencies }));
+    apiaryDependencies: apiary.dependencies, installations }));
 }

@@ -63,6 +63,17 @@ function readApiaryOrb<T>(read: () => T): T {
   catch (cause) { throw Error("Invalid attached apiary orb custody.", { cause }); }
 }
 
+/** The same complete flower-query envelope applies before a hive is opened.
+ * Checking it must never create a wild queen or initialize production clocks. */
+export function assertAsteroidApiaryQuerySide(frame: AsteroidAttachmentFrame, key: string): boolean {
+  const side = asteroidAttachmentContainsCell(frame, key, "orbit"), [x, y, z] = key.split(",").map(Number);
+  const { radius, verticalRadius } = APIARY_FORAGING_SCAN;
+  const querySide = asteroidAttachmentVolumeSide(frame, { minX: x - radius - .5, maxX: x + radius + .5,
+    minY: y - verticalRadius - .5, maxY: y + verticalRadius + .5, minZ: z - radius - .5, maxZ: z + radius + .5 }, "orbit");
+  if (querySide !== side) throw Error("Apiary flower query crosses the attachment boundary.");
+  return side;
+}
+
 function selection(frame: AsteroidAttachmentFrame, sources: AsteroidApiarySources) {
   canonicalJson(sources); assertExactKeys(sources, ["apiaries", "creatures", "sleepingCreatures", "visuals"], "Apiary sources");
   record(sources.apiaries);
@@ -86,13 +97,9 @@ function selection(frame: AsteroidAttachmentFrame, sources: AsteroidApiarySource
   };
   for (const [key, hive] of Object.entries(sources.apiaries)) {
     record(hive); assertExactKeys(hive, Object.keys(fields), "Attached apiary");
-    const side = asteroidAttachmentContainsCell(frame, key, "orbit"), [x, y, z] = key.split(",").map(Number);
-    const { radius, verticalRadius } = APIARY_FORAGING_SCAN;
+    const side = assertAsteroidApiaryQuerySide(frame, key);
     // Neighboring hives may share flowers: query envelopes are not exclusive
     // cell custody, so do not feed them into the disjoint block-component codec.
-    const querySide = asteroidAttachmentVolumeSide(frame, { minX: x - radius - .5, maxX: x + radius + .5,
-      minY: y - verticalRadius - .5, maxY: y + verticalRadius + .5, minZ: z - radius - .5, maxZ: z + radius + .5 }, "orbit");
-    if (querySide !== side) throw Error("Apiary flower query crosses the attachment boundary.");
     if (hive.schema !== 1 || typeof hive.attached !== "boolean" || typeof hive.queenDisplayEnabled !== "boolean"
       || !Array.isArray(hive.workers) || hive.workers.length > APIARY_WORKER_CAP || !bounded(hive.nectar, APIARY_NECTAR_CAP)
       || !bounded(hive.honey, APIARY_HONEY_CAP) || !bounded(hive.royalJelly, APIARY_JELLY_CAP)

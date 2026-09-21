@@ -30,7 +30,7 @@ import { createWaystarCatalog, validateCelestialCatalog, type CelestialCatalogSn
 import { bodyEnvironment, gravityAcceleration, gravityGait, contactPushOffSpeed, effectiveFallDistance, type BodyEnvironment } from "./celestial-environment";
 import { localBodyClock, secondsFromLocalClock, sampleCelestialSky, type CelestialSkySample } from "./celestial-ephemeris";
 import { CelestialSkyRenderer } from "./celestial-sky";
-import { EMPTY_LIFE_SUPPORT, normalizeLifeSupportState, stepLifeSupport, operateLifeSupport, maneuverImpulse, constrainTether, validLifeSupportOperation, type LifeSupportState, type LifeSupportHud, type LifeSupportOperation, type EvaTether } from "./life-support";
+import { EMPTY_LIFE_SUPPORT, normalizeLifeSupportState, stepLifeSupport, operateLifeSupport, maneuverImpulse, constrainTether, validLifeSupportOperation, EVA_TETHER_RENDER_HEIGHT, type LifeSupportState, type LifeSupportHud, type LifeSupportOperation, type EvaTether } from "./life-support";
 import { craftLifeSupportSupply } from "./life-support-crafting";
 import { isSharedModelGeometry, sharedModelGeometryDiagnostics } from "./shared-model-geometry";
 import { CreatureLodBatcher, type CreatureLodInstance } from "./creature-lod-batcher";
@@ -22207,6 +22207,25 @@ export class VoxelEngine {
     });
   }
 
+  /** Exact host navigation preimage, without serialize()'s page capture. A
+   * short-lived cargo collection line must finish before changing frames. */
+  snapshotAttachmentNavigationSource() {
+    if (this.evaCargoLine) throw Error("Finish the active EVA cargo line before attachment capture.");
+    const actors = this.snapshotAttachmentActorBodies(), actor = actors.find(value => value.id === this.localPlayerId());
+    if (!actor) throw Error("Missing current attachment navigation actor.");
+    return freezeUniverseJson(cloneUniverseJson({ actor, source: {
+      player: { x: this.position.x, y: this.position.y, z: this.position.z, yaw: this.yaw, pitch: this.pitch },
+      spawn: { x: this.spawn.x, y: this.spawn.y, z: this.spawn.z }, locationPlayerState: this.locationPlayerSnapshot(),
+    } }));
+  }
+
+  private locationPlayerSnapshot(): LocationPlayerState {
+    return { schema: 1, creativeFlying: this.creativeFlying, boatId: this.mountedBoatId,
+      creatureId: this.mountedCreatureId, creatureSeat: this.mountedCreatureSeat,
+      ...(this.evaTether ? { tether: structuredClone(this.evaTether) } : {}),
+      ...(this.bodyContext().environment.gravityG === 0 ? { velocity: this.velocity.toArray() as [number, number, number] } : {}) };
+  }
+
   /** Read the live hive and omitted display bodies together without invoking
    * serialize(), which captures asteroid page edits. Detached snapshots retain
    * exact metadata; complete owner revision/actor/consent gates remain external. */
@@ -33488,7 +33507,7 @@ export class VoxelEngine {
         this.evaTetherLine = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xd4c391 }));
         this.evaTetherLine.name = "eva-location-tether"; this.scene.add(this.evaTetherLine);
       }
-      this.evaTetherLine.geometry.setFromPoints([this.position.clone().add(new THREE.Vector3(0, 1, 0)), tetherEnd]);
+      this.evaTetherLine.geometry.setFromPoints([this.position.clone().add(new THREE.Vector3(0, EVA_TETHER_RENDER_HEIGHT, 0)), tetherEnd]);
     }
     if (this.evaTetherLine) this.evaTetherLine.visible = Boolean(tetherEnd);
     const targetFov = this.aimingRanged ? Math.max(42, this.settings.fov * 0.68) : this.settings.fov;
@@ -35682,10 +35701,7 @@ export class VoxelEngine {
       agentPlatform: normalizeAgentWorldSave(this.agentWorldState),
       agentCustody: this.serializeAgentCustody(),
       lifeSupport: { ...this.lifeSupportState },
-      locationPlayerState: { schema: 1, creativeFlying: this.creativeFlying, boatId: this.mountedBoatId,
-        creatureId: this.mountedCreatureId, creatureSeat: this.mountedCreatureSeat,
-        ...(this.evaTether ? { tether: structuredClone(this.evaTether) } : {}),
-        ...(this.bodyContext().environment.gravityG === 0 ? { velocity: this.velocity.toArray() as [number, number, number] } : {}) },
+      locationPlayerState: this.locationPlayerSnapshot(),
       agentWorldFingerprint: this.agentWorldFingerprint,
       ...(this.agentTestWorld ? { agentTestWorld: true } : {}),
       savedAt: Date.now(),

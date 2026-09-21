@@ -2,6 +2,17 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Navigation selection/capture now binds the actual host human body, exact
+  occupied seats, inertial velocity and the full physics/rendered EVA tether.
+  Solid integer anchor custody and both outside-to-outside line crossings are
+  checked. Distant spawn points and absent legacy bindings stay exact;100cold
+  cycles preserve fractional coordinates. A non-mutating engine snapshot shares
+  the existing serializer's binding construction and refuses active cargo lines.
+ 36focused/229expanded/static108/lint91PASS. Static107's readonly source/test
+  mutation errors are retained and corrected without casts. Actual render height
+  and save semantics are unchanged. Respawn actions, guest maps, whole vehicle/
+  follower closure and atomic owner/resource/consent authority remain separate;
+  local entry is still closed and no new build/browser is claimed.
 - Attached map views retain original discovery keys, marker identities and
   world-elevation cave bands. Only already-known local information is projected;
   host observations merge through the original map reducers.100cold cycles keep

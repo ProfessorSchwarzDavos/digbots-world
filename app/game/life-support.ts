@@ -203,6 +203,8 @@ export function maneuverImpulse(back: InventorySlot | null | undefined, seconds:
 }
 
 export type EvaTether = { anchor: [number, number, number]; length: number };
+/** Shared with whole-frame tether preflight; does not alter tether physics. */
+export const EVA_TETHER_RENDER_HEIGHT = 1;
 export function constrainTether(position: readonly number[], velocity: readonly number[], tether: EvaTether, dt: number, reel: boolean) {
   const length = Math.max(1.5, tether.length - (reel ? Math.max(0, dt) * 2 : 0));
   const offset = position.map((n, i) => n - tether.anchor[i]), distance = Math.hypot(...offset);

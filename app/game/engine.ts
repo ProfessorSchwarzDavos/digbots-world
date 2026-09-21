@@ -12040,13 +12040,26 @@ export class VoxelEngine {
         this.rejectCreatureAction(action, peer.identity.id, "That attuned companion is no longer deployed for this keeper.");
         return;
       }
-      const recalled = recallAttunedCreature(orb, this.creatureMetadataForMob(mob), peer.identity.id, "manual", Date.now());
+      const now = Date.now();
+      const recalled = recallAttunedCreature(orb, this.creatureMetadataForMob(mob), peer.identity.id, "manual", now, String(mob.id));
       if (!recalled) {
         this.rejectCreatureAction(action, peer.identity.id, "The attuned companion could not return to its orb.");
         return;
       }
+      let encounters: ReturnType<typeof planCreatureEncounterRecall>;
+      try {
+        encounters = planCreatureEncounterRecall({ id: mob.id, specimenId: mob.specimenId, kind: mob.kind,
+          primeAnchorId: mob.primeAnchorId, legendaryEncounterId: mob.legendaryEncounterId, legendarySiteId: mob.legendarySiteId }, orb,
+        { prime: mob.primeAnchorId ? this.primeEncounters.get(mob.primeAnchorId) ?? null : null,
+          legendary: mob.legendarySiteId ? this.legendaryEncounters.get(mob.legendarySiteId) ?? null : null }, now);
+      } catch {
+        this.rejectCreatureAction(action, peer.identity.id, "That companion's current encounter ownership could not be verified.");
+        return;
+      }
       targetId = mob.id;
       inventory[current.selected] = captureOrbInventorySlot(recalled.orb);
+      if (encounters.prime) this.primeEncounters.set(encounters.prime.anchorId, encounters.prime);
+      if (encounters.legendary) this.legendaryEncounters.set(encounters.legendary.siteId, encounters.legendary);
       this.spawnRecallSparkles(mob, recalled.effect.particleCount);
       this.removeMob(this.mobs.indexOf(mob));
     } else {

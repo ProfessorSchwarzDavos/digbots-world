@@ -9,6 +9,7 @@ import {
   type WorldMetadata, type WorldOptions, type WorldStorageIssue, type WorldStorageResult,
 } from "./world-storage";
 import { normalizeGameVersion } from "./version";
+import { encodeAttachmentSource } from "./attachment-source-preimage";
 
 export type UniverseSaveStatus = Readonly<{
   phase: "opening" | "migrating" | "ready" | "loading" | "saving" | "saved" | "error";
@@ -85,6 +86,8 @@ export class UniverseWorldStorage {
   private diagnostics: WorldStorageIssue[] = [];
   private listeners = new Set<(status: UniverseSaveStatus) => void>();
   private queue: Promise<unknown> = Promise.resolve();
+  private pendingOperations = 0;
+  private storageOperationEpoch = 0;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private writerConfirmed = false;
   private disposed = false;
@@ -108,6 +111,39 @@ export class UniverseWorldStorage {
   get currentCatalog() { return this.active?.catalog ?? null; }
   get writerAuthorityValid() { return this.writerConfirmed && !!this.active?.lease && this.active.lease.expiresAt > Date.now(); }
   get currentStatus() { return { ...this.status }; }
+
+  private attachmentSourceGuard() {
+    const active = this.active;
+    if (!active?.lease || this.disposed !== false || this.writerConfirmed !== true || this.selectedId !== active.manifest.id
+      || this.pendingOperations !== 0 || !Number.isSafeInteger(this.storageOperationEpoch) || this.storageOperationEpoch < 0
+      || !["ready", "saved"].includes(this.status.phase) || this.pendingVehicleCommit
+      || this.completedVehicleCommit || this.reloadCheckpoint || active.stamp.locationId !== active.manifest.currentLocationId)
+      throw new UniverseStorageError("conflict", "Finish pending storage work before attachment source capture.");
+    return { id: active.manifest.id, revision: active.manifest.revision, locationId: active.stamp.locationId,
+      lease: cloneUniverseJson(active.lease), source: encodeAttachmentSource({ operationEpoch: this.storageOperationEpoch,
+        selectedId: this.selectedId,
+        lease: { id: active.lease.id, universeId: active.lease.universeId, owner: active.lease.owner, epoch: active.lease.epoch } }),
+      loadedSource: encodeAttachmentSource({ world: active.world, manifest: active.manifest, stamp: active.stamp, catalog: active.catalog }) };
+  }
+
+  /** Read-only binding to the open world. Do not queue behind or finish a save
+   * here: even a complete start/finish during await invalidates the observation.
+   * Heartbeat renewal may extend the same lease without replacing its owner. */
+  async snapshotAttachmentSource() {
+    const before = this.attachmentSourceGuard();
+    const observed = await this.repository.snapshotAttachmentSource(before.id, before.lease);
+    const after = this.attachmentSourceGuard();
+    if (JSON.stringify(after.source) !== JSON.stringify(before.source)
+      || JSON.stringify(after.loadedSource) !== JSON.stringify(before.loadedSource)
+      || after.lease.expiresAt < before.lease.expiresAt
+      || observed.snapshot.manifest.id !== before.id || observed.snapshot.manifest.revision !== before.revision
+      || observed.snapshot.manifest.currentLocationId !== before.locationId)
+      throw new UniverseStorageError("conflict", "Stale attachment storage facade source.");
+    const { world, manifest, stamp, catalog } = observed.loaded;
+    if (JSON.stringify(encodeAttachmentSource({ world, manifest, stamp, catalog })) !== JSON.stringify(before.loadedSource))
+      throw new UniverseStorageError("conflict", "Attachment repository differs from the cached committed base.");
+    return observed;
+  }
 
   async describeLocation(destination: LocationId) {
     if (!this.active) throw new UniverseStorageError("conflict", "Open a universe before planning travel.");
@@ -165,6 +201,7 @@ export class UniverseWorldStorage {
   }
 
   private perform<T>(phase: UniverseSaveStatus["phase"], message: string, action: () => Promise<T>): Promise<WorldStorageResult<T>> {
+    this.pendingOperations++; this.storageOperationEpoch++;
     const run = async (): Promise<WorldStorageResult<T>> => {
       if (!await this.ready || this.disposed) return { ok: false, error: { code: "unavailable", message: this.status.message } };
       this.publish(phase, message);
@@ -175,7 +212,7 @@ export class UniverseWorldStorage {
         return { ok: true, value };
       } catch (error) { const problem = issue(error); this.publish("error", problem.message); return { ok: false, error: problem }; }
     };
-    const result = this.queue.then(run, run); this.queue = result; return result;
+    const result = this.queue.then(run, run).finally(() => { this.pendingOperations--; }); this.queue = result; return result;
   }
 
   private startHeartbeat() {

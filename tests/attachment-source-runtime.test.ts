@@ -96,6 +96,22 @@ test("actual exhaustive source binds implicit shelf counts and exact stored spel
   assert.throws(() => engine.assertAttachmentSourceUnchanged(unopened), /Stale attachment source/);
 });
 
+test("actual universe source join rechecks live runtime after an asynchronous repository observation", async () => {
+  for (const mutate of [false, true]) {
+    const { engine, asteroid } = fixture(); let reads = 0;
+    Object.assign(engine.worldStorage!, { snapshotAttachmentSource: async () => {
+      reads++; await Promise.resolve(); if (mutate) engine.inventory[0]!.count--;
+      return { snapshot: { manifest: { currentLocationId: engine.world.locationScope.locationId } }, testDouble: true };
+    } });
+    if (mutate) await assert.rejects(() => engine.snapshotAttachmentUniverseSource(asteroid.id), /Stale attachment source/);
+    else { const result = await engine.snapshotAttachmentUniverseSource(asteroid.id); assert(Object.isFrozen(result)); }
+    assert.equal(reads, 1); assert.equal(engine.persistenceRevision, 11);
+  }
+  const { engine, asteroid } = fixture();
+  Object.assign(engine.worldStorage!, { snapshotAttachmentSource: async () => ({ snapshot: { manifest: { currentLocationId: "another-location" } } }) });
+  await assert.rejects(() => engine.snapshotAttachmentUniverseSource(asteroid.id), /differs from the active orbital source/);
+});
+
 test("actual exhaustive engine source is cache/clock/normalization free and detects direct changes", () => {
   const { engine, asteroid } = fixture(), registry = engine.asteroidFields, inventory = engine.inventory;
   const before = canonicalJson({ registry, inventory }), now = Date.now;

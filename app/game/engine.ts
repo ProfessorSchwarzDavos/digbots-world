@@ -22367,6 +22367,19 @@ export class VoxelEngine {
       throw Error("Stale attachment source.");
   }
 
+  /** Join active runtime and all persisted owners without saving or opening
+   * travel. Any runtime change during the repository's asynchronous read
+   * invalidates the proposal. Shared pause/consent/atomic commit are separate. */
+  async snapshotAttachmentUniverseSource(asteroidId: string) {
+    const runtime = this.snapshotAttachmentSource(asteroidId);
+    if (!this.worldStorage) throw Error("Attachment source lacks universe storage.");
+    const repository = await this.worldStorage.snapshotAttachmentSource();
+    this.assertAttachmentSourceUnchanged(runtime);
+    if (repository.snapshot.manifest.currentLocationId !== runtime.physical.frame.orbitId)
+      throw Error("Attachment repository differs from the active orbital source.");
+    return freezeUniverseJson({ runtime, repository });
+  }
+
   /** Synchronous host-owned body/connection/seat snapshot for future attachment
    * preflight. No guest payload, actor consent, cargo transfer or save is issued.
    * Complete follower/owner/location and revision gates remain separate. */

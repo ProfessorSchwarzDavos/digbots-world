@@ -2,7 +2,8 @@ import type { WorldSave } from "./engine";
 import { TYPESCRIPT_STORAGE_PREFIX } from "./edition";
 import { catalogBody, createWaystarCatalog, validateCelestialCatalog, type CelestialCatalogSnapshot } from "./celestial-catalog";
 import { homeLocation, locationId, parseLocationId, universeId, type LocationId, type LocationStamp, type UniverseId } from "./location-address";
-import { assertExactKeys, canonicalJson, cloneUniverseJson, isUniverseRecord, universeSha256 } from "./universe-json";
+import { assertExactKeys, canonicalJson, cloneUniverseJson, freezeUniverseJson, isUniverseRecord, universeSha256 } from "./universe-json";
+import { encodeAttachmentSource, type AttachmentSourceValue } from "./attachment-source-preimage";
 import { composeUniverseSave, splitUniverseSave, type SaveFields } from "./universe-save";
 import { assertVehicleCommitReady, commitVehicleArrival, remapSpacefleetUniverse, validateSpacefleetSave, validateSpacefleetUniverse } from "./space-vehicle";
 import { validateStationRegistrySave } from "./orbital-station";
@@ -53,6 +54,12 @@ export type UniverseSnapshot = Readonly<{
   players: readonly PlayerData[]; backups: readonly LegacyBackup[]; journals: readonly UniverseJournal[]; receipts: readonly MigrationReceipt[];
 }>;
 export type UniverseLoadedWorld = Readonly<{ world: StoredWorld; manifest: UniverseManifest; catalog: CelestialCatalogSnapshot; stamp: LocationStamp; lease: UniverseLease | null }>;
+/** A verified read preimage, not a lease acquisition, pause or commit grant. */
+export type UniverseAttachmentSource = Readonly<{
+  snapshot: UniverseSnapshot; source: AttachmentSourceValue; lease: UniverseLease;
+  /** The same pure composition used by load(), for comparing the cached base. */
+  loaded: UniverseLoadedWorld;
+}>;
 export type VehicleLocationCommit = Readonly<{
   /** Stable flight identity, distinct from a retryable storage attempt. */
   transactionId: string;
@@ -251,10 +258,14 @@ export class UniverseStorage {
     }
   }
 
+  private async readRecords(tx: IDBTransaction, id: UniverseId): Promise<Map<ExportStore, Record<string, unknown>[]>> {
+    return new Map(await Promise.all(EXPORT_STORES.map(async (store) => [store,
+      await request(tx.objectStore(store).index("universeId").getAll(id)) as Record<string, unknown>[]] as const)));
+  }
+
   private async records(id: UniverseId): Promise<Map<ExportStore, Record<string, unknown>[]>> {
     universeId(id);
-    return this.transaction(EXPORT_STORES, "readonly", async (tx) => new Map(await Promise.all(EXPORT_STORES.map(async (store) => [store,
-      await request(tx.objectStore(store).index("universeId").getAll(id)) as Record<string, unknown>[]] as const))));
+    return this.transaction(EXPORT_STORES, "readonly", tx => this.readRecords(tx, id));
   }
 
   private async decode(records: Map<ExportStore, Record<string, unknown>[]>, id: UniverseId, partial = false): Promise<UniverseSnapshot> {
@@ -325,6 +336,45 @@ export class UniverseStorage {
 
   async snapshot(id: UniverseId): Promise<UniverseSnapshot> { return this.decode(await this.records(id), id); }
 
+  /** Inactive locations, players and the writer lease are observed in ONE
+   * readonly transaction. Hash verification happens afterward; the returned
+   * preimage does not claim that authority stayed current during that await.
+   * No recovery, save or lease renewal is performed. Unsupported local-frame
+   * hydration remains refused by the existing decoder. */
+  async snapshotAttachmentSource(id: UniverseId, expected: UniverseLease): Promise<UniverseAttachmentSource> {
+    universeId(id);
+    const validateLease = (value: unknown): UniverseLease => {
+      encodeAttachmentSource(value);
+      if (!isUniverseRecord(value)) throw new UniverseStorageError("conflict", "Attachment source lacks a writer lease.");
+      assertExactKeys(value, ["id", "universeId", "owner", "epoch", "expiresAt"], "Attachment lease");
+      if (value.id !== id || value.universeId !== id || typeof value.owner !== "string" || !value.owner
+        || !integer(value.epoch, 1) || !integer(value.expiresAt)) throw new UniverseStorageError("corrupt", "Invalid attachment writer lease.");
+      return cloneUniverseJson(value) as UniverseLease;
+    };
+    const expectedLease = validateLease(expected);
+    const observed = await this.transaction(STORES, "readonly", async tx => {
+      const [records, rawLease] = await Promise.all([this.readRecords(tx, id), request(tx.objectStore("leases").get(id))]);
+      const lease = validateLease(rawLease); this.assertLease(lease, expectedLease);
+      if (lease.expiresAt < expectedLease.expiresAt) throw new UniverseStorageError("conflict", "Attachment writer lease moved backward.");
+      return { records, lease };
+    });
+    // Keep the raw IDB observation, not merely decoded/normalized JSON. Routine
+    // same-owner epoch-preserving lease renewal is deliberately separate.
+    const source = encodeAttachmentSource(EXPORT_STORES.map(store => [store, observed.records.get(store)]));
+    const snapshot = await this.decode(observed.records, id);
+    if (snapshot.manifest.deletedAt !== null || snapshot.journals.some(journal => journal.state === "prepared"))
+      throw new UniverseStorageError("conflict", "Finish pending universe transactions before attachment source capture.");
+    return freezeUniverseJson({ snapshot, source, lease: observed.lease, loaded: this.loadedFromSnapshot(snapshot, observed.lease) });
+  }
+
+  /** Reinspection is still a read preimage, not an atomic write barrier. The
+   * eventual journal must bind current source/revision and lease at commit. */
+  async assertAttachmentSourceUnchanged(source: UniverseAttachmentSource): Promise<void> {
+    const current = await this.snapshotAttachmentSource(source.snapshot.manifest.id, source.lease);
+    if (JSON.stringify(current.source) !== JSON.stringify(source.source))
+      throw new UniverseStorageError("conflict", "Stale attachment repository source.");
+  }
+
   /** Normal loads/checkpoints do not materialize dormant payloads or raw backups. */
   private async currentSnapshot(id: UniverseId, transactionId?: string, extraLocation?: LocationId): Promise<UniverseSnapshot> {
     universeId(id);
@@ -348,7 +398,11 @@ export class UniverseStorage {
   }
 
   async load(id: UniverseId, lease: UniverseLease | null = null): Promise<UniverseLoadedWorld> {
-    const snapshot = await this.currentSnapshot(id), { manifest } = snapshot;
+    return this.loadedFromSnapshot(await this.currentSnapshot(id), lease);
+  }
+
+  private loadedFromSnapshot(snapshot: UniverseSnapshot, lease: UniverseLease | null): UniverseLoadedWorld {
+    const { manifest } = snapshot;
     const location = snapshot.locations.find((entry) => entry.descriptor.id === manifest.currentLocationId)!;
     const player = snapshot.players.find((entry) => entry.playerId === manifest.currentPlayerId)!;
     const save = composeUniverseSave({ universe: snapshot.universe.fields, extensions: snapshot.universe.extensions,

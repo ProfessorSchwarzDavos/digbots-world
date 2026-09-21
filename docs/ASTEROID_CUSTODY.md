@@ -247,6 +247,24 @@ inactive owners, authenticate/consent actors, prove all authored footprints or
 establish canonical propagated-light/climate authority. Those gates still have
 to be joined to the same immutable proposal and existing atomic journal.
 
+`snapshotAttachmentUniverseSource()` now joins that synchronous engine preimage
+to a read-only repository observation. One native IndexedDB transaction reads
+all persisted locations, players, global records, histories and the writer
+lease. Raw record tags retain distinctions that decoded JSON may omit; checksum
+verification and the ordinary pure load composition run after that transaction.
+Missing/replaced/expired leases, backward expiry changes and prepared journals
+reject without acquisition, renewal, recovery or saving.
+
+The storage facade refuses queued/in-flight operations and pending vehicle/reload
+states. An operation that starts and finishes during the read still changes its
+operation epoch. Monotonic renewal of the same owner/lease epoch is allowed, but
+the complete cached committed world, manifest, catalog and location stamp must
+match the repository's normal load representation. The engine rechecks its live
+source after the await. These checks do not create an atomic write barrier:
+the eventual transaction must revalidate source, revision and lease at commit.
+This observes inactive partitions; it does not yet establish the global semantic
+creature/resource-custody join, shared physical capacity provenance or consent.
+
 This remains a prerequisite, not a complete admission gate. Exhaustive authored
 sites/environment integration, inactive location owners, transition consent and
 atomic finite-resource transfer still require their integration checks.

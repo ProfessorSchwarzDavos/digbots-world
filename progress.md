@@ -2,6 +2,19 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Revision16 repository-source binding reads all ten native IndexedDB stores,
+  including inactive locations/players and the writer lease, in one readonly
+  transaction. Exact raw tags precede decoding; pending journals and missing/
+  replaced/expired/backward leases reject without recovery or writes. Facade
+  queue count/operation epoch detect in-flight and complete-during-await work;
+  whole cached committed base/catalog/stamp must match normal load composition.
+  Actual engine joins before/after runtime observations. Focusedr1:32PASS,
+  reviewed/hardenedr2:33PASS; native r1 five and r2 six checksPASS, including
+  checksum-valid same-revision base divergence and JSON-invisible own-undefined
+  changes. Expandedr3:188PASS; static141/142 and lint120/121PASS. Exact committed
+  repeat/build/browser pending. No global
+  semantic custody join, shared pause, atomic authority or travel grant yet.
+
 - Revision16 book-furniture source now enumerates seven archive-shelf variants
   and tome displays, matching actual blocks/counts to exact ordered book/spell
   state. Unopened shelves retain implicit BoundBook provenance without creating
@@ -11,7 +24,10 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
   tilt and conservative parent-yaw rotations. Focused r1 retained37PASS/1FAIL:
   test incorrectly applied a local Euler Y rotation never used by the renderer;
   corrected without changing the renderer. Focusedr2:38PASS, expandedr3:172PASS,
-  static139/140 and lint118/119PASS; build/browser checkpoint pending.
+  static139/140 and lint118/119PASS. Committed919f0f2/build41
+  95m24dCG-74dE7tEfP4TS, exact172repeat/official41PASS; image reviewed and jobs
+  drained23:07Z. Frozen book-checkpoint933ca738 binds6source/35files/10receipts;
+  director accepted the bounded prerequisite in CF6_R16_BOOK_ACCEPTANCE.md.
   No entry/return permission or complete authored-site claim.
 
 - Revision16 production-station selector covers all installed Golem Forges,

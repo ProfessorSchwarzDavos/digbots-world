@@ -2,6 +2,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Loot/spell adapters preserve unique-reward history, historical container
+  ownership/theft data, optional absent/null spell fields and exact deadlines.
+  Tidemend's actual16-block XZ cooldown keys remain canonical (shared history-grid
+  helper also retains ecology64 behavior). Ironwake follows only the actual local
+  human body, never an inferred station aura or drone grant.100cold cycles retain
+  values; timer/history loss and stale/crossing actor bindings reject.18focused
+  then165expanded/static97/lint79PASS before commit. R1 named a nonexistent loot
+  suite that Node did not run; r2 explicitly includes contextual-loot-world.test.ts.
+  Pure adapters still require authoritative event/resource/clock validation and
+  atomic complete-frame integration; no fresh build/browser/travel claim.
 - Full Survey Hopper bounds now derive from its actual capsule/gear/cockpit/
   plume model under arbitrary rotations and conservative all-phase sweeps.
   Rendering shares unchanged gear/flutter constants, checked against original

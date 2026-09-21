@@ -1,10 +1,11 @@
 import { type BlockId } from "./data";
 import { liquidKindForBlock, type LiquidCell } from "./liquids";
-import { ecologySectorKey, ECOLOGY_SECTOR_SIZE, type EcologySectorSave } from "./ecology-population";
-import { asteroidAttachmentContainsCell, asteroidAttachmentPhysicalBounds, rebaseAsteroidCell,
+import { ECOLOGY_SECTOR_SIZE, type EcologySectorSave } from "./ecology-population";
+import { asteroidAttachmentContainsCell, rebaseAsteroidCell,
   type AsteroidAttachmentFrame, type AsteroidAttachmentView } from "./asteroid-attachment-frame";
 import { assertExactKeys, canonicalJson, cloneUniverseJson, isUniverseRecord } from "./universe-json";
 import { mergeSelectedAttachmentRecords } from "./attachment-array-merge";
+import { asteroidHistoryRegionCoordinates, asteroidHistoryRegionKey, asteroidHistoryRegionTouches } from "./asteroid-history-regions";
 
 export type AsteroidLiquidRecords = readonly (readonly [string, LiquidCell])[];
 /** Must read the complete host-owned voxel preimage/after-image in the named
@@ -78,15 +79,10 @@ export type AsteroidEcologyView = Readonly<{
 }>;
 const ecologyFields = { schema: true, lastUpdatedTick: true, recentKills: true } satisfies Record<keyof EcologySectorSave, true>;
 function sectorCoordinates(key: string): [number, number] {
-  if (!/^-?\d+,-?\d+$/.test(key)) throw Error("Invalid canonical ecology sector key.");
-  const result = key.split(",").map(Number) as [number, number];
-  if (result.join(",") !== key || result.some(n => !Number.isSafeInteger(n * ECOLOGY_SECTOR_SIZE)
-    || !Number.isSafeInteger((n + 1) * ECOLOGY_SECTOR_SIZE))) throw Error("Invalid canonical ecology sector coordinate.");
-  return result;
+  return asteroidHistoryRegionCoordinates(key, ECOLOGY_SECTOR_SIZE);
 }
 function sectorTouches(frame: AsteroidAttachmentFrame, key: string): boolean {
-  const [x, z] = sectorCoordinates(key), b = asteroidAttachmentPhysicalBounds(frame, "orbit"), size = ECOLOGY_SECTOR_SIZE;
-  return x * size < b.maxX && (x + 1) * size > b.minX && z * size < b.maxZ && (z + 1) * size > b.minZ;
+  return asteroidHistoryRegionTouches(frame, key, ECOLOGY_SECTOR_SIZE);
 }
 function validateEcology(sectors: Readonly<Record<string, EcologySectorSave>>) {
   canonicalJson(sectors);
@@ -100,10 +96,7 @@ function validateEcology(sectors: Readonly<Record<string, EcologySectorSave>>) {
   }
 }
 export function asteroidEcologySectorKey(frame: AsteroidAttachmentFrame, x: number, z: number, view: AsteroidAttachmentView): string {
-  const b = asteroidAttachmentPhysicalBounds(frame, view);
-  if (![x, z].every(Number.isFinite) || x < b.minX || x >= b.maxX || z < b.minZ || z >= b.maxZ)
-    throw Error("Ecology query is outside the attached frame.");
-  return ecologySectorKey(x + (view === "local" ? frame.offset.x : 0), z + (view === "local" ? frame.offset.z : 0));
+  return asteroidHistoryRegionKey(frame, x, z, view, ECOLOGY_SECTOR_SIZE);
 }
 export function projectAsteroidEcology(frame: AsteroidAttachmentFrame, canonical: Readonly<Record<string, EcologySectorSave>>): AsteroidEcologyView {
   validateEcology(canonical);

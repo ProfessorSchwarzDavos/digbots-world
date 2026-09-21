@@ -2,6 +2,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Runtimeeea6415 passes committed232 regressions and productionbuild34
+  HAjF9PsEvRWj0yZZxC5aR. Official34 and normal/fresh-cold Morrow audits pass;
+  both2500ms pauses retain clock/EVA/workshop/nearby creatures, both012 saves
+  retain18 old IDs/specimens/seeds and checked finite fleet/inventory/blocks/
+  containers/inactive locations exactly. Three screenshots personally reviewed.
+  These ordinary load/pause/save checks contain no loose-cargo journey; actual
+  drop coverage is vertex/animation and pure capture/lineage tests. No full
+  ecology/cache/performance or local-travel claim. All jobs and4338/4339 ports
+  drained01:36:48UTC; generated tsconfig restored exactly. Authenticated actor,
+  authored/agent/fleet adapters and atomic authority remain next; fullCF6 open.
 - Drop/human prerequisites now share the exact old engine scale, animation,
   terrain probe and sex/race/stance height formulas. Conservative drop envelopes
   cover every vertex of643catalog items plus filled Capture Orb under animation;

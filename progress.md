@@ -2,6 +2,17 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Accumulated runtimec183669 passes isolatedbuild35 KhFNHObg2pTOwXUTm7ImB,
+  unchanged official35 and one normal/cold custody smoke. Both paused2500ms
+  observations are exact; all18 original creature IDs/specimens/seeds and checked
+  inventory/fleet/blocks/containers/inactive location survive. Three captured
+  images personally reviewed. SaveQuit10/title11/storage12/context13 on each;
+  all jobs drained and Windows/WSL4338/4339 absent at06:46UTC. Generated tsconfig
+  additions restored exactly. Known circular-chunk/module-type warnings retained.
+  Read-only census of119 existing synthetic storage files finds no attuned pair;
+  ordinary browser recall/rendered effects/post-recall reload remain unverified.
+  No new fixture development, local entry, complete CF6/CFV or CF7 claim. Bounded
+  source/check/evidence checkpoint prepared under the director's guardrail.
 - Canonical creature paths now bind to explicit host/guest, agent, block, boat,
   ship, drop and universe-owned holders. Nested stored cargo retains its outer
   containment chain; current deployed cargo follows the actual numeric body ID.
@@ -10,8 +21,8 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
   its own player ID, with no fabricated positions or transfer authority.
   37focused/328expanded/static123/lint106PASS, including100cold exact bindings.
   The r1 test-only inputA typo is retained and corrected to the real input slot.
-  Physical holder/site/environment closure, atomic consent/resource authority
-  and relevant production-build/browser checks remain open. Under the director's
+  Physical holder/site/environment closure and atomic consent/resource authority
+  remain open; the later accumulated build/browser result is above. Under the director's
   bounded-continuation guardrail, no new subsystem/helper or local entry starts.
 - Block chest selection/capture now checks whole single/double components, the
   complete articulated lid sweep and compatible unopened pairing neighbors.

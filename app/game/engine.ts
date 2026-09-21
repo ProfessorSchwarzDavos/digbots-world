@@ -560,10 +560,14 @@ import { WORLD_DROP_VISUAL, worldDropUsesFilledOrb } from "./world-drop-body";
 import { PLAYER_HEIGHT, PLAYER_RADIUS, playerBodyHeight } from "./player-body";
 import { snapshotHostAttachmentActorBodies } from "./attachment-actor-bodies";
 import type { AsteroidApiarySources } from "./asteroid-attachment-apiaries";
+import { createAsteroidAttachmentWorld, type AsteroidAttachmentWorldSource } from "./asteroid-attachment-world";
+import { HEALER_ACTIVE_FUEL } from "./custody-block-body";
+import { createAsteroidAttachmentFrame } from "./asteroid-attachment-frame";
+import { selectAsteroidCreatureCustody, type AsteroidCustodyPhysicalContext } from "./asteroid-attachment-custody";
 import type { WorldCreatureCustodySource } from "./creature-custody-sources";
 import { collectWorldCreatureCustodyHolders } from "./creature-custody-holders";
 import { planCreatureEncounterRecall, reconcileCreatureEncounterCustody } from "./creature-encounter-custody";
-import { cloneUniverseJson, freezeUniverseJson } from "./universe-json";
+import { canonicalJson, cloneUniverseJson, freezeUniverseJson } from "./universe-json";
 import { itemPresentationFamily } from "./item-presentation";
 import {
   boardSailboat,
@@ -22197,6 +22201,72 @@ export class VoxelEngine {
     );
   }
 
+  /** Synchronous complete voxel preimage, independent of loaded chunks. The
+   * proposed finite-page capture stays detached; serialize() would mutate the
+   * live registry. This is one source slice, not a durable owner/transfer grant.
+   * Later async proposals must compare the entire image, not only dirty counters.
+   */
+  snapshotAttachmentWorldSource() {
+    if (this.multiplayer && (this.multiplayer.role !== "host" || !["hosting", "connected"].includes(this.multiplayer.state)))
+      throw Error("Attachment world sources require the current host.");
+    const stamp = this.worldStorage.currentStamp, scope = this.world.locationScope, terrain = this.world.celestialTerrain;
+    if (!stamp || !sameLocationStamp(stamp, scope) || !terrain || terrain.kind !== "orbit")
+      throw Error("Attachment world requires a current saved orbital scope.");
+    const address = parseLocationId(stamp.locationId), originalRegistry = this.asteroidFields.fields[stamp.locationId];
+    if (address.kind !== "orbit" || !originalRegistry) throw Error("Attachment world lacks its canonical orbit registry.");
+    const edits = this.world.serializeEdits();
+    const proposed = captureAsteroidEdits(this.asteroidFields, address, edits).fields[stamp.locationId];
+    const world: AsteroidAttachmentWorldSource = { locationId: stamp.locationId, terrainVersion: terrain.version,
+      terrainSeed: terrain.seed, expansionLevel: terrain.expansionLevel, registry: proposed, edits,
+      blockFacings: this.world.serializeBlockFacings() };
+    const checked = createAsteroidAttachmentWorld(world);
+    return freezeUniverseJson(cloneUniverseJson({ stamp, originalRegistry, world: checked.source }));
+  }
+
+  /** One synchronous physical-custody envelope. Read actual owner maps once,
+   * never serialize/save/advance a clock. This is NOT complete frame admission:
+   * authored sites, environmental queries, inactive location owners and durable
+   * actor/consent/resource authority remain mandatory separate gates. */
+  snapshotAttachmentPhysicalCustodySource(asteroidId: string) {
+    if (this.checkpointPromise || this.pendingFieldSurvey || this.pendingSpaceArrival || this.locationTransitioning || this.evaCargoLine)
+      throw Error("Finish pending world/cargo transactions before attachment inspection.");
+    const voxels = this.snapshotAttachmentWorldSource(), actors = this.snapshotAttachmentActorBodies();
+    const manifest = this.worldStorage.currentManifest, catalog = this.worldStorage.currentCatalog;
+    if (!manifest || !catalog || manifest.currentLocationId !== voxels.stamp.locationId || !this.pressureRuntime)
+      throw Error("Attachment custody lacks its current durable owner or pressure source.");
+    const ownerBaseline = canonicalJson({ stamp: voxels.stamp, manifest, catalog });
+    const custody = this.snapshotAttachmentCreatureCustody(), hostPlayerId = this.localPlayerId();
+    const exhibitResidents: Record<string, ExhibitResident[]> = {};
+    for (const [key, slots] of Object.entries(custody.source.chests)) if (key.startsWith("exhibit:"))
+      exhibitResidents[key] = slots.flatMap((slot, index) => {
+        const resident = slot && this.exhibitSpecimen(slot, key, index); return resident ? [resident] : [];
+      });
+    const frame = createAsteroidAttachmentFrame(voxels.world.registry, asteroidId);
+    const context: AsteroidCustodyPhysicalContext = { world: voxels.world, actors, apiaryVisuals: custody.apiaryVisuals,
+      exhibitResidents, stations: { registry: this.orbitalStations ?? createStationRegistry(voxels.stamp.locationId),
+        pressure: this.pressureRuntime.snapshot(), fleet: custody.source.spacefleet!,
+        // CF6 has no live wayanchor producer. Any recorded lease remains
+        // unresolved and is rejected by the station selector, never guessed.
+        wayanchorCells: {} } };
+    const physical = selectAsteroidCreatureCustody(frame, custody.source, hostPlayerId, context);
+    if (ownerBaseline !== canonicalJson({ stamp: this.worldStorage.currentStamp,
+      manifest: this.worldStorage.currentManifest, catalog: this.worldStorage.currentCatalog }))
+      throw Error("Attachment durable owner changed during source inspection.");
+    return freezeUniverseJson(cloneUniverseJson({ frame, stamp: voxels.stamp, manifest, catalog,
+      originalRegistry: voxels.originalRegistry, persistenceRevision: this.persistenceRevision,
+      hostPlayerId, source: custody.source, encounters: custody.encounters, context, physical,
+      navigation: { player: { x: this.position.x, y: this.position.y, z: this.position.z, yaw: this.yaw, pitch: this.pitch },
+        spawn: { x: this.spawn.x, y: this.spawn.y, z: this.spawn.z }, locationPlayerState: this.locationPlayerSnapshot() } }));
+  }
+
+  /** Prospective async commit boundary: counters alone do not cover direct
+   * inventory/edit/pose writes. Rebind all covered sources exactly; never repair
+   * the proposal or reuse it for a different actor/frame. Still no travel grant. */
+  assertAttachmentPhysicalCustodySourceUnchanged(source: ReturnType<VoxelEngine["snapshotAttachmentPhysicalCustodySource"]>) {
+    if (canonicalJson(source) !== canonicalJson(this.snapshotAttachmentPhysicalCustodySource(source.frame.asteroidId)))
+      throw Error("Stale attachment physical custody source.");
+  }
+
   /** Synchronous host-owned body/connection/seat snapshot for future attachment
    * preflight. No guest payload, actor consent, cargo transfer or save is issued.
    * Complete follower/owner/location and revision gates remain separate. */
@@ -26812,11 +26882,11 @@ export class VoxelEngine {
       }
       if (healer.gelFuelSeconds > 0) {
         const activeFuel = new THREE.Mesh(
-          new THREE.BoxGeometry(0.16, 0.045, 0.018),
+          new THREE.BoxGeometry(HEALER_ACTIVE_FUEL.width, HEALER_ACTIVE_FUEL.height, HEALER_ACTIVE_FUEL.depth),
           new THREE.MeshBasicMaterial({ color: 0xa8ffe0, transparent: true, opacity: 0.9 }),
         );
         activeFuel.name = "healing-station-active-fuel";
-        activeFuel.position.set(0, -0.12, -0.493);
+        activeFuel.position.set(HEALER_ACTIVE_FUEL.x, HEALER_ACTIVE_FUEL.y, HEALER_ACTIVE_FUEL.z);
         group.add(activeFuel);
       }
     }

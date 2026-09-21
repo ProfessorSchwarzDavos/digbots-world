@@ -2,6 +2,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Revision16 physical-custody checkpoint in progress: complete detached orbital
+  voxel lookup, actual host source collection, six basic holder model bounds,
+  complete recorded habitat closure and all-phase habitat bodies, physical
+  custody joins and exact async-staleness recheck. New focused88PASS (r2),
+  integrated136PASS (r3), static129/lint110PASS. First integrated r1 was85PASS/3FAIL: missing canonicalJson
+  import plus a nonexistent test item; static128 additionally caught a helper
+  clone typing issue. All corrected, original receipts retained. Build/
+  ordinary-browser smoke pending. This does not open local entry: unrecorded
+  installations, full authored-site/environment closure and atomic consent/
+  finite-resource transfer remain open. See docs/ASTEROID_CUSTODY.md.
 - Revision16 resumed under the director's current packet. Separate producer-derived
   level10 petalfox fixture retains normal progression/max7.188; old r15 malformed
   fixture and receipts are unchanged. New adapter tests cover levels1/10/50 at
@@ -9,7 +19,7 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
   issues, corrected; static126/lint108PASS. No runtime change or new build:
   accepted build36/source3eed2e8 and lock identity reread. Normal browser attune,
   deploy, white recall sparkles, native save and fresh cold inventory exercised;
-  exact saved-custody audit pending. Images personally reviewed. Work/CF6/r16-resume
+  exact saved/cold custody audit passed; director accepted3d2d1e9. Images personally reviewed. Work/CF6/r16-resume
   owns current implementation ledger; fullCF6/CFV and local entry remain gated.
 - Revision15 bounded guest recall fix3eed2e8: actual host handler reproduced
   live-ID rejection and missing current encounter preflight/update. Reuses the

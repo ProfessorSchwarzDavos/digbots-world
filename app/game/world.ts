@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { FURNACE_FRONT_PLATE } from "./custody-block-body";
 import { stationPanelFace } from "./station-kit";
 import { homeLocation, locationId, parseLocationId, universeId, locationStamp as validateLocationStamp, type LocationStamp } from "./location-address";
 import { celestialTerrainSeed, createCelestialTerrain, normalizeCelestialGenerationState, MORROW_REGIONS, type CelestialTerrain, type CelestialGenerationState } from "./celestial-terrain";
@@ -8763,7 +8764,7 @@ export class ChunkWorld {
           // carries the authored furnace-front atlas tile and rotates with the
           // builder's placement facing.
           addFacingCuboid(bucket, lx, lz, facing, lx - 0.5, y - 0.5, lz - 0.5, lx + 0.5, y + 0.5, lz + 0.5, definition.bottom, definition.top, definition.bottom, tint, environment);
-          addFacingCuboid(bucket, lx, lz, facing, lx - 0.43, y - 0.4, lz - 0.506, lx + 0.43, y + 0.4, lz - 0.499, definition.side, definition.side, definition.side, tint, environment);
+          addFacingCuboid(bucket, lx, lz, facing, lx - 0.43, y - 0.4, lz + FURNACE_FRONT_PLATE.minZ, lx + 0.43, y + 0.4, lz + FURNACE_FRONT_PLATE.maxZ, definition.side, definition.side, definition.side, tint, environment);
           continue;
         }
         for (const face of FACES) {

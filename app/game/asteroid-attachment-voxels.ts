@@ -7,7 +7,8 @@ import { locationId, type LocationAddress } from "./location-address";
 import { isUniverseRecord } from "./universe-json";
 import type { ChunkEditSave } from "./world";
 
-function cells(edits: ChunkEditSave): Record<string, BlockId> {
+/** Exact detached cell index for canonical (already migrated) construction edits. */
+export function asteroidVoxelEditCells(edits: ChunkEditSave): Record<string, BlockId> {
   if (!isUniverseRecord(edits)) throw Error("Invalid attached voxel edits.");
   const output: Record<string, BlockId> = {};
   for (const [key, entries] of Object.entries(edits)) {
@@ -51,13 +52,13 @@ const voxelCodec = opaqueAsteroidBlockCodec<BlockId>();
 /** Construction-edit projection only. Canonical finite asteroid pages must be
  * projected separately by projectAsteroidEdits; this creates no new ore owner. */
 export function projectAsteroidVoxelEdits(frame: AsteroidAttachmentFrame, canonical: ChunkEditSave): ChunkEditSave {
-  return chunks(projectAsteroidBlocks(frame, cells(canonical), voxelCodec));
+  return chunks(projectAsteroidBlocks(frame, asteroidVoxelEditCells(canonical), voxelCodec));
 }
 /** Data merge, not build/extract authority. The host must atomically capture
  * finite asteroid pages and inventory with these edits before removing mirrors. */
 export function captureAsteroidVoxelEdits(frame: AsteroidAttachmentFrame, canonical: ChunkEditSave,
   baseline: ChunkEditSave, edited: ChunkEditSave): ChunkEditSave {
-  return chunks(captureAsteroidBlocks(frame, cells(canonical), cells(baseline), cells(edited), voxelCodec), canonical);
+  return chunks(captureAsteroidBlocks(frame, asteroidVoxelEditCells(canonical), asteroidVoxelEditCells(baseline), asteroidVoxelEditCells(edited), voxelCodec), canonical);
 }
 
 /** Removes ONLY redundant finite-page mirrors after exact canonical readback.
@@ -69,7 +70,7 @@ export function stripCapturedAsteroidEditMirrors(raw: AsteroidRegistry, location
   if (!orbit || locationId(orbit) !== locationId(registry.orbit)
     || location.kind === "asteroid" && !registry.asteroids.some(entry => entry.descriptor.id === location.instanceId))
     throw Error("Foreign or unknown asteroid edit owner.");
-  const source = cells(edits), reader = createAsteroidReader(registry), retained: Record<string, BlockId> = {};
+  const source = asteroidVoxelEditCells(edits), reader = createAsteroidReader(registry), retained: Record<string, BlockId> = {};
   for (const [key, block] of Object.entries(source)) {
     const [x, y, z] = key.split(",").map(Number), point = { x, y, z }, asteroid = asteroidAtPoint(registry, point, location);
     if (!asteroid) { retained[key] = block; continue; }

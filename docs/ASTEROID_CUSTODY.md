@@ -156,6 +156,31 @@ subsystem's semantic and authorization checks. Complete physical/component and
 entity/fleet/agent adapters plus ordinary local-frame travel evidence are still
 required before entry opens. Synthetic storage tests are not gameplay acceptance.
 
+The host now has a synchronous, read-only physical-custody preimage through
+`snapshotAttachmentPhysicalCustodySource`. Its voxel reader combines the pinned
+orbital generator, proposed finite pages and exact construction/facings, without
+requiring loaded chunks or treating unknown terrain as air. Inventory paths are
+joined to actual actor, boat, creature, drop, chest, machine, habitat and fleet
+holders. A deployed orb and its body must stay on the same side. Shared digital
+stores and inactive guest ledgers remain at their canonical owners; missing
+agent bodies reject instead of inventing a position.
+
+Recorded habitats require complete face-connected components (including the
+neighbors of the twentieth cell), and their rails, decorations and fitted,
+animated residents are checked separately from voxel membership. Basic holder
+bounds include furnace trim and active healer fuel displays outside their cells.
+The preimage binds the durable owner/catalog, original finite registry, covered
+storage, actor/session bodies, pressure and navigation. Before a future async
+commit it must be reread and compared exactly: dirty counters alone do not catch
+all direct inventory, terrain or pose changes.
+
+This remains a prerequisite, not a complete admission gate. Unrecorded empty
+installations, all authored-site/environmental dependencies, inactive location
+owners, transition consent and atomic finite-resource transfer still require
+their integration checks. Conservative all-phase model spheres may refuse an
+installation very close to the frame boundary. There is no new local-entry UI,
+save mutation or travel permission in this preflight.
+
 The repository checkpoint also has a production-browser regression using an
 explicitly admitted synthetic fixture: ordinary Continue, paid survey, Save &
 Quit and fresh cold reload retain the canonical owner and finite stores. This

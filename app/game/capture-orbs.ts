@@ -297,7 +297,7 @@ export function captureOrbInventorySlot(orb: CaptureOrb): InventorySlot {
         health: creature.health,
         maxHealth: creature.maxHealth,
         attuned: Boolean(orb.attunement),
-        attunedOwnerId: orb.attunement?.ownerId,
+        ...(orb.attunement ? { attunedOwnerId: orb.attunement.ownerId } : {}),
         deployed: Boolean(orb.attunement?.activeEntityId),
         fainted: Boolean(orb.attunement?.fainted || creature.health <= 0),
       } : {}),

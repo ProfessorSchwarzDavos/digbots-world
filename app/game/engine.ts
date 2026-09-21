@@ -557,6 +557,8 @@ import { applyFirstPersonHeldItemOrientation, createAvatarHeldItemModel } from "
 import { WORLD_DROP_VISUAL, worldDropUsesFilledOrb } from "./world-drop-body";
 import { PLAYER_HEIGHT, PLAYER_RADIUS, playerBodyHeight } from "./player-body";
 import { snapshotHostAttachmentActorBodies } from "./attachment-actor-bodies";
+import type { AsteroidApiarySources } from "./asteroid-attachment-apiaries";
+import { cloneUniverseJson, freezeUniverseJson } from "./universe-json";
 import { itemPresentationFamily } from "./item-presentation";
 import {
   boardSailboat,
@@ -870,6 +872,7 @@ import {
   APIARY_JELLY_CAP,
   APIARY_NECTAR_CAP,
   APIARY_WORKER_CAP,
+  APIARY_FORAGING_SCAN,
   apiaryContainerStatus,
   beeStingProfile,
   breakApiary,
@@ -16708,12 +16711,12 @@ export class VoxelEngine {
     return this.inventory?.[this.selected] ?? null;
   }
 
-  apiaryFlowersNear(key: string, radius = 5) {
+  apiaryFlowersNear(key: string, radius = APIARY_FORAGING_SCAN.radius) {
     const [x, y, z] = key.split(",").map(Number);
     const flowers: Array<{ x: number; y: number; z: number }> = [];
     for (let dx = -radius; dx <= radius; dx += 1) for (let dz = -radius; dz <= radius; dz += 1) {
       if (dx * dx + dz * dz > radius * radius) continue;
-      for (let dy = -3; dy <= 3; dy += 1) {
+      for (let dy = -APIARY_FORAGING_SCAN.verticalRadius; dy <= APIARY_FORAGING_SCAN.verticalRadius; dy += 1) {
         const type = this.world.getBlock(x + dx, y + dy, z + dz);
         if (type === undefined) continue;
         const name = BLOCKS[type]?.name ?? "";
@@ -22202,6 +22205,19 @@ export class VoxelEngine {
       activeWorkAgents: [...new Set([...this.agentRuntimeTasks.keys(), ...this.agentBuildJobs.keys(),
         ...[...this.agentBuildPreviews.values()].map(preview => preview.agentId)])],
     });
+  }
+
+  /** Read the live hive and omitted display bodies together without invoking
+   * serialize(), which captures asteroid page edits. Detached snapshots retain
+   * exact metadata; complete owner revision/actor/consent gates remain external. */
+  snapshotAttachmentApiarySources(): AsteroidApiarySources {
+    if (this.multiplayer && (this.multiplayer.role !== "host" || !["hosting", "connected"].includes(this.multiplayer.state)))
+      throw Error("Apiary attachment sources require the current host.");
+    return freezeUniverseJson(cloneUniverseJson({ apiaries: Object.fromEntries(this.apiaries),
+      creatures: this.mobs.filter(mob => !mob.beeHiveKey && !this.temporarySummons?.has(mob.id)).map(mob => this.serializeCreature(mob)),
+      sleepingCreatures: this.sleepingCreatures,
+      visuals: this.mobs.filter(mob => mob.beeHiveKey).map(mob => ({ hiveKey: mob.beeHiveKey!, creature: this.serializeCreature(mob) })),
+    }));
   }
 
   /** Medium and large ground creatures have horizontal presence without becoming unstable moving platforms. */

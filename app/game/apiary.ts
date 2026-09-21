@@ -1,6 +1,8 @@
 import { Item, type InventorySlot, type ItemCode } from "./data";
 
 export const APIARY_WORKER_CAP = 8;
+/** Exact flower-query footprint used by the live engine and frame preflight. */
+export const APIARY_FORAGING_SCAN = Object.freeze({ radius: 5, verticalRadius: 3 });
 export const APIARY_CONTAINER_KIND = "apiary" as const;
 export const APIARY_NECTAR_CAP = 64;
 export const APIARY_HONEY_CAP = 12;

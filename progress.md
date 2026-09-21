@@ -2,6 +2,17 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Apiary selection now reconciles canonical hives, saved free/sleeping bees and
+  the live hive visuals omitted by normal serialization. Whole foraging queries
+  and visual bodies must stay with their hive; duplicate bees/orbs and stale or
+  mismatched ownership fail closed. One hundred cold captures preserve products,
+  clocks and exact encoded orbs. The runtime snapshot is detached/frozen and
+  host-only, without calling the mutating world serializer. A real orb-factory
+  bug (an absent owner emitted as nested undefined) is fixed without changing
+  serialized bytes.63focused/213expanded/static101/lint84PASS. R1's orb failures
+  and static100's negative-fixture type error are retained and corrected.
+  Global inventory, defense links, voxel ownership and event/resource authority
+  remain integration gates; this does not enable local-frame entry.
 - Non-settlement resident histories now resolve against canonical road events
   and guild recruitment books, using the same authored spawn definitions as the
   engine. Historical links do not drag distant roads/halls across a frame;

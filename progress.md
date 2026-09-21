@@ -2,6 +2,17 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Block chest selection/capture now checks whole single/double components, the
+  complete articulated lid sweep and compatible unopened pairing neighbors.
+  Rebased compound keys retain half-order: sorting them could exchange which
+  inventory half belongs to each block. Exact27/54 slots and outside state stay
+  unchanged through100cold captures. Shared original model pose/layout/1.08-radian
+  opening equations leave visuals unchanged; actual engine vertices pass all four
+  facings, both pair axes/orderings and101lid phases.22focused/6existing engine
+  chest tests/324expanded/static122/lint104PASS. Static121's negative-fixture
+  union typing error retained/corrected. Mobile/exhibit chest namespaces are
+  explicitly excluded from this BLOCK-only adapter; their holder/environment
+  selectors, authored loot and atomic authority remain separate gates.
 - Current creature ownership now reconciles with exact Prime/legendary history in
   the host preflight. Historical regional/site IDs are not current positions;
   deployed orb/body representations stay one unit. Missing/stale/duplicate owners

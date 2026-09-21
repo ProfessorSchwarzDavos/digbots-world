@@ -80,7 +80,8 @@ import {
   rotateBlockOffset,
   type BlockFacing,
 } from "./block-facing";
-import { CHEST_VISUAL, chestLatchCenters } from "./chest-model";
+import { CHEST_VISUAL, chestLatchCenters, chestLidRotation, chestModelPose } from "./chest-model";
+export { chestModelLayout } from "./chest-model";
 import { isDoubleTallGrass, planDoubleTallGrassRemoval } from "./tall-grass";
 import { planSubmergedFlora } from "./ecology";
 import { adventurePoiCandidateForChunk } from "./adventure-content";
@@ -1211,20 +1212,6 @@ export type FurnaceState = {
 
 export type ChestState = Array<InventorySlot | null>;
 
-export function chestModelLayout(positions: ReadonlyArray<readonly [number, number, number]>) {
-  const large = positions.length > 1;
-  const pairAlongX = large && positions.every((position) => position[2] === positions[0][2]);
-  // The local chest model is always wider left-to-right. Z-adjacent pairs are
-  // rotated as a unit so their lid never becomes a long front-to-back flap.
-    return {
-      large,
-      width: large ? 1.88 : 0.88,
-      depth: CHEST_VISUAL.bodyDepth,
-      lidWidth: large ? 1.92 : 0.92,
-      lidDepth: CHEST_VISUAL.lidDepth,
-    rotationY: large && !pairAlongX ? Math.PI / 2 : 0,
-  } as const;
-}
 export type ApiaryBlockState = ApiaryState | EmptyApiaryBlock;
 export type ApiaryHudState = {
   queen: ApiaryBee | null;
@@ -6001,7 +5988,7 @@ export class VoxelEngine {
     this.activeChestKey = chestKey;
     this.showChestModel(chestKey);
     this.chestOpenAmount = 1;
-    if (this.chestLidPivot) this.chestLidPivot.rotation.x = 1.08;
+    if (this.chestLidPivot) this.chestLidPivot.rotation.x = chestLidRotation(1);
     this.emitHud(true);
   }
 
@@ -12870,20 +12857,15 @@ export class VoxelEngine {
     const positions = blocks.map((key) => key.split(",").map(Number) as [number, number, number]);
     this.activeChestBlocks = positions;
     for (const [blockX, blockY, blockZ] of positions) this.world.setChestVisualHidden(blockX, blockY, blockZ, true);
-    const x = positions.reduce((sum, value) => sum + value[0], 0) / positions.length;
-    const y = positions[0][1];
-    const z = positions.reduce((sum, value) => sum + value[2], 0) / positions.length;
-    const layout = chestModelLayout(positions);
+    const facing = this.worldBlockFacing(positions[0][0], positions[0][1], positions[0][2]);
+    const { x, y, z, layout, rotationY } = chestModelPose(positions, facing);
     const bodyWidth = layout.width;
     const bodyDepth = layout.depth;
     const lidWidth = layout.lidWidth;
     const lidDepth = layout.lidDepth;
     const group = new THREE.Group();
     group.position.set(x, y, z);
-    const facing = this.worldBlockFacing(positions[0][0], positions[0][1], positions[0][2]);
-    const right = blockFacingRight(facing);
-    const pairMatchesFacing = positions.length < 2 || Math.abs((positions[1][0] - positions[0][0]) * right.z - (positions[1][2] - positions[0][2]) * right.x) < 0.001;
-    group.rotation.y = pairMatchesFacing ? blockFacingYaw(facing) : layout.rotationY;
+    group.rotation.y = rotationY;
     const wood = new THREE.MeshLambertMaterial({ map: this.world.atlas, color: 0xffffff });
     const base = new THREE.Mesh(createAtlasBlockGeometry(BlockId.Chest), wood);
     base.scale.set(bodyWidth, CHEST_VISUAL.bodyTop - CHEST_VISUAL.bodyBottom, bodyDepth);
@@ -12935,7 +12917,7 @@ export class VoxelEngine {
     this.chestOpenAmount += (target - this.chestOpenAmount) * (1 - Math.exp(-dt * 10));
     // Positive X raises the front edge around the rear hinge. The previous
     // sign drove the lid downward through the chest body.
-    this.chestLidPivot.rotation.x = this.chestOpenAmount * 1.08;
+    this.chestLidPivot.rotation.x = chestLidRotation(this.chestOpenAmount);
     if (!target && this.chestOpenAmount < 0.015) this.hideChestModel(true);
   }
 

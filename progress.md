@@ -2,6 +2,15 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Revision16 resumed under the director's current packet. Separate producer-derived
+  level10 petalfox fixture retains normal progression/max7.188; old r15 malformed
+  fixture and receipts are unchanged. New adapter tests cover levels1/10/50 at
+  full and damaged health; focused93PASS. Static125 found two test-only typing
+  issues, corrected; static126/lint108PASS. No runtime change or new build:
+  accepted build36/source3eed2e8 and lock identity reread. Normal browser attune,
+  deploy, white recall sparkles, native save and fresh cold inventory exercised;
+  exact saved-custody audit pending. Images personally reviewed. Work/CF6/r16-resume
+  owns current implementation ledger; fullCF6/CFV and local entry remain gated.
 - Revision15 bounded guest recall fix3eed2e8: actual host handler reproduced
   live-ID rejection and missing current encounter preflight/update. Reuses the
   solo custody planner before mutation;87focused tests pass twice, static124,

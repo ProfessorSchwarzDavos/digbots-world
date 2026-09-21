@@ -2,6 +2,16 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Non-settlement resident histories now resolve against canonical road events
+  and guild recruitment books, using the same authored spawn definitions as the
+  engine. Historical links do not drag distant roads/halls across a frame;
+  physical POIs, homes, social groups and active followers remain separately
+  enforced. The persistentPoiResident retention flag no longer invents a POI
+  for hatched pets or companions.44focused/159expanded/static99/lint81PASS,
+  including actual engine spawn/once-only/guest-refusal checks and100cold entity
+  captures. Static98's test-only physical/history union error retained/corrected.
+  Pure history resolution is not complete authored selection or atomic authority;
+  no new build/browser, handoff or local-entry claim.
 - Loot/spell adapters preserve unique-reward history, historical container
   ownership/theft data, optional absent/null spell fields and exact deadlines.
   Tidemend's actual16-block XZ cooldown keys remain canonical (shared history-grid

@@ -552,6 +552,7 @@ import {
   type LootContainerRecord,
 } from "./contextual-loot";
 import { normalizeRoadEventState, planRoadEvent, type RoadEdge, type RoadEventState } from "./surface-roads";
+import { GUILD_RECRUIT_COMPANIONS, ROAD_EVENT_RESIDENTS } from "./authored-residents";
 import { applyFirstPersonHeldItemOrientation, createAvatarHeldItemModel } from "./held-items";
 import { WORLD_DROP_VISUAL, worldDropUsesFilledOrb } from "./world-drop-body";
 import { PLAYER_HEIGHT, PLAYER_RADIUS, playerBodyHeight } from "./player-body";
@@ -22704,15 +22705,7 @@ export class VoxelEngine {
     mob.group.userData.guildEscortOriginX = mob.group.position.x;
     mob.group.userData.guildEscortOriginZ = mob.group.position.z;
     this.guildBook = recordGuildServiceFlag(this.guildBook, npc.guildId, `recruit:${npc.id}`);
-    const companionKinds: Readonly<Record<string, Readonly<{ kind: MobKind; name: string }>>> = Object.freeze({
-      "pella-reedshoe": { kind: "burrowbell", name: "Button" },
-      "sela-wakequiet": { kind: "currentweaver-eel", name: "Wakecoil" },
-      "bram-coalgrin": { kind: "warg", name: "Toll" },
-      "hessa-deepnote": { kind: "copper-mole", name: "Pipet" },
-      "rowan-mileglass": { kind: "petalfox", name: "Blankmile" },
-      "taff-ribbons": { kind: "taffy-hound", name: "Knot" },
-    });
-    const companion = companionKinds[npc.id];
+    const companion = Object.hasOwn(GUILD_RECRUIT_COMPANIONS, npc.id) ? GUILD_RECRUIT_COMPANIONS[npc.id] : undefined;
     const companionResidentId = `guild-companion:${npc.id}`;
     if (companion && !this.mobs.some((candidate) => candidate.residentId === companionResidentId && candidate.health > 0)) {
       const definition = MOB_DEFS[companion.kind];
@@ -25555,13 +25548,8 @@ export class VoxelEngine {
         mob.group.userData.roadEventId = anchorId;
         return mob;
       };
-      if (event.kind === "ambush") spawn("warg", "Roadside Prowler", true);
-      else if (event.kind === "creature-crossing") {
-        spawn("thimbledeer", "Crossing Thimbledeer");
-        spawn("thimbledeer", "Crossing Fawn");
-      } else if (event.kind === "caravan") spawn("taffalo", "Hearthroad Pack Taffalo");
-      else if (event.kind === "lost-traveler") spawn("hobbit-merchant", "Lost Wayfarer", false, "hobbits", "general");
-      else if (event.kind === "toll") spawn("goblin-worker", "Road Tollkeeper", false, "goblins", "general");
+      for (const resident of ROAD_EVENT_RESIDENTS[event.kind])
+        spawn(resident.kind, resident.name, resident.hostile, resident.factionId, resident.profession);
       const caption = event.kind === "ambush" ? "Movement breaks from the verge: a road ambush has found this crossing."
         : event.kind === "creature-crossing" ? "A small herd crosses the road; slowing down keeps the route calm."
           : event.kind === "caravan" ? "A pack caravan pauses at the waymark before continuing its route."

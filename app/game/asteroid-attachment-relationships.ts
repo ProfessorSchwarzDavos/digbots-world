@@ -2,6 +2,7 @@ import type { SavedCreature } from "./engine";
 import type { CelestialBounds, CelestialPoint } from "./celestial-terrain";
 import { MOB_DEFS } from "./mobs";
 import { SAILBOAT_CAPACITY } from "./boats";
+import { historicalResidentReference, type HistoricalResidentKind } from "./authored-residents";
 import { assertKnownAsteroidEntityFields, type AsteroidAttachedEntities } from "./asteroid-attachment-entities";
 import { asteroidAttachmentVolumeSide, asteroidCreatureFootprintSide } from "./asteroid-attachment-creature-footprint";
 import { asteroidSailboatFootprintSide } from "./asteroid-attachment-vehicle-footprint";
@@ -14,6 +15,9 @@ export type AsteroidEntityDependencyKind = "poi" | "legendary" | "prime" | "summ
  * alone cannot establish an owner's geometry, revision or finite custody. */
 export type AsteroidEntityDependency = Readonly<{
   kind: AsteroidEntityDependencyKind; id: string; attached: boolean;
+} | {
+  /** Shared canonical history, not a structure that must move with its NPC. */
+  kind: HistoricalResidentKind; id: string; attached: null;
 }>;
 export type AsteroidRelationshipActor = Readonly<{
   id: string; position: CelestialPoint; bounds: CelestialBounds;
@@ -192,18 +196,24 @@ export function asteroidEntityRelationshipPartition(frame: AsteroidAttachmentFra
   const dependencies = new Map<string, AsteroidEntityDependency>(), usedDependencies = new Set<string>();
   for (const dependency of context.dependencies) {
     identifier(dependency.id); const key = idKey(dependency.kind, dependency.id);
-    if (!dependencyKinds.has(dependency.kind) || typeof dependency.attached !== "boolean" || dependencies.has(key)) throw Error("Invalid or duplicate attachment dependency.");
+    const historical = dependency.kind === "road-event" || dependency.kind === "guild-companion";
+    if ((historical ? dependency.attached !== null : !dependencyKinds.has(dependency.kind as AsteroidEntityDependencyKind)
+      || typeof dependency.attached !== "boolean") || dependencies.has(key)) throw Error("Invalid or duplicate attachment dependency.");
     dependencies.set(key, dependency);
   }
   for (const creature of creatures.values()) {
     const side = sides.get(creature.id)!;
     const requireDependency = (kind: AsteroidEntityDependencyKind, id: string) => {
       identifier(id); const key = idKey(kind, id), dependency = dependencies.get(key);
-      if (!dependency) throw Error(`Unresolved attachment ${kind} dependency.`);
+      if (!dependency || dependency.attached === null) throw Error(`Unresolved attachment ${kind} dependency.`);
       usedDependencies.add(key); sameSide(side, dependency.attached, `${kind} dependency`);
     };
     if (creature.poiMarkerId !== undefined) requireDependency("poi", creature.poiMarkerId);
-    if (creature.persistentPoiResident && !creature.poiMarkerId) throw Error("Unresolved persistent POI resident.");
+    // This is also a retention/protection flag for hatched pets, apiary releases
+    // and guild companions. It is not an implicit, missing POI identity. Actual
+    // marker/home/guard/encounter references still require their own closure.
+    if (creature.persistentPoiResident !== undefined && typeof creature.persistentPoiResident !== "boolean")
+      throw Error("Invalid persistent creature retention flag.");
     if (creature.legendaryEncounterId !== undefined || creature.legendarySiteId !== undefined) {
       identifier(creature.legendaryEncounterId); identifier(creature.legendarySiteId);
       requireDependency("legendary", asteroidEntityCompoundId(creature.legendaryEncounterId, creature.legendarySiteId));
@@ -215,8 +225,13 @@ export function asteroidEntityRelationshipPartition(frame: AsteroidAttachmentFra
     }
     if (creature.settlementId != null) requireDependency("settlement", creature.settlementId);
     if (creature.residentId != null) {
-      identifier(creature.settlementId);
-      requireDependency("resident", asteroidEntityCompoundId(creature.settlementId, creature.residentId));
+      identifier(creature.residentId);
+      if (creature.settlementId != null) requireDependency("resident", asteroidEntityCompoundId(creature.settlementId, creature.residentId));
+      else {
+        const reference = historicalResidentReference(creature.residentId), key = idKey(reference.kind, reference.id);
+        if (dependencies.get(key)?.attached !== null) throw Error(`Unresolved attachment ${reference.kind} history.`);
+        usedDependencies.add(key);
+      }
     }
     if (creature.apiaryBee) requireDependency("apiary-bee", creature.apiaryBee.id);
     if (creature.attunedOrbId != null) requireDependency("orb", creature.attunedOrbId);

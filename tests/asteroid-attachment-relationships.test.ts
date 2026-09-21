@@ -50,6 +50,15 @@ test("historical owner alone does not force an idle creature to move with its ow
   const petState = { ...createPeelopState(4), tamed: true, ownerId: "outside", command: "stay" as const };
   assert.deepEqual(select({ ...fixture(), creatures: [{ ...creature(), petState, creatureOwnerId: "outside" }] }).creatureIds, [1]);
 });
+
+test("persistent retention alone does not invent a POI for a protected pet", () => {
+  const input = { ...fixture(), creatures: [{ ...creature(), persistentPoiResident: true }],
+    sleepingCreatures: [{ ...creature(2, 80), persistentPoiResident: true }] };
+  assert.deepEqual(select(input).creatureIds, [1]);
+  rejectsUnchanged({ ...input, creatures: [{ ...input.creatures[0], poiMarkerId: "actual-marker" }] }, context(), /Unresolved attachment poi/);
+  const malformed = structuredClone(input); Object.assign(malformed.creatures[0], { persistentPoiResident: "true" });
+  rejectsUnchanged(malformed, context(), /retention flag/);
+});
 test("configured follower links cannot cross either direction and missing owners fail closed", () => {
   for (const [x, ownerId] of [[0, "outside"], [80, "host"], [0, "disconnected"]] as const) {
     const petState = { ...createPeelopState(4), tamed: true, ownerId, command: "follow" as const };
@@ -102,7 +111,7 @@ test("creature mount cannot cross, refer to a missing creature or double-book a 
   const { input, ctx } = withBoat(); rejectsUnchanged(input, { ...ctx, actors: [{ ...actor(), mountedCreatureId: 1 }] }, /boat and a creature/);
   assert.deepEqual(select(fixture(), { ...context(), actors: [{ ...actor(), mountedCreatureId: 1 }, actor("outside", 80)] }).creatureIds, [1]);
 });
-const dependencies: readonly Readonly<{ name: string; patch: Partial<SavedCreature>; dependency: AsteroidEntityDependency }>[] = [
+const dependencies: readonly Readonly<{ name: string; patch: Partial<SavedCreature>; dependency: Extract<AsteroidEntityDependency, { attached: boolean }> }>[] = [
   { name: "legendary", patch: { legendaryEncounterId: LEGENDARY_ENCOUNTER_ORDER[0], legendarySiteId: "site" },
     dependency: { kind: "legendary", id: asteroidEntityCompoundId(LEGENDARY_ENCOUNTER_ORDER[0], "site"), attached: true } },
   { name: "poi", patch: { poiMarkerId: "marker", persistentPoiResident: true }, dependency: { kind: "poi", id: "marker", attached: true } },
@@ -152,7 +161,7 @@ test("unresolved outside authored identities also reject instead of orphaning un
 });
 test("malformed authored pairs, zero-volume actor bodies and false local aliases reject", () => {
   for (const patch of [{ residentId: "resident" }, { groundedSummonLineageId: "lineage" },
-    { legendarySiteId: "site" }, { persistentPoiResident: true }])
+    { legendarySiteId: "site" }])
     rejectsUnchanged({ ...fixture(), creatures: [{ ...creature(), ...patch }] }, context(), /identity|Unresolved/);
   rejectsUnchanged(fixture(), { ...context(), localActorId: "local" }, /Unresolved/);
   rejectsUnchanged(fixture(), { ...context(), actors: [{ ...actor(), bounds: { ...actor().bounds, minX: 0, maxX: 0 } }] }, /positive volume/);

@@ -94,6 +94,13 @@ axes against an exact whole-unit baseline, including live/sleep transfers and
 reordered boats. Loose drops require explicit ephemeral host lineage because
 the saved drop schema has no stable IDs; matching by item or array order is not
 safe. This capture helper is not a spatial selector or resource authorization.
+Physical creature bounds now share the engine's growth/rarity/contact-body and
+foot-plane calculations. Footprint checks cover the whole body and known roost,
+work and dragon-home anchors, including the dragon's X/Z guard area. Centered
+voxel bounds are `[min-0.5,max+0.5)`; whole bodies touching an edge may fit, while
+partial overlaps from either side reject. Authored/social/lead/passenger/agent
+relationship closure and the remaining fleet/physical-field selectors are still
+separate requirements; body containment alone does not admit an entity unit.
 
 Pressure zone IDs are derived from location and membership, so projections must
 remap their station/airlock references together. Gas, heat, installation identities,

@@ -2,6 +2,14 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Shared creature-body formulas now serve the engine and saved-record footprint
+  checks, preserving exact adult/baby/phenotype/prime/dragon/leviathan/shade
+  geometry and existing live override hooks. Whole contact-body AABBs and known
+  roost/work/home anchors reject either-direction boundary intrusion; dragon home
+  guards use their actual X/Z area, including diagonal outside-origin overlap.
+  Body-r1:136PASS, footprint-r1:23PASS, combined-r2:281PASS; static85/lint66PASS.
+  This is physical-footprint coverage, not complete authored/social/lead/agent/
+  fleet selection or local travel. Source-bound build/browser check is next.
 - Continuous frame bounds now match centered voxel ownership[min-0.5,max+0.5),
   correcting the old half-cell offset before engine integration. Retained
   centered-bounds-red-r1:0PASS/3FAIL proves left-edge valid points rejected and

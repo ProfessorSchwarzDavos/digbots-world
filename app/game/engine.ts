@@ -158,6 +158,7 @@ import { CREATURE_MOVES, CREATURE_REACTIONS, learnedMovesAtLevel } from "./creat
 import { creatureMaximumHealth, creatureOutputMultiplier, statsAtLevel } from "./creature-stats";
 import { aptitudesFromSeed, bondTierForPoints, isShinySeed, migrateCreatureProgression, offspringProgressionLegacy, phenotypeFromSeed, recordCreatureCaptureHistory, recordCreatureReleaseHistory, stableCreatureSeed, type CreatureProgressionV2, type LegacyCreatureProgression } from "./creature-progression";
 import { creatureAppearance } from "./creature-appearance";
+import { creatureBodyScale, creatureRuntimeBodyProfile, creatureRuntimeCollisionProfile, creatureFootY } from "./creature-body";
 import { applyCreatureRarityVisual, triggerCreatureInspectionShimmer, updateCreatureRarityVisual } from "./creature-rarity-visuals";
 import {
   PRIME_FORM_PROFILES,
@@ -332,7 +333,6 @@ import {
   aquaticSpawnBandForMob,
   fishSpawnTableForHabitat,
   foodLureResponseForMob,
-  husbandryAgeScale,
   naturalActivityAllowsSpawn,
   naturalGroupSizeForMob,
   naturalMicrohabitatAffinity,
@@ -391,11 +391,9 @@ import {
   chooseBirdPerch,
   chooseCreatureRoute,
   createCreatureRouteState,
-  creatureBodyMass,
   creatureDropAllowance,
   creatureKnockbackSpeed,
   creatureMeleeReach,
-  creatureCollisionProfile,
   findFollowerTeleportTarget,
   followerTravelSpeed,
   planFollowerFormation,
@@ -27027,51 +27025,18 @@ export class VoxelEngine {
   }
 
   mobBaseScale(mob: MobEntity) {
-    const base = mob.dragonState ? mob.dragonState.growthScale
-      : mob.leviathanGrowth ? mob.leviathanGrowth.growthScale
-        : mob.shadeState ? shadecrawlerScale(mob.shadeState)
-          : husbandryAgeScale(mob.kind, Boolean(mob.petState?.baby || mob.careState?.baby));
-    // Fully spawned and restored mobs always carry v2 progression. Keeping the
-    // geometry/collision query tolerant of a missing record protects legacy
-    // worlds and bounded simulation fixtures while their entity is migrating.
-    const appearanceScale = mob.progression ? creatureAppearance(mob.kind, mob.progression).sizeScale : 1;
-    const primeScale = mob.progression?.rarityForm === "prime" ? PRIME_FORM_PROFILES[mob.kind]?.sizeScale ?? 1 : 1;
-    return base * appearanceScale * primeScale;
+    return creatureBodyScale(mob);
   }
 
   mobCollisionProfile(mob: MobEntity) {
-    const profile = creatureCollisionProfile(
-      mob.definition,
-      this.mobBaseScale(mob),
-      Boolean(mob.dragonState?.stage === 1 || mob.petState?.baby || mob.careState?.baby || (mob.leviathanGrowth && mob.leviathanGrowth.stage !== "adult")),
-    );
-    if (!mob.dragonState || mob.dragonState.stage === 1) return profile;
-    const scale = this.mobBaseScale(mob);
-    return {
-      solid: true,
-      size: "large" as const,
-      radius: clamp(mob.definition.radius * scale * 0.72, 0.48, 2.8),
-      height: Math.max(0.8, mob.definition.height * scale),
-      visualScale: scale,
-    };
+    return creatureRuntimeCollisionProfile(mob.definition, mob, this.mobBaseScale(mob));
   }
 
   /** Physical contact includes small ground animals even when they are not hard blockers. */
   mobBodyProfile(mob: MobEntity) {
     const collision = this.mobCollisionProfile(mob);
     const scale = this.mobBaseScale(mob);
-    const radius = collision.solid
-      ? collision.radius
-      : clamp(mob.definition.radius * scale * 0.72, 0.12, 0.42);
-    const height = collision.solid
-      ? collision.height
-      : Math.max(0.16, mob.definition.height * scale);
-    return {
-      ...collision,
-      radius,
-      height,
-      mass: creatureBodyMass({ size: collision.size, radius, height }),
-    };
+    return creatureRuntimeBodyProfile(mob.definition, collision, scale);
   }
 
   mobTerrainClearAt(mob: MobEntity, x: number, groupY: number, z: number) {
@@ -27389,7 +27354,7 @@ export class VoxelEngine {
 
   /** Mob group origins vary by model; this converts one back to its common foot plane. */
   mobFootY(mob: MobEntity, groupY = mob.group.position.y) {
-    return groupY - mob.definition.footOffset + 0.5;
+    return creatureFootY(mob.definition, groupY);
   }
 
   mobDynamicObstaclesAt(mob: MobEntity, x: number, groupY: number, z: number, allowEscape = false) {

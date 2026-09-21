@@ -2,6 +2,17 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Final bounded verification was superseded by the director's clean drain.
+  The one serial invocation selected232 source test files and retained369 completed
+  passing subtests/0 failing subtests before deliberate termination; exit1 and no
+  final TAP summary mean INCOMPLETE, not a suite pass. Its full partial log/receipt
+  are preserved. A minimal declared synthetic petalfox-orb fixture was prepared
+  using canonical serializers; existing Field Wrench moved0→20, one provisioned
+  orb in0, all other source-save fields exact. No recall browser started, no new
+  source fix/build/official smoke, and recall/effects/save/cold remain unverified.
+  Preview stopped; exact test PIDs and Windows/WSL4338/4339 absent07:16:46–52UTC.
+  See CF6/final-verification/HANDOFF.md. Frozen continuation evidence unchanged;
+  full CF6/CFV incomplete, local entry closed, CF7 gated. Stop pending authority.
 - Accumulated runtimec183669 passes isolatedbuild35 KhFNHObg2pTOwXUTm7ImB,
   unchanged official35 and one normal/cold custody smoke. Both paused2500ms
   observations are exact; all18 original creature IDs/specimens/seeds and checked

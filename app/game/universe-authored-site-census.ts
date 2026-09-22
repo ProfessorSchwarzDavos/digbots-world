@@ -20,7 +20,8 @@ export function observeUniverseAuthoredSites(snapshot: UniverseCreatureCustodySn
     throw Error("Authored-site census differs from its repository owner.");
   const fields = validateAsteroidFields(snapshot.universe.fields.asteroidFields, universe);
   const catalog = readAsteroidAttachmentCatalog(snapshot.universe.attachmentOwners, fields, universe);
-  const ids = new Set<string>(), locations: { runtime: boolean; census: ReturnType<typeof observeAsteroidAuthoredSites> }[] = [];
+  const ids = new Set<string>(), locations: { runtime: boolean; census: ReturnType<typeof observeAsteroidAuthoredSites>;
+    persistedCensus: ReturnType<typeof observeAsteroidAuthoredSites> }[] = [];
   for (const row of snapshot.locations) {
     const descriptor = row.descriptor, id = descriptor.id;
     if (parseLocationId(id).universeId !== universe || descriptor.universeId !== universe || ids.has(id)
@@ -41,7 +42,7 @@ export function observeUniverseAuthoredSites(snapshot: UniverseCreatureCustodySn
     }
     const runtime = id === live.locationId;
     if (runtime && descriptor.revision !== live.locationRevision) throw Error("Stale authored-site location revision.");
-    locations.push({ runtime, census: runtime ? observeAsteroidAuthoredSites(id, live.source) : persisted });
+    locations.push({ runtime, persistedCensus: persisted, census: runtime ? observeAsteroidAuthoredSites(id, live.source) : persisted });
   }
   if (!ids.has(live.locationId)) throw Error("Authored-site current location is missing.");
   for (const id of Object.keys(fields.fields)) if (!ids.has(id)) throw Error("Authored-site field lacks its repository location.");

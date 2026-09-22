@@ -1,5 +1,8 @@
 import * as THREE from "three";
 import { blocksSky } from "./environment-queries";
+import { AUTHORED_GENERATION_RULE_VERSION, generatesLegacyAuthoredSites, isEmptyAuthoredOrbitFactory } from "./authored-generation-policy";
+import { encodeAttachmentSource } from "./attachment-source-preimage";
+import { freezeUniverseJson } from "./universe-json";
 import { FURNACE_FRONT_PLATE } from "./custody-block-body";
 import { FENCE_POST_TOP, FENCE_GATE_TOP, fenceConnectsTo } from "./fence-body";
 import { stationPanelFace } from "./station-kit";
@@ -764,6 +767,7 @@ type GeometryBucket = {
 type ChunkGenerationStage = "terrain" | "caves" | "features" | "finalize" | "complete";
 
 type ChunkGenerationTask = {
+  generationSource: string | null;
   key: string;
   cx: number;
   cz: number;
@@ -2926,6 +2930,9 @@ export function createBlockAtlas() {
 }
 
 export class ChunkWorld {
+  #generationBaseline: { source: string; terrain: CelestialTerrain | null; epoch: number } | null = null;
+  #chunkGenerationSources = new WeakMap<Chunk, string>();
+  #generationContamination: string[] = [];
   celestialTerrain: CelestialTerrain | null = null;
   celestialGeneration: CelestialGenerationState = normalizeCelestialGenerationState();
   /** Local derived-system invalidation. Observers do not own or serialize blocks. */
@@ -3160,6 +3167,9 @@ export class ChunkWorld {
     this.terrainGenerationPipeline = new TerrainGenerationPipeline();
     this.terrainBufferPipeline = new TerrainBufferPipeline();
     this.disposeChunks();
+    this.#generationBaseline = null;
+    this.#chunkGenerationSources = new WeakMap();
+    this.#generationContamination = [];
     // Disposal caches the outgoing payload under its original owner and edits.
     this.locationScope = nextScope;
     this.generationQueue = [];
@@ -3236,6 +3246,7 @@ export class ChunkWorld {
     this.celestialTerrain = nextTerrain;
     this.celestialGeneration = nextCelestialGeneration;
     this.generationOptions = normalizeWorldGenerationOptions(generationOptions);
+    this.#generationBaseline = { source: this.generationProducerSource(), terrain: nextTerrain, epoch: nextScope.epoch };
     this.chunkMemoryCache.clear();
     this.playerChunkX = Number.NaN;
     this.playerChunkZ = Number.NaN;
@@ -3259,6 +3270,51 @@ export class ChunkWorld {
 
   blockFacingAt(x: number, y: number, z: number): BlockFacing {
     return this.blockFacings.get(`${Math.trunc(x)},${Math.trunc(y)},${Math.trunc(z)}`) ?? BLOCK_FACING_NORTH;
+  }
+
+  private generationProducerSource() {
+    return JSON.stringify(encodeAttachmentSource({ ruleVersion: AUTHORED_GENERATION_RULE_VERSION,
+      generatorVersion: GENERATOR_VERSION, seed: this.seedText,
+      locationId: this.locationScope.locationId,
+      options: this.generationOptions, celestialGeneration: this.celestialGeneration,
+      terrainVersion: this.celestialTerrain?.version ?? null }));
+  }
+
+  /** Compact producer token for derived chunks. A never-reset or directly
+   * changed World cannot mint a supported provenance record. */
+  snapshotGenerationProducer(): string | null {
+    const baseline = this.#generationBaseline;
+    if (!baseline || baseline.terrain !== this.celestialTerrain || baseline.epoch !== this.locationScope.epoch) return null;
+    const current = this.generationProducerSource();
+    return current === baseline.source ? current : null;
+  }
+
+  /** Actual runtime premise only, not generated absence from a location label.
+   * Repository descriptors/raw ledgers and eventual atomic authority must still
+   * be joined and rechecked. Query-only settlement caches are conservatively
+   * refused too; they are never silently promoted to materialized owners. */
+  snapshotEmptyAuthoredOrbitGeneration() {
+    const source = this.snapshotGenerationProducer(), terrain = this.celestialTerrain;
+    if (!source || !isEmptyAuthoredOrbitFactory(terrain) || parseLocationId(this.locationScope.locationId).kind !== "orbit")
+      throw Error("No reset-established empty orbital generation proof.");
+    if (this.#generationContamination.length) throw Error("Unresolved cached or worker authored generation provenance.");
+    if (this.activeGenerationTask || this.generationTasks.size || this.generationQueue.length || this.generationQueued.size
+      || this.pendingWorkerGeneration.size || this.completedWorkerGeneration.length || this.pendingPersistentChunks.size)
+      throw Error("Finish pending terrain generation before empty-site inspection.");
+    if (this.structureMarkers.size || this.settlementPlans.size || this.surfaceRoadGraphCache.size || this.surfaceRoadCache.size
+      || this.settlementCandidateCache.size || this.settlementValidatedCandidateCache.size || this.safeCaveEntranceCache.size
+      || this.settlementIndex.cacheSize)
+      throw Error("Unresolved authored generation precursor cache.");
+    const chunks = [...this.chunks].map(([key, chunk]) => {
+      if (key !== chunk.key || key !== chunkKey(chunk.cx, chunk.cz) || this.#chunkGenerationSources.get(chunk) !== source)
+        throw Error("Loaded chunk lacks exact authored generation provenance.");
+      return key;
+    });
+    const { contains: _contains, column: _column, block: _block, ...descriptor } = terrain;
+    void _contains; void _column; void _block;
+    return freezeUniverseJson(structuredClone({ source, runtimeLocationEpoch: this.locationLoadEpoch,
+      scope: this.locationScope, seed: this.seedText, options: this.generationOptions,
+      celestialGeneration: this.celestialGeneration, descriptor, chunks: chunks.sort() }));
   }
 
   setBlockFacing(x: number, y: number, z: number, facing: BlockFacing, immediate = false) {
@@ -3804,7 +3860,7 @@ export class ChunkWorld {
     // Location v1 could label outgoing orbit voxels as incoming surface terrain.
     // Ignore those disposable records without deleting caches or durable saves.
     const expansion = this.celestialGeneration.expansionLevel ? `|celestial-expansion:${this.celestialGeneration.expansionLevel}` : "";
-    return `terrain-location-v2|${this.locationScope.locationId}|g${GENERATOR_VERSION}|${this.seedText}|${JSON.stringify(this.generationOptions)}|${key}|${editHalo}${expansion}`;
+    return `terrain-location-v3|authored:${AUTHORED_GENERATION_RULE_VERSION}|celestial:${this.celestialTerrain?.version ?? "home"}|${this.locationScope.locationId}|g${GENERATOR_VERSION}|${this.seedText}|${JSON.stringify(this.generationOptions)}|${key}|${editHalo}${expansion}`;
   }
 
   private generationNamespace(key: string) { return `${this.locationLoadEpoch}|${this.chunkCacheKey(key)}`; }
@@ -3823,6 +3879,7 @@ export class ChunkWorld {
   private cachedChunkData(chunk: Chunk): CachedChunkData {
     return {
       cacheKey: this.chunkCacheKey(chunk.key),
+      generationSource: this.#chunkGenerationSources.get(chunk) ?? null,
       key: chunk.key,
       cx: chunk.cx,
       cz: chunk.cz,
@@ -3841,6 +3898,10 @@ export class ChunkWorld {
 
   private restoreCachedChunk(data: CachedChunkData) {
     if (data.cacheKey !== this.chunkCacheKey(data.key) || this.chunks.has(data.key)) return undefined;
+    if (data.key !== chunkKey(data.cx, data.cz)) {
+      if (isEmptyAuthoredOrbitFactory(this.celestialTerrain)) this.#generationContamination.push(`cache-coordinates:${data.key}`);
+      return undefined;
+    }
     const chunk: Chunk = {
       key: data.key,
       cx: data.cx,
@@ -3861,6 +3922,10 @@ export class ChunkWorld {
     };
     chunk.group.position.set(chunk.cx * CHUNK_SIZE, 0, chunk.cz * CHUNK_SIZE);
     this.chunks.set(chunk.key, chunk);
+    const producer = this.snapshotGenerationProducer();
+    if (producer && data.generationSource === producer && (!isEmptyAuthoredOrbitFactory(this.celestialTerrain) || data.structureMarkers.length === 0))
+      this.#chunkGenerationSources.set(chunk, producer);
+    else if (isEmptyAuthoredOrbitFactory(this.celestialTerrain)) this.#generationContamination.push(`cache:${data.key}`);
     this.group.add(chunk.group);
     this.freezeTerrainTransform(chunk.group);
     this.restoreStructureMarkerEntries(data.structureMarkers);
@@ -3889,9 +3954,8 @@ export class ChunkWorld {
       if (ownerEpoch !== this.locationLoadEpoch) return;
       this.pendingPersistentChunks.delete(cacheKey);
       if (cacheKey !== this.chunkCacheKey(key) || this.chunks.has(key)) return;
-      if (data) {
+      if (data && this.restoreCachedChunk(data)) {
         this.persistentCacheHits += 1;
-        this.restoreCachedChunk(data);
         return;
       }
       this.persistentCacheMisses += 1;
@@ -4022,7 +4086,8 @@ export class ChunkWorld {
           this.renderDistance + 1,
           radialStreaming,
         );
-        if (completed.namespace !== this.generationNamespace(completed.key) || !retained || this.chunks.has(completed.key)) {
+        if (completed.namespace !== this.generationNamespace(completed.key) || completed.key !== chunkKey(completed.cx, completed.cz)
+          || !retained || this.chunks.has(completed.key)) {
           this.generationQueued.delete(completed.key);
           this.generationEnqueuedAt.delete(completed.key);
           this.staleWorkerGeneration += 1;
@@ -4048,6 +4113,10 @@ export class ChunkWorld {
         };
         chunk.group.position.set(chunk.cx * CHUNK_SIZE, 0, chunk.cz * CHUNK_SIZE);
         this.chunks.set(chunk.key, chunk);
+        const producer = this.snapshotGenerationProducer();
+        if (producer && completed.generationSource === producer && (!isEmptyAuthoredOrbitFactory(this.celestialTerrain) || completed.structureMarkers.length === 0))
+          this.#chunkGenerationSources.set(chunk, producer);
+        else if (isEmptyAuthoredOrbitFactory(this.celestialTerrain)) this.#generationContamination.push(`worker:${completed.key}`);
         this.group.add(chunk.group);
         this.freezeTerrainTransform(chunk.group);
         this.restoreStructureMarkerEntries(completed.structureMarkers);
@@ -4086,6 +4155,13 @@ export class ChunkWorld {
           request,
           (result) => {
             if (request.namespace !== this.generationNamespace(key)) { this.staleWorkerGeneration += 1; return; }
+            if (result.namespace !== request.namespace || result.key !== key || result.cx !== request.cx || result.cz !== request.cz) {
+              this.#generationContamination.push(`worker-result:${key}`);
+              this.pendingWorkerGeneration.delete(key);
+              this.generationQueued.delete(key);
+              this.staleWorkerGeneration += 1;
+              return;
+            }
             this.completedWorkerGeneration.push(result);
           },
           () => {
@@ -5165,6 +5241,7 @@ export class ChunkWorld {
       sample,
       aquiferColumns,
       aquiferColumn,
+      generationSource: this.snapshotGenerationProducer(),
       stage: "terrain",
       nextLocalX: 0,
       nextSection: 0,
@@ -5298,12 +5375,12 @@ export class ChunkWorld {
       return undefined;
     }
     if (task.stage === "caves") {
-      if (!this.celestialTerrain && this.generationOptions.profile === "world-below-v15") this.carveGraphCaves(task.chunk, task.sample);
+      if (generatesLegacyAuthoredSites(this.celestialTerrain) && this.generationOptions.profile === "world-below-v15") this.carveGraphCaves(task.chunk, task.sample);
       task.stage = "features";
       return undefined;
     }
     if (task.stage === "features") {
-      if (!this.celestialTerrain) this.generateFeatures(task.chunk, task.sample);
+      if (generatesLegacyAuthoredSites(this.celestialTerrain)) this.generateFeatures(task.chunk, task.sample);
       task.stage = "finalize";
       return undefined;
     }
@@ -5344,6 +5421,8 @@ export class ChunkWorld {
     task.nextSection = endSection;
     if (task.nextSection < SECTION_COUNT) return undefined;
     this.chunks.set(key, chunk);
+    const producer = this.snapshotGenerationProducer();
+    if (producer && task.generationSource === producer) this.#chunkGenerationSources.set(chunk, producer);
     this.group.add(chunk.group);
     this.freezeTerrainTransform(chunk.group);
     this.generationQueued.delete(key);
@@ -5885,6 +5964,7 @@ export class ChunkWorld {
   }
 
   generateFeatures(chunk: Chunk, sample: (x: number, z: number) => ColumnSample) {
+    if (!generatesLegacyAuthoredSites(this.celestialTerrain)) return;
     const minX = chunk.cx * CHUNK_SIZE;
     const minZ = chunk.cz * CHUNK_SIZE;
     const inside = (x: number, z: number) => x >= minX && x < minX + CHUNK_SIZE && z >= minZ && z < minZ + CHUNK_SIZE;

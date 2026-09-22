@@ -3,6 +3,8 @@ import { TYPESCRIPT_TERRAIN_CACHE_DATABASE } from "./edition";
 
 export type CachedChunkData = Readonly<{
   cacheKey: string;
+  /** Exact reset-established producer contract. Older caches have no proof. */
+  generationSource?: string | null;
   key: string;
   cx: number;
   cz: number;

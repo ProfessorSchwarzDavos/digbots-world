@@ -976,6 +976,7 @@ import { prepareWaygridCapacity, waygridBlockCapacity, type WaygridCapacityPlan 
 import { configuredWaygridPowerSource } from "./waygrid-power";
 import { selectUniverseWaygridOwnership } from "./universe-waygrid-ownership";
 import { observeUniverseAuthoredSites } from "./universe-authored-site-census";
+import { inspectEmptyAuthoredSiteClearance } from "./empty-authored-site-clearance";
 import {
   canRideReedstrider,
   createPeelopSheddingState,
@@ -22435,6 +22436,31 @@ export class VoxelEngine {
     // Do not apply raw-data depth/node limits again to the expanded tag tree.
     if (JSON.stringify(source) !== JSON.stringify(this.snapshotAttachmentSource(source.physical.frame.asteroidId)))
       throw Error("Stale attachment source.");
+  }
+
+  /** Read-only supported-generation prerequisite. The full global physical
+   * source remains mandatory; this does not enable entry or reserve resources. */
+  async snapshotEmptyAuthoredAttachmentUniverseSource(asteroidId: string) {
+    const world = this.world, storage = this.worldStorage;
+    const observe = () => {
+      if (this.world !== world || this.worldStorage !== storage) throw Error("Empty-site runtime owner changed.");
+      // Use the concrete producer and its private reset/cache brands, not an
+      // overridable fixture method or a caller-supplied celestial flag.
+      const generation = ChunkWorld.prototype.snapshotEmptyAuthoredOrbitGeneration.call(world);
+      const state = { roadEvents: Object.fromEntries(this.roadEvents), activatedStructureMarkers: [...this.activatedStructureMarkers],
+        startingSettlementId: this.startingSettlementId, surfaceRoadGraph: world.serializeSurfaceRoadGraph(),
+        primeEncounters: Object.fromEntries(this.primeEncounters), legendaryEncounters: Object.fromEntries(this.legendaryEncounters),
+        contextualLoot: { schema: 1, acquiredUniqueIds: [...this.acquiredLootUniqueIds], containers: Object.fromEntries(this.contextualLootContainers) } };
+      return freezeUniverseJson(structuredClone({ generation, state, options: this.worldOptions }));
+    };
+    const before = observe(), scoped = await this.snapshotScopedAttachmentUniverseSource(asteroidId);
+    if (JSON.stringify(encodeAttachmentSource(before)) !== JSON.stringify(encodeAttachmentSource(observe())))
+      throw Error("Empty-site generation or authored source changed during repository observation.");
+    const clearance = inspectEmptyAuthoredSiteClearance(scoped.repository, before.generation, {
+      frame: scoped.runtime.physical.frame, world: scoped.runtime.physical.context.world,
+      sites: scoped.runtime.authoredSiteSource, state: before.state, options: before.options,
+    });
+    return freezeUniverseJson({ scoped, clearance });
   }
 
   /** Join active runtime and all persisted owners without saving or opening

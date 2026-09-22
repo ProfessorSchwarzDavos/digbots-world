@@ -16,6 +16,7 @@ export type TerrainGenerationRequest = Readonly<{
 
 export type TerrainGenerationResult = Readonly<{
   namespace: string;
+  generationSource?: string | null;
   key: string;
   cx: number;
   cz: number;
@@ -31,7 +32,7 @@ export type TerrainGenerationResult = Readonly<{
   structureMarkers: readonly (readonly [string, StructureMarker])[];
 }>;
 
-export const TERRAIN_WORKER_PROTOCOL = 2;
+export const TERRAIN_WORKER_PROTOCOL = 3;
 type WorkerResponse = Readonly<{ type: "ready"; protocol: number }>
   | Readonly<{ type: "result"; id: number; result: TerrainGenerationResult }>
   | Readonly<{ type: "task-error"; id: number; message: string }>;

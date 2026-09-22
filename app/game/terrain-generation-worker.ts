@@ -20,6 +20,7 @@ self.onmessage = (event: MessageEvent<Request>) => {
     ));
     const result = {
     namespace: request.namespace,
+    generationSource: world.snapshotGenerationProducer(),
     key: chunk.key,
     cx: chunk.cx,
     cz: chunk.cz,

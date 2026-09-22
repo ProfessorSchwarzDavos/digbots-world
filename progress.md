@@ -2,6 +2,18 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Revision17 empty-site prerequisite now joins the actual reset-established
+  orbital generator, branded chunks, cache rule/worker protocol3 and canonical
+  saved descriptor/profile/field/frame to persisted AND live global site records.
+  All unresolved owners/reference history remain refused; no transfer opens.
+  Review corrected non-generation-option false refusal and raw repository loss
+  before decoding. Generation35PASS/global28PASS; initial fixture failures and
+  test-only static failure retained. Expanded89PASS/static170/lint137PASS;
+  actual engine await guards and native4PASS cover current day-length changes,
+  raw IDB undefined/-0 refusal with exact record-value preservation, and cold
+  reload. Review confirmed both fixes. Native scope is a synthetic paid-flight
+  fixture plus actual generation/storage, not normal journey/transfer. Exact
+  production build/browser regression follows this bounded checkpoint.
 - Revision16 authored-site observation now retains all instantiated saved/live
   settlement and merchant owners and raw active/sleeping site references across
   locations, including unloaded/bodyless owners. It is an unresolved census,

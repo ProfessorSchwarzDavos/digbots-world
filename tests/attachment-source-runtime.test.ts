@@ -17,6 +17,7 @@ import type { ChunkEditSave } from "../app/game/world";
 import { captureIntoOrb, captureOrbInventorySlot, createEmptyCaptureOrb } from "../app/game/capture-orbs";
 import { createPrimeEncounterState, planPrimeEncounter, transferPrimeEncounterCustody } from "../app/game/creature-rarity";
 import { prepareWaygridCapacity } from "../app/game/waygrid-capacity";
+import { emptyAuthoredSiteFixture } from "./empty-authored-site-fixtures";
 
 const additionalMaps = ["saplings", "veinRegrowth", "roadEvents", "golemForges", "alchemyStands", "distilleries", "sugarworks",
   "archiveShelves", "tomeDisplays", "settlements", "merchants", "liquidCells", "ecologySectors", "multiplayerPlayerProgressions",
@@ -57,6 +58,36 @@ function fixture() {
   }) as VoxelEngine;
   return { engine, asteroid, pressure, edits };
 }
+
+test("actual engine empty-site join uses branded World and refuses same-revision changes across repository await", async () => {
+  for (const fault of ["none", "seed", "queued-generation", "live-merchant", "persisted-merchant", "facade"] as const) {
+    const { engine, asteroid } = fixture(), f = emptyAuthoredSiteFixture("runtime-complete-source");
+    try {
+      let reads = 0;
+      const storage = { currentStamp: f.world.locationScope, currentManifest: f.repository.snapshot.manifest,
+        currentCatalog: f.repository.snapshot.catalog, snapshotAttachmentSource: async () => {
+          reads++;
+          if (fault === "seed") f.world.seedText = "same-revision-changed";
+          if (fault === "queued-generation") f.world.generationQueue.push({ cx: 0, cz: 0, distance: 0 });
+          if (fault === "live-merchant") engine.merchants.set("new-owner", { schema: 1, id: "new-owner", authorityId: "host", revision: 0, recentEventIds: [] } as never);
+          if (fault === "persisted-merchant") Object.assign(f.repository.snapshot.locations[0].fields,
+            { merchants: { bodyless: { schema: 1, id: "bodyless", authorityId: "host", revision: 0, recentEventIds: [] } } });
+          if (fault === "facade") Object.assign(engine, { worldStorage: { ...storage } });
+          return f.repository;
+        } };
+      Object.assign(engine, { world: f.world, worldStorage: storage, worldOptions: f.live.options, startingSettlementId: null,
+        asteroidFields: { schema: 1, fields: { [f.world.locationScope.locationId]: f.live.world.registry } } });
+      if (fault === "none") {
+        const result = await engine.snapshotEmptyAuthoredAttachmentUniverseSource(asteroid.id);
+        assert.equal(result.clearance.kind, "proven-empty-authored-sites"); assert(Object.isFrozen(result));
+      } else await assert.rejects(() => engine.snapshotEmptyAuthoredAttachmentUniverseSource(asteroid.id),
+        /changed|reset-established|pending terrain|Unresolved global/);
+      assert.equal(reads, 1);
+    } finally { f.world.dispose(); }
+  }
+  const fake = fixture();
+  await assert.rejects(() => fake.engine.snapshotEmptyAuthoredAttachmentUniverseSource(fake.asteroid.id), { name: "TypeError" });
+});
 
 test("actual full source refuses orphan architecture and observes exact paired cells", () => {
   const { engine, asteroid, edits } = fixture();

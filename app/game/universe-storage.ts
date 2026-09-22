@@ -360,7 +360,13 @@ export class UniverseStorage {
     });
     // Keep the raw IDB observation, not merely decoded/normalized JSON. Routine
     // same-owner epoch-preserving lease renewal is deliberately separate.
-    const source = encodeAttachmentSource(EXPORT_STORES.map(store => [store, observed.records.get(store)]));
+    const raw = EXPORT_STORES.map(store => [store, observed.records.get(store)]);
+    const source = encodeAttachmentSource(raw);
+    // decode/verify uses canonical JSON. A read-only attachment proposal must
+    // refuse before that boundary if it would erase own undefined, negative
+    // zero or other raw evidence. Ordinary loading/recovery is unchanged.
+    if (JSON.stringify(source) !== JSON.stringify(encodeAttachmentSource(cloneUniverseJson(raw))))
+      throw new UniverseStorageError("corrupt", "Attachment repository raw data requires lossy normalization.");
     const snapshot = await this.decode(observed.records, id);
     if (snapshot.manifest.deletedAt !== null || snapshot.journals.some(journal => journal.state === "prepared"))
       throw new UniverseStorageError("conflict", "Finish pending universe transactions before attachment source capture.");

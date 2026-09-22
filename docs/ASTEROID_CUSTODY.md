@@ -41,8 +41,9 @@ Import remaps the universe identity and retires old command epochs without
 refilling voxels or changing claims.
 
 Persisted field expansion levels also control main-thread and worker terrain
-generation. Expanded chunks use distinct cache identities, while level-zero and
-Home cache keys remain compatible. Public host snapshots carry only the bounded
+generation. Expanded chunks use distinct cache identities. The authored-rule
+cache namespace now versions all terrain, including Home; older derived entries
+are misses and are rebuilt without deleting saved worlds. Public host snapshots carry only the bounded
 generation level, never the private registry, discoveries or claims. Missing
 legacy generation context means level zero; malformed context rejects before a
 guest discards its active runtime. Generation-worker protocol 2 prevents an older
@@ -424,6 +425,30 @@ history is classified separately, not converted into physical site geometry.
 An empty census means only no records in these observed families, never full
 generated-site clearance. Whole authored generation footprints, ownership links
 and environment/transfer admission are still required.
+
+The separate empty-site prerequisite binds the real reset-established orbital
+generator to the repository's current location, generator18 source/profile,
+normalized generation options, terrain1, field and exact asteroid frame. Every
+loaded chunk must retain its matching producer provenance; pending generation,
+unknown cached/worker producers, authored precursors and restored site markers
+refuse. Worker protocol3 and the authored-rule cache namespace prevent reuse of
+older derived contracts. These tokens identify producers, not cryptographic
+authentication of arbitrarily forged cache contents.
+
+Both persisted and live site views are checked globally, so an empty live map
+cannot conceal an inactive, bodyless, off-frame or sleeping-only owner. Raw IDB
+records must survive canonical JSON losslessly before decoding; otherwise this
+read-only inspection refuses without changing the save. Unknown extensions,
+synthetic or unsupported descriptors, nonempty road/encounter/site-loot owners,
+and resident history not yet joined to its producer also refuse. Existing
+once-only road/activation/origin history retains its explicit non-spatial
+semantics. Non-generation setting changes such as day length remain supported.
+
+This is not an entry grant or write lock. Complete environment/relationship
+closure, authenticated membership and consent, simulation pause, finite resource
+reservation, exact atomic revalidation, entry AND return remain required.
+Positive authored-site support remains a separate mandatory CF6 obligation;
+rejecting it here is an interim safety boundary, not completion.
 
 The repository checkpoint also has a production-browser regression using an
 explicitly admitted synthetic fixture: ordinary Continue, paid survey, Save &

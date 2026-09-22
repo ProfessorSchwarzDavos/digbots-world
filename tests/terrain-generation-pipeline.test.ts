@@ -55,11 +55,13 @@ test("a failed generation worker releases its job to the synchronous fallback", 
 
 test("an old worker cannot silently ignore expanded generation context", () => {
   withFakeBrowserWorker(() => {
-    const pipeline = new TerrainGenerationPipeline(1, 0);
-    FailingWorker.instances[0].ready(1);
-    assert.equal(pipeline.supported, false);
-    assert.match(pipeline.diagnostics().lastError!.message, /incompatible/);
-    pipeline.dispose();
+    for (const oldProtocol of [1, 2]) {
+      const pipeline = new TerrainGenerationPipeline(1, 0);
+      FailingWorker.instances.at(-1)!.ready(oldProtocol);
+      assert.equal(pipeline.supported, false);
+      assert.match(pipeline.diagnostics().lastError!.message, /incompatible/);
+      pipeline.dispose();
+    }
   });
 });
 

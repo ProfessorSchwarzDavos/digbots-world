@@ -81,7 +81,7 @@ test("v1 poisoned derived cache is rejected without deleting its record", () => 
     const currentKey = internals(world).chunkCacheKey("2,0");
     const poisoned = { ...empty, cacheKey: currentKey.replace(/^terrain-location-v\d+\|/, "terrain-location-v1|") };
     const retained = structuredClone(poisoned);
-    assert.match(currentKey, /^terrain-location-v2\|/);
+    assert.match(currentKey, /^terrain-location-v3\|authored:1\|celestial:/);
     assert.equal(internals(world).restoreCachedChunk(poisoned), undefined);
     assert.deepEqual(poisoned, retained);
     assert.equal(writes.length, 1, "only ordinary outgoing cache write occurred");

@@ -108,7 +108,8 @@ test("actual full scoped source observes remote history before physical selectio
   assert.equal(JSON.stringify(engine.inventory), before); assert(!Object.isFrozen(repository));
   assert(Object.isFrozen(result.runtime)); assert.equal(engine.primeEncounters.size, 0);
   assert.equal(result.waygrid.bindings.length, 0); assert.equal(result.waygrid.ownership.starters.length, 2);
-  for (const fault of ["inventory", "pressure", "environment", "catalog", "catalogUndefined", "architecture", "effects", "facade", "waygrid"] as const) {
+  assert.equal(result.authoredSites.locations.length, 2); assert.deepEqual(result.authoredSites.unresolvedLocations, []);
+  for (const fault of ["inventory", "pressure", "environment", "catalog", "catalogUndefined", "architecture", "effects", "facade", "waygrid", "settlement", "merchant"] as const) {
     const priorInventory = engine.inventory, priorHealth = engine.health, priorCatalog = storage.currentCatalog;
     const oldInstallation = pressure.nextInstallation;
     const priorVault = engine.digitalItemVault;
@@ -126,10 +127,13 @@ test("actual full scoped source observes remote history before physical selectio
       if (fault === "effects") engine.projectiles.push({} as never);
       if (fault === "facade") Object.assign(engine, { worldStorage: { ...storage } });
       if (fault === "waygrid") engine.digitalItemVault = { ...priorVault, cells: [] };
+      if (fault === "settlement") engine.settlements.set("new-site", { schema: 1, id: "new-site", authorityId: "host", revision: 0, recentEventIds: [] } as never);
+      if (fault === "merchant") engine.merchants.set("trader", { schema: 1, id: "trader", authorityId: "host", revision: 0, recentEventIds: [], gold: 1 } as never);
     };
     await assert.rejects(engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /changed during repository|active effects/, fault);
     engine.inventory = priorInventory; engine.health = priorHealth; pressure.nextInstallation = oldInstallation;
     engine.digitalItemVault = priorVault;
+    engine.settlements.clear(); engine.merchants.clear();
     for (const key of Object.keys(edits)) delete edits[key];
     storage.currentCatalog = priorCatalog; engine.projectiles.length = 0; Object.assign(engine, { worldStorage: storage });
   }

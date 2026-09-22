@@ -32,7 +32,7 @@ test("actual road runtime retains spawn order, options and once-only canonical e
     ROAD_EVENT_RESIDENTS[eventKind].forEach((expected, i) => {
       assert.equal(spawned[i].kind, expected.kind); assert.equal(spawned[i].hostile, expected.hostile ?? false);
       assert.deepEqual(spawned[i].position.toArray(), [3, 40 + MOB_DEFS[expected.kind].footOffset, 3]);
-      assert.deepEqual(spawned[i].options, { name: expected.name, factionId: expected.factionId ?? null,
+      assert.deepEqual(spawned[i].options, { newSpecimen: true, name: expected.name, factionId: expected.factionId ?? null,
         profession: expected.profession ?? null, residentId: `road-event:${anchorId}`, persistentPoiResident: false });
       assert.deepEqual(spawned[i].group.userData, { roadEventId: anchorId });
     });

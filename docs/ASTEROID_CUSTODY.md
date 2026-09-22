@@ -412,6 +412,19 @@ Conservative all-phase model spheres may refuse an
 installation very close to the frame boundary. There is no new local-entry UI,
 save mutation or travel permission in this preflight.
 
+The authored-site observation inventories every saved instantiated settlement and
+merchant plus every active/sleeping body reference across repository locations.
+Current raw ledgers replace only their own location after the persisted row is
+checked. It uses neither loaded marker caches nor coordinates parsed from IDs.
+Raw persisted fields are inspected before JSON hydration, including canonical
+attachment-owner fields, so explicit invalid `undefined` values cannot vanish.
+Whole additive owner state and exact source preimages remain intact. Bodyless and
+off-frame owners stay visible and explicitly unresolved. Road/guild resident
+history is classified separately, not converted into physical site geometry.
+An empty census means only no records in these observed families, never full
+generated-site clearance. Whole authored generation footprints, ownership links
+and environment/transfer admission are still required.
+
 The repository checkpoint also has a production-browser regression using an
 explicitly admitted synthetic fixture: ordinary Continue, paid survey, Save &
 Quit and fresh cold reload retain the canonical owner and finite stores. This

@@ -2,6 +2,15 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Revision16 authored-site observation now retains all instantiated saved/live
+  settlement and merchant owners and raw active/sleeping site references across
+  locations, including unloaded/bodyless owners. It is an unresolved census,
+  never positive geometry or admission. Review caught lossy JSON hydration before
+  raw validation; fixed for legacy and canonical owner rows with exact undefined
+  and negative-zero preservation. Focused r1 27PASS; expanded r2 113PASS/1FAIL
+  exposed a stale road-spawn expectation (newSpecimen flag, test corrected),
+  then r3 114PASS. static163 readonly fault-fixture write corrected; static164
+  and lint133/134PASS. Production/browser verification follows this checkpoint.
 - Revision16 global Waygrid ownership joins complete saved/live location voxels,
   finite pages and canonical attachment owners to one shared capacity pair.
   Exact IDs/type/tier/pairs, orphan/duplicate/ambiguous legacy and missing location

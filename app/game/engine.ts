@@ -975,6 +975,7 @@ import {
 import { prepareWaygridCapacity, waygridBlockCapacity, type WaygridCapacityPlan } from "./waygrid-capacity";
 import { configuredWaygridPowerSource } from "./waygrid-power";
 import { selectUniverseWaygridOwnership } from "./universe-waygrid-ownership";
+import { observeUniverseAuthoredSites } from "./universe-authored-site-census";
 import {
   canRideReedstrider,
   createPeelopSheddingState,
@@ -22385,7 +22386,9 @@ export class VoxelEngine {
     // them again would multiply nesting depth for large, valid pressure rooms.
     return freezeUniverseJson({ source, pressureSource, production, bookFurniture, architecture,
       waygridSource: structuredClone({ asteroidFields: this.asteroidFields, generatorVersion: GENERATOR_VERSION,
-        generatorProfile: this.world.generationOptions.profile, seed: this.world.seedText }) });
+        generatorProfile: this.world.generationOptions.profile, seed: this.world.seedText }),
+      authoredSiteSource: structuredClone({ settlements: [...this.settlements], merchants: [...this.merchants],
+        creatures: mobs.map(body => body.fields), sleepingCreatures: this.sleepingCreatures }) });
   }
 
   snapshotAttachmentSource(asteroidId: string) {
@@ -22420,7 +22423,11 @@ export class VoxelEngine {
       ...runtime.waygridSource, repositoryRevision: observed.manifest.revision, locationRevision: observed.stamp.revision,
       world: observed.context.world, vault: observed.source.digitalItemVault!, archive: observed.source.digitalCreatureArchive!,
     });
-    return freezeUniverseJson({ runtime, repository: structuredClone(repository), physical, waygrid });
+    const authoredSites = observeUniverseAuthoredSites(repository.snapshot, {
+      locationId: observed.stamp.locationId, repositoryRevision: observed.manifest.revision,
+      locationRevision: observed.stamp.revision, source: runtime.authoredSiteSource,
+    });
+    return freezeUniverseJson({ runtime, repository: structuredClone(repository), physical, waygrid, authoredSites });
   }
 
   assertAttachmentSourceUnchanged(source: ReturnType<VoxelEngine["snapshotAttachmentSource"]>) {

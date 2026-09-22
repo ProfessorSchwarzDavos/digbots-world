@@ -973,6 +973,8 @@ import {
   type DigitalItemVault,
 } from "./digital-storage";
 import { prepareWaygridCapacity, waygridBlockCapacity, type WaygridCapacityPlan } from "./waygrid-capacity";
+import { configuredWaygridPowerSource } from "./waygrid-power";
+import { selectUniverseWaygridOwnership } from "./universe-waygrid-ownership";
 import {
   canRideReedstrider,
   createPeelopSheddingState,
@@ -16154,11 +16156,9 @@ export class VoxelEngine {
     if (![x, y, z].every(Number.isSafeInteger) || !Number.isSafeInteger(joules) || joules <= 0) return null;
     for (const [dx, dy, dz] of [[0, 0, -1], [1, 0, 0], [0, 0, 1], [-1, 0, 0], [0, 1, 0], [0, -1, 0]]) {
       const sourceKey = blockKey(x + dx, y + dy, z + dz), state = this.wayworks.get(sourceKey);
-      if (!state || !state.enabled || !workshopRunning(state.workshop) || state.ownerId !== "local" || state.revision >= Number.MAX_SAFE_INTEGER
-        || state.locationId !== (this.world.locationScope?.locationId ?? "home-preview") || state.energyJ < joules
-        || machineKindForBlock(this.world.getBlock(x + dx, y + dy, z + dz)) !== state.kind) continue;
-      const port = state.ports[localFaceForWorldDirection(state.facing, -dx, -dy, -dz)];
-      if (["output", "both", "service"].includes(port)) return { key: sourceKey, state, joules };
+      if (!state || state.energyJ < joules || !configuredWaygridPowerSource(state,
+        () => this.world.getBlock(x + dx, y + dy, z + dz), this.world.locationScope?.locationId ?? "home-preview", -dx, -dy, -dz)) continue;
+      return { key: sourceKey, state, joules };
     }
     return null;
   }
@@ -22383,7 +22383,9 @@ export class VoxelEngine {
     });
     // Keep already-encoded authority records outside the field encoder: encoding
     // them again would multiply nesting depth for large, valid pressure rooms.
-    return freezeUniverseJson({ source, pressureSource, production, bookFurniture, architecture });
+    return freezeUniverseJson({ source, pressureSource, production, bookFurniture, architecture,
+      waygridSource: structuredClone({ asteroidFields: this.asteroidFields, generatorVersion: GENERATOR_VERSION,
+        generatorProfile: this.world.generationOptions.profile, seed: this.world.seedText }) });
   }
 
   snapshotAttachmentSource(asteroidId: string) {
@@ -22414,7 +22416,11 @@ export class VoxelEngine {
       playerId: observed.manifest.currentPlayerId, locationId: observed.stamp.locationId, actorId: observed.hostPlayerId,
       actors: observed.context.actors, source: observed.source, encounterSources: observed.encounterSources,
     }, observed.context);
-    return freezeUniverseJson({ runtime, repository: structuredClone(repository), physical });
+    const waygrid = selectUniverseWaygridOwnership(observed.frame, repository.snapshot, {
+      ...runtime.waygridSource, repositoryRevision: observed.manifest.revision, locationRevision: observed.stamp.revision,
+      world: observed.context.world, vault: observed.source.digitalItemVault!, archive: observed.source.digitalCreatureArchive!,
+    });
+    return freezeUniverseJson({ runtime, repository: structuredClone(repository), physical, waygrid });
   }
 
   assertAttachmentSourceUnchanged(source: ReturnType<VoxelEngine["snapshotAttachmentSource"]>) {

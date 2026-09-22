@@ -375,8 +375,28 @@ The pure planner computes bounded, exact overflow proposals, but the engine does
 not emit them. Agent previews, reservation commits and queued batches validate
 the actual removal-then-placement sequence, not only its final net capacity;
 later conflicts cancel safely and return unplaced material reservations. This
-is lifecycle integrity, not global physical-owner resolution, a Waygrid attachment
-selector, terminal power-dependency closure, or local-frame admission.
+is lifecycle integrity, not local-frame admission.
+
+The separate global Waygrid selector now binds every installed capacity block to
+one complete location/cell/kind/tier registration across both shared stores. It
+hydrates every persisted owner before replacing the current row with exact live
+voxels, reads finite pages and construction independently of loaded chunks, and
+checks both saved and live field catalogs for missing locations. Pinned generator
+18 and celestial terrain1 make this census explicit; unsupported versions and
+local-frame views refuse. Scoped IDs, paired cells and whole-cube boundaries must
+agree. Bare-coordinate legacy IDs may be associated only with one unambiguous
+physical block across all locations; association does not migrate or rewrite them.
+Orphan, duplicate, unregistered or unknown custom contributions block admission.
+Known starter tier-one capacity remains explicitly nonphysical.
+
+Both terminal types now participate in configured power boundary closure using
+the same eligibility predicate as actual terminal operations. Every eligible
+adjacent output/both/service face counts, even at zero energy or when another
+source could supply the terminal. No battery/generator-only or channel restriction
+is invented. Live operations still require positive finite payment and sufficient
+energy. The runtime global source join rechecks exact inputs around repository
+observation; these are read-only ownership/dependency guards, not authentication,
+legacy migration, resource payment or atomic asteroid entry/return.
 
 A separate isolated native IndexedDB check now covers a declared synthetic paid
 vehicle transition, fresh repository/facade open, and ordinary save/reopen.

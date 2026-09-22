@@ -10,6 +10,7 @@ import { validCustodyItem } from "./wayworks-custody";
 import { canonicalJson, isUniverseRecord } from "./universe-json";
 import { workshopBodyBounds } from "./workshop-body";
 import { asteroidAttachmentVolumeSide } from "./asteroid-attachment-creature-footprint";
+import { configuredWaygridPowerSource } from "./waygrid-power";
 
 /** Complete canonical ORBIT voxel preimage/after-image, not loaded chunks only. */
 export type AsteroidMachineVoxels = (key: string) => BlockId | undefined;
@@ -34,6 +35,9 @@ function validateMachineComponents(frame: AsteroidAttachmentFrame, machines: Rea
     if (block === undefined) throw Error("Unresolved attached machine neighborhood.");
     if (machineKindForBlock(block) && !other) throw Error("Missing canonical neighboring machine.");
     if (side === sides.get(node.key)) continue;
+    if ((block === BlockId.WaygridVaultTerminal || block === BlockId.WaygridCreatureArchive)
+      && configuredWaygridPowerSource(node.state, voxel(node.key), frame.orbitId, dx, dy, dz))
+      throw Error("Waygrid power dependency crosses the attached frame boundary.");
     if (other) {
       // A crossing edge is sufficient to split a weak component. Inspect every
       // canonical boundary pair: never truncate the owner to the live 256-node

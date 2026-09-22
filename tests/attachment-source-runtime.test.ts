@@ -6,7 +6,7 @@ import { BlockId, Item } from "../app/game/data";
 import { PressureRuntime } from "../app/game/pressure-runtime";
 import { bodyEnvironment } from "../app/game/celestial-environment";
 import { createAsteroidRegistry } from "../app/game/asteroid-custody";
-import { createCelestialTerrain } from "../app/game/celestial-terrain";
+import { celestialTerrainSeed, createCelestialTerrain } from "../app/game/celestial-terrain";
 import { createWaystarCatalog } from "../app/game/celestial-catalog";
 import { homeLocation, locationAddress, locationId, universeId } from "../app/game/location-address";
 import { createDigitalCreatureArchive, createDigitalItemVault } from "../app/game/digital-storage";
@@ -16,6 +16,7 @@ import { SPELL_TOME_ITEMS } from "../app/game/dragon-world";
 import type { ChunkEditSave } from "../app/game/world";
 import { captureIntoOrb, captureOrbInventorySlot, createEmptyCaptureOrb } from "../app/game/capture-orbs";
 import { createPrimeEncounterState, planPrimeEncounter, transferPrimeEncounterCustody } from "../app/game/creature-rarity";
+import { prepareWaygridCapacity } from "../app/game/waygrid-capacity";
 
 const additionalMaps = ["saplings", "veinRegrowth", "roadEvents", "golemForges", "alchemyStands", "distilleries", "sugarworks",
   "archiveShelves", "tomeDisplays", "settlements", "merchants", "liquidCells", "ecologySectors", "multiplayerPlayerProgressions",
@@ -23,7 +24,8 @@ const additionalMaps = ["saplings", "veinRegrowth", "roadEvents", "golemForges",
   "apiaryFlowerCache", "socialMotions", "celestialCreatureVelocity", "multiplayerBoatInputs", "capturePacification"] as const;
 function fixture() {
   const orbit = locationAddress({ ...homeLocation(universeId("runtime-complete-source")), kind: "orbit", instanceId: "low" });
-  const registry = createAsteroidRegistry(orbit, 953), asteroid = registry.asteroids[0].descriptor;
+  const seed = celestialTerrainSeed("source-fixture");
+  const registry = createAsteroidRegistry(orbit, seed), asteroid = registry.asteroids[0].descriptor;
   const stamp = { locationId: locationId(orbit), epoch: 3, revision: 7 };
   const maps = Object.fromEntries([...additionalMaps, "furnaces", "wheatMills", "wayworks", "chests", "boats", "orbRacks",
     "healingStations", "morphLooms", "multiplayerPlayerStates", "apiaries", "aquariums", "fieldPerches", "temporarySummons",
@@ -42,7 +44,7 @@ function fixture() {
     agentAuthority: { list: () => [] }, pressureRuntime: { snapshot: () => structuredClone(pressure), snapshotAttachmentSource: () => structuredClone(pressure) },
     orbitalStations: null, worldStorage: { currentStamp: stamp, currentManifest: { currentLocationId: stamp.locationId, revision: 5 }, currentCatalog: createWaystarCatalog() },
     asteroidFields: { schema: 1, fields: { [stamp.locationId]: registry } },
-    world: { locationScope: stamp, celestialTerrain: createCelestialTerrain({ location: orbit, seed: 953 }),
+    world: { locationScope: stamp, celestialTerrain: createCelestialTerrain({ location: orbit, seed }),
       generationOptions: { profile: "world-below-v15" }, seedText: "source-fixture", serializeEdits: () => structuredClone(edits), serializeBlockFacings: () => ({}),
       serializeSurfaceRoadGraph: () => ({ schema: 1, edges: [] }), getBlock: () => { throw Error("No loaded chunks"); } },
     bodyContext: () => { throw Error("No mutable body cache"); }, serialize: () => { throw Error("No mutating serialization"); },
@@ -85,10 +87,11 @@ test("actual full scoped source observes remote history before physical selectio
   const manifest = { id: universe, universeId: universe, revision: 5, currentLocationId: orbit, currentPlayerId: "host", deletedAt: null };
   // Existing exact repository API is represented by a declared transport adapter;
   // this exercises real engine observation/selection, not native IDB or consent.
-  const repository = { snapshot: { manifest, universe: { fields: {} },
+  const physicalFields = { generatorVersion: 18, generatorProfile: "world-below-v15", seed: "source-fixture", edits: {} };
+  const repository = { snapshot: { manifest, universe: { fields: { asteroidFields: engine.asteroidFields } },
     players: [{ playerId: "host", locationId: orbit, fields: { inventory: [] } }], locations: [
-      { descriptor: { id: orbit, universeId: universe, revision: 7 }, fields: { furnaces: {}, chests: {} } },
-      { descriptor: { id: home, universeId: universe, revision: 2 }, fields: { furnaces: {}, chests: {}, primeEncounters: { [anchor]: history } } },
+      { descriptor: { id: orbit, universeId: universe, revision: 7 }, fields: { ...physicalFields, furnaces: {}, chests: {} } },
+      { descriptor: { id: home, universeId: universe, revision: 2 }, fields: { ...physicalFields, furnaces: {}, chests: {}, primeEncounters: { [anchor]: history } } },
     ] }, source: ["repository-adapter"] };
   let mutate: (() => void) | null = null, reads = 0;
   const storage = { ...engine.worldStorage, currentManifest: manifest,
@@ -104,9 +107,11 @@ test("actual full scoped source observes remote history before physical selectio
   assert.equal(result.physical.custody.encounters.primeOwners[0].owner?.encounterOriginLocationId, null);
   assert.equal(JSON.stringify(engine.inventory), before); assert(!Object.isFrozen(repository));
   assert(Object.isFrozen(result.runtime)); assert.equal(engine.primeEncounters.size, 0);
-  for (const fault of ["inventory", "pressure", "environment", "catalog", "catalogUndefined", "architecture", "effects", "facade"] as const) {
+  assert.equal(result.waygrid.bindings.length, 0); assert.equal(result.waygrid.ownership.starters.length, 2);
+  for (const fault of ["inventory", "pressure", "environment", "catalog", "catalogUndefined", "architecture", "effects", "facade", "waygrid"] as const) {
     const priorInventory = engine.inventory, priorHealth = engine.health, priorCatalog = storage.currentCatalog;
     const oldInstallation = pressure.nextInstallation;
+    const priorVault = engine.digitalItemVault;
     mutate = () => {
       if (fault === "inventory") engine.inventory = [];
       if (fault === "pressure") pressure.nextInstallation++;
@@ -120,9 +125,11 @@ test("actual full scoped source observes remote history before physical selectio
       }
       if (fault === "effects") engine.projectiles.push({} as never);
       if (fault === "facade") Object.assign(engine, { worldStorage: { ...storage } });
+      if (fault === "waygrid") engine.digitalItemVault = { ...priorVault, cells: [] };
     };
     await assert.rejects(engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /changed during repository|active effects/, fault);
     engine.inventory = priorInventory; engine.health = priorHealth; pressure.nextInstallation = oldInstallation;
+    engine.digitalItemVault = priorVault;
     for (const key of Object.keys(edits)) delete edits[key];
     storage.currentCatalog = priorCatalog; engine.projectiles.length = 0; Object.assign(engine, { worldStorage: storage });
   }
@@ -132,6 +139,19 @@ test("actual full scoped source observes remote history before physical selectio
     await assert.rejects(engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /pending world\/cargo/); assert.equal(reads, prior);
     Object.assign(engine, { [field]: null });
   }
+  const types = [BlockId.WaygridVaultTerminal, BlockId.WaygridCreatureArchive, BlockId.WaygridCellI, BlockId.WaygridCellII, BlockId.WaygridCellIII];
+  const changes = types.map((after, index) => ({ x: asteroid.center.x + index, y: asteroid.center.y + 10,
+    z: asteroid.center.z, before: BlockId.Air, after }));
+  const plan = prepareWaygridCapacity(orbit, engine.digitalItemVault, engine.digitalCreatureArchive, changes);
+  for (const { x, y, z, after } of changes) {
+    const cx = Math.floor(x / 16), cz = Math.floor(z / 16);
+    (edits[`${cx},${cz}`] ??= []).push([(y + 64) * 256 + (z - cz * 16) * 16 + x - cx * 16, after]);
+  }
+  engine.digitalItemVault = plan.vault; engine.digitalCreatureArchive = plan.archive;
+  const installed = await engine.snapshotScopedAttachmentUniverseSource(asteroid.id);
+  assert.equal(installed.waygrid.bindings.length, 5); assert(installed.waygrid.bindings.every(row => row.side === "attached"));
+  engine.digitalItemVault = createDigitalItemVault();
+  await assert.rejects(engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /registrations disagree|registration/);
 });
 
 test("actual exhaustive source binds installed production and detects ledger changes at the same revision", () => {

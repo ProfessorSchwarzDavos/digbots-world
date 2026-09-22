@@ -2,6 +2,20 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Revision16 global Waygrid ownership joins complete saved/live location voxels,
+  finite pages and canonical attachment owners to one shared capacity pair.
+  Exact IDs/type/tier/pairs, orphan/duplicate/ambiguous legacy and missing location
+  guards; starter capacity explicit, unique legacy association read-only. All
+  terminal configured power edges use the actual live predicate, including zero
+  energy and all faces/facings; positive payment remains required for operations.
+  Runtime exact-source join integrated, no chunks/clock/save changes or entry grant.
+  Review found persisted-only orphan field omission; both catalogs now checked
+  and combined-omission regression added, reviewer confirmed. Parent r1 26PASS;
+  r2 80PASS/6FAIL from fixture raw-vs-derived terrain seed, corrected; r3 87PASS.
+  r4 106PASS but two nonexistent test arguments were ignored and not counted as
+  coverage. Verified-path r5 222PASS; static160/161/162PASS, static159 test-only
+  assert signature failure retained/corrected; lint131PASS. Final build/native/
+  browser checks recorded separately; full site/authority/atomic gates remain.
 - Revision16 Waygrid lifecycle uses full location-qualified capacity IDs and
   shared both-store preflight across local, host/guest and agent edits. Guest
   edits are intent-only; queued jobs revalidate before reservation and each batch.

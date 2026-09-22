@@ -21,8 +21,9 @@ export function waygridBlockCapacity(type: BlockId): Readonly<{ kind: WaygridCap
   return tier ? { kind: "cell", tier } : null;
 }
 
-function validateStores(vault: DigitalItemVault, archive: DigitalCreatureArchive) {
+export function assertWaygridStores(vault: DigitalItemVault, archive: DigitalCreatureArchive) {
   if (vault.schema !== 1 || archive.schema !== 1 || !Array.isArray(vault.stacks) || !Array.isArray(archive.orbs)
+    || vault.stacks.length > 65_536 || archive.orbs.length > 8_192
     || !Number.isFinite(archive.healClock) || archive.healClock < 0 || archive.healClock > 60
     || !Number.isSafeInteger(archive.healCycles) || archive.healCycles < 0) throw Error("Invalid Waygrid shared stores.");
   const indexes = [vault, archive].map((store, index) => {
@@ -67,7 +68,7 @@ function validateStores(vault: DigitalItemVault, archive: DigitalCreatureArchive
 export function prepareWaygridCapacity(locationId: string, vault: DigitalItemVault, archive: DigitalCreatureArchive,
   changes: readonly WaygridBlockChange[]): WaygridCapacityPlan {
   parseLocationId(locationId);
-  validateStores(vault, archive);
+  assertWaygridStores(vault, archive);
   let itemCells = [...vault.cells], creatureCells = [...archive.cells];
   let spillPosition: readonly [number, number, number] | null = null;
   for (const change of changes) {

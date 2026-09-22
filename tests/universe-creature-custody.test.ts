@@ -6,7 +6,7 @@ import type { WorldCreatureCustodySource } from "../app/game/creature-custody-so
 import { createDigitalCreatureArchive, createDigitalItemVault } from "../app/game/digital-storage";
 import { normalizeMultiplayerPlayerState, type SavedCreature } from "../app/game/engine";
 import { homeLocation, locationId, universeId, type LocationId } from "../app/game/location-address";
-import { collectUniverseCreatureCustody, type LiveUniverseCreatureCustody, type UniverseCreatureCustodySnapshot } from "../app/game/universe-creature-custody";
+import { collectUniverseCreatureCustody, reconcileUniverseCreatureCustody, type LiveUniverseCreatureCustody, type UniverseCreatureCustodySnapshot } from "../app/game/universe-creature-custody";
 import type { AttachmentActorBody } from "../app/game/attachment-actor-bodies";
 import { canonicalJson } from "../app/game/universe-json";
 import { createSurveyHopper } from "../app/game/space-vehicle";
@@ -16,6 +16,7 @@ import { BlockId } from "../app/game/data";
 import { createAsteroidRegistry } from "../app/game/asteroid-custody";
 import { celestialTerrainSeed } from "../app/game/celestial-terrain";
 import { captureAsteroidAttachmentCatalog } from "../app/game/asteroid-attachment-catalog";
+import { createPrimeEncounterState, planPrimeEncounter, transferPrimeEncounterCustody } from "../app/game/creature-rarity";
 
 const universe = universeId("universe-custody"), address = homeLocation(universe), home = locationId(address);
 const orbitAddress = { ...address, kind: "orbit" as const, instanceId: "low" }, orbit = locationId(orbitAddress);
@@ -188,6 +189,25 @@ test("history tables stay location-owned and exact, including current runtime re
   input.snapshot = { ...input.snapshot, locations: input.snapshot.locations.map(row => row.descriptor.id === orbit
     ? { ...row, fields: { ...row.fields, primeEncounters: undefined } } : row) };
   assert.throws(() => inspect(input), /canonical creature encounter table/);
+});
+
+test("complete owner enumeration joins a carried inactive encounter without losing or stamping its legacy origin", () => {
+  const input = fixture(), anchor = "prime:petalfox:0:0", meta: CreatureMetadata = { ...metadata("remote-prime"), kind: "petalfox", custom: { primeAnchorId: anchor } };
+  const value = captureIntoOrb(createEmptyCaptureOrb("remote-orb"), meta, 200, "keeper")!;
+  const state = transferPrimeEncounterCustody(createPrimeEncounterState(planPrimeEncounter("petalfox", { worldSeed: "fixture", x: 0, z: 0,
+    y: 30, surfaceY: 30, biomeName: "Glimmerwood", weather: "clear", daylight: .8 })!, "petalfox", 23, 100),
+  "captured", meta.entityId, "orb:remote-orb", null, 200);
+  input.live = { ...input.live, source: { ...input.live.source, inventory: [captureOrbInventorySlot(value)] } };
+  input.snapshot = { ...input.snapshot, locations: input.snapshot.locations.map(row => row.descriptor.id === orbit
+    ? { ...row, fields: { ...row.fields, primeEncounters: { [anchor]: state } } } : row) };
+  const before = canonicalJson(input), result = reconcileUniverseCreatureCustody(input.snapshot, input.live);
+  assert.equal(result.encounters.primeOwners[0].locationId, orbit);
+  assert.deepEqual(result.encounters.primeOwners[0].owner?.path, ["player", "host", "inventory", 0]);
+  assert.equal(result.encounters.primeOwners[0].owner?.holderLocationId, home);
+  assert.equal(result.encounters.primeOwners[0].owner?.encounterOriginLocationId, null);
+  assert.equal(canonicalJson(input), before);
+  input.live = { ...input.live, source: { ...input.live.source, inventory: [] } };
+  assert.throws(() => reconcileUniverseCreatureCustody(input.snapshot, input.live), /current body\/specimen/);
 });
 
 test("raw descriptors are inspected before access and one hundred cold collections do not mutate, normalize or read clocks", () => {

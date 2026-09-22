@@ -7,6 +7,7 @@ import { createDigitalCreatureArchive, createDigitalItemVault } from "../app/gam
 import { createApiary } from "../app/game/apiary";
 import { Item } from "../app/game/data";
 import { createPrimeEncounterState, planPrimeEncounter, transferPrimeEncounterCustody } from "../app/game/creature-rarity";
+import { homeLocation, locationId, universeId } from "../app/game/location-address";
 
 const blankEquipment = () => ({ head: null, chest: null, legs: null, feet: null, back: null });
 
@@ -139,4 +140,47 @@ test("actual host snapshot reconciles canonical encounter maps and refuses stale
   const stale = { ...state, entityId: 23 }; engine.primeEncounters.set(anchor, stale);
   assert.throws(() => engine.snapshotAttachmentCreatureCustody(), /current body\/specimen/);
   assert.equal(engine.primeEncounters.get(anchor), stale);
+});
+
+test("actual engine global read joins a carried remote history after repository observation without passing through local assumptions", async () => {
+  const { engine } = fixture(), universe = universeId("runtime-global-custody"), home = locationId(homeLocation(universe));
+  const orbit = locationId({ ...homeLocation(universe), kind: "orbit", instanceId: "low" }), anchor = "prime:petalfox:0:0";
+  const value = captureIntoOrb(createEmptyCaptureOrb("remote-orb"), { schema: 1, entityId: "remote-specimen", kind: "petalfox",
+    health: 5, maxHealth: 7, ageTicks: 123, baby: false, temperament: "Gentle", hostile: false, tamed: true, ownerId: "keeper",
+    name: null, geneticSeed: 321, command: null, custom: { primeAnchorId: anchor } }, 42)!;
+  const state = transferPrimeEncounterCustody(createPrimeEncounterState(planPrimeEncounter("petalfox", { worldSeed: "fixture", x: 0, z: 0,
+    y: 30, surfaceY: 30, biomeName: "Glimmerwood", weather: "clear", daylight: .8 })!, "petalfox", 23, 100),
+  "captured", "remote-specimen", "orb:remote-orb", null, 200);
+  const manifest = { id: universe, universeId: universe, revision: 7, currentLocationId: home, currentPlayerId: "host", deletedAt: null };
+  // Declared verified-repository transport adapter, not native IndexedDB proof.
+  const repository = { snapshot: { manifest, universe: { fields: {} },
+    players: [{ playerId: "host", locationId: home, fields: { inventory: [] } }], locations: [
+      { descriptor: { id: home, universeId: universe, revision: 6 }, fields: { furnaces: {}, chests: {} } },
+      { descriptor: { id: orbit, universeId: universe, revision: 2 }, fields: { furnaces: {}, chests: {}, primeEncounters: { [anchor]: state } } },
+    ] }, source: ["repository-test-adapter"] };
+  let reads = 0, mutate: (() => void) | null = null;
+  const storage = { currentManifest: manifest, currentStamp: { locationId: home, epoch: 1, revision: 6 },
+    snapshotAttachmentSource: async () => { reads++; mutate?.(); return repository; } };
+  Object.assign(engine, { inventory: [captureOrbInventorySlot(value)], worldStorage: storage, persistenceRevision: 11,
+    position: new THREE.Vector3(0, 30, 0), playerVariant: "male", crouching: false, mountedBoatId: null, mountedCreatureId: null,
+    mountedCreatureSeat: null, creatureMountSeats: new Map(), remotePlayers: new Map(), agentAuthority: { list: () => [] } });
+  assert.throws(() => engine.snapshotAttachmentCreatureCustody(), /unresolved Prime/);
+  const before = JSON.stringify(engine.inventory), result = await engine.snapshotUniverseCreatureCustody();
+  assert.equal(reads, 1); assert.equal(result.custody.encounters.primeOwners[0].locationId, orbit);
+  assert.equal(result.custody.encounters.primeOwners[0].owner?.encounterOriginLocationId, null);
+  assert.deepEqual(result.custody.encounters.primeOwners[0].owner?.path, ["player", "host", "inventory", 0]);
+  assert.equal(result.runtime.actorId, "local"); assert.equal(result.custody.activePlayer.playerId, "host");
+  assert.equal(JSON.stringify(engine.inventory), before); assert.equal(engine.primeEncounters.size, 0);
+  assert(!Object.isFrozen(repository));
+  mutate = () => { engine.inventory[0]!.metadata!.changedDuringAwait = true; };
+  await assert.rejects(engine.snapshotUniverseCreatureCustody(), /changed during repository/);
+  Reflect.deleteProperty(engine.inventory[0]!.metadata!, "changedDuringAwait");
+  mutate = () => { Object.assign(engine, { worldStorage: { ...storage } }); };
+  await assert.rejects(engine.snapshotUniverseCreatureCustody(), /pending world\/cargo/);
+  Object.assign(engine, { worldStorage: storage }); mutate = null;
+  for (const field of ["checkpointPromise", "pendingFieldSurvey", "pendingSpaceArrival", "locationTransitioning", "evaCargoLine"]) {
+    Object.assign(engine, { [field]: true }); const prior: number = reads;
+    await assert.rejects(engine.snapshotUniverseCreatureCustody(), /pending world\/cargo/); assert.equal(reads, prior);
+    Object.assign(engine, { [field]: null });
+  }
 });

@@ -308,13 +308,28 @@ The host raw producer is separate from the existing strict local reconciler.
 It retains unfiltered body preimages alongside SavedCreature projections and
 preserves raw sleeping/hive/metadata records before semantic checks. Unresolved
 remote histories remain visible. The pure universe collector retains each
-location's history but does NOT yet reconcile encounter semantics globally or
-replace the runtime physical selector's local assumptions. Its structural unit
-fixtures are not native persistence or ordinary entry/return evidence. Exact
+location's history. `reconcileUniverseCreatureCustody()` then associates every
+Prime/legendary reference globally, before any per-location selection. Explicit
+encounter origin chooses its history; unknown legacy origin requires exactly one
+compatible state/species/specimen/custody-token/body match across all locations.
+No match, multiple matches or multiple owners of one qualified history refuse.
+The result preserves unknown provenance; it does not stamp an inferred origin.
+Resident tokens use explicit storage-family provenance, not prefixed-path
+offsets. Prime captured deployment stays orb-owned and legendary deployment
+body-owned. Terminal and permitted unmaterialized histories remain ownerless.
+
+`VoxelEngine.snapshotUniverseCreatureCustody()` exposes this read-only global
+join without passing through the local encounter assumption. It binds the raw
+runtime storage/body/actor/manifest/stamp preimage before and after the existing
+verified repository read; pending transactions, source changes and facade
+replacement refuse. Returned repository data is detached, not frozen in place.
+This does NOT replace the runtime physical selector's local assumptions, observe
+every environmental source, pause shared simulation or grant atomic rights.
+Its structural unit fixtures are not native persistence or ordinary entry/return evidence. Exact
 repository/runtime source, lease, physical and transaction checks remain required.
 
 This remains a prerequisite, not a complete admission gate. Exhaustive authored
-sites/environment integration, scoped encounter reconciliation, transition consent and
+sites/environment integration, scoped physical-source integration, transition consent and
 atomic finite-resource transfer still require their integration checks.
 Conservative all-phase model spheres may refuse an
 installation very close to the frame boundary. There is no new local-entry UI,

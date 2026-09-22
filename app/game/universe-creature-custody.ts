@@ -7,7 +7,8 @@ import type { CreatureCustodyPath } from "./creature-custody-index";
 import { validateCreatureEncounterSources, type CreatureEncounterSources } from "./creature-encounter-custody";
 import { parseLocationId, universeId, type LocationId, type UniverseId } from "./location-address";
 import { indexScopedCreatureCustody, type ScopedCreatureCustodySources } from "./scoped-creature-custody-index";
-import { freezeUniverseJson, isUniverseRecord } from "./universe-json";
+import { reconcileScopedCreatureEncounterCustody, type CreatureResidentFamily } from "./scoped-creature-encounters";
+import { canonicalJson, freezeUniverseJson, isUniverseRecord } from "./universe-json";
 import { GUEST_LOCATION_FIELDS, WORLD_SAVE_OWNERS, type SaveFields, type SaveOwner } from "./universe-save";
 import type { UniverseSnapshot } from "./universe-storage";
 
@@ -180,4 +181,20 @@ export function collectUniverseCreatureCustody(snapshot: UniverseCreatureCustody
   const index = indexScopedCreatureCustody(scoped, expected);
   return freezeUniverseJson(structuredClone({ source, universeId: expected, repositoryRevision: manifest.revision,
     activePlayer: { playerId: live.playerId, actorId: live.actorId, locationId: live.locationId }, partitions, paths, aliases, sources: scoped, histories, index }));
+}
+
+/** Join every history only after enumerating every owner. The raw collector
+ * above remains independently usable; neither API grants physical admission. */
+export function reconcileUniverseCreatureCustody(snapshot: UniverseCreatureCustodySnapshot, live: LiveUniverseCreatureCustody) {
+  const custody = collectUniverseCreatureCustody(snapshot, live);
+  const paths = new Map(custody.paths.map(row => [canonicalJson(row.path), row]));
+  const residentFamilies: CreatureResidentFamily[] = custody.index.residents.map(resident => {
+    const provenance = paths.get(canonicalJson(resident.path));
+    if (!provenance || provenance.family !== "aquariums" && provenance.family !== "fieldPerches")
+      throw Error("Universe resident lacks its actual family provenance.");
+    return { path: resident.path, family: provenance.family };
+  });
+  const histories = custody.histories.map(({ locationId, sources }) => ({ locationId, sources }));
+  const encounters = reconcileScopedCreatureEncounterCustody(custody.sources, histories, residentFamilies, custody.universeId);
+  return freezeUniverseJson({ ...custody, encounters });
 }

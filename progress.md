@@ -2,6 +2,19 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Revision16 scoped encounter join associates every global Prime/legendary
+  reference before filtering, with explicit encounter origin or a unique exact
+  compatible legacy association. Unknown origins remain unknown; equal local
+  IDs can remain independent. Shared predicates retain existing local rules,
+  including Prime orb versus legendary body custody. Pure universe composition
+  and an actual read-only engine before/after repository API now use the join;
+  physical travel integration remains separate. Focusedr1:33PASS; integratedr2:
+  63PASS/1FAIL output freeze mutated a mutable repository adapter. Detached the
+  returned repository; r3:64PASS, expandedr4:130PASS. Static150/152 and lint125/126
+  PASS; static151 retained TS7022 on a test loop counter, fixed with its numeric
+  annotation. Independent read-only review found no actionable issues. Build45,
+  exact committed repeat and ordinary browser regression remain pending.
+
 - Revision16 global-custody prerequisite separates raw host observation from
   local semantic checks, adds strict owner-partition visitors, a location/origin-
   qualified index and a pure same-snapshot universe owner collector. Active
@@ -13,8 +26,10 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
   sleeping/hive/body preimages ahead of lossy semantic projection. Focusedr3:
   36PASS, r4:42PASS/1FAIL (wrong Item vs BlockId fixture), correctedr5:58PASS.
   Static148 retained a structural actor-bounds fixture type failure; corrected.
-  Expandedr6:111PASS/r7:115PASS; static147/149 and lint124PASS. Exact commit/build/browser
-  pending. No runtime global
+  Expandedr6:111PASS/r7 and exactcommittedr8:115PASS; static147/149 and lint124PASS.
+  Commit780340c/build44o0lpmiBdYFczYyro3RHWo/official44PASS; gameplay reviewed,
+  jobs drained. Director accepted this bounded prerequisite after independent
+  41tests and64file/11Gitblob/16receipt matches. No runtime global
   encounter/physical join or atomic entry/return; local entry remains CLOSED.
 
 - Revision16 creature-origin prerequisite adds explicit canonical specimen and

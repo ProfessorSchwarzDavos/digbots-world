@@ -18,7 +18,8 @@ export type CreatureEncounterOwner = Readonly<{
   body: Readonly<{ collection: CreatureCustodyBody["collection"]; id: number }> | null;
 }>;
 type References = Readonly<{ prime: string | null; legendary: Readonly<{ encounterId: string; siteId: string }> | null }>;
-type Unit = Readonly<{ owner: CreatureEncounterOwner; references: References; custodyId: string | null }>;
+export type CreatureEncounterUnit = Readonly<{ owner: CreatureEncounterOwner; references: References; custodyId: string | null }>;
+type Unit = CreatureEncounterUnit;
 
 function identifier(value: unknown): asserts value is string {
   if (typeof value !== "string" || !value || value.trim() !== value) throw Error("Invalid creature encounter identity.");
@@ -36,6 +37,7 @@ function references(value: Pick<SavedCreature, "primeAnchorId" | "legendaryEncou
   identifier(value.legendaryEncounterId); identifier(value.legendarySiteId);
   return { prime, legendary: { encounterId: value.legendaryEncounterId, siteId: value.legendarySiteId } };
 }
+export { references as readCreatureEncounterReferences };
 
 /** Exact inspection only. Normalizers are equality validators, never replacement
  * values. Missing optional first-draft Prime fields remain missing; unsupported
@@ -56,6 +58,34 @@ export function validateCreatureEncounterSources(sources: CreatureEncounterSourc
       || (state.outcome === "capture") !== (state.custodyEntityId !== null))
       throw Error("Inconsistent legendary encounter resolution custody.");
   }
+}
+
+/** Shared exact owner predicates. A scoped caller must establish the history's
+ * location and one-to-one association before these rules can grant a match. */
+export function assertPrimeCreatureEncounterOwner(state: PrimeEncounterState, unit: CreatureEncounterUnit | null): void {
+  const owner = unit?.owner ?? null;
+  if (state.status === "defeated") {
+    if (owner || state.entityId !== null || state.custodyId != null) throw Error("Defeated Prime still has living custody.");
+  } else {
+    if (!unit || !owner || owner.kind !== state.kind || state.specimenId !== undefined && state.specimenId !== owner.specimenId
+      || state.entityId !== (owner.body?.id ?? null)) throw Error("Prime history does not match its current body/specimen.");
+    if (state.status === "captured") {
+      if (!state.specimenId || !state.custodyId || state.custodyId !== unit.custodyId || owner.path === null)
+        throw Error("Captured Prime has no exact current container owner.");
+    } else if (owner.path !== null || owner.body === null || state.custodyId != null)
+      throw Error("Free Prime has an incompatible stored owner.");
+  }
+}
+export function assertLegendaryCreatureEncounterOwner(state: LegendaryEncounterState, unit: CreatureEncounterUnit | null): void {
+  const owner = unit?.owner ?? null;
+  if (owner && owner.kind !== LEGENDARY_ENCOUNTERS[state.encounterId].kind) throw Error("Legendary owner has the wrong authored species.");
+  if (state.outcome === "capture") {
+    // Legendary deployment follows its body; captured Prime remains orb-owned.
+    const current = owner?.body ? `creature:${owner.body.id}` : unit?.custodyId;
+    if (!owner || current !== state.custodyEntityId || !owner.body && !current?.startsWith("orb:"))
+      throw Error("Captured legendary has no exact current body/orb owner.");
+  } else if (owner && (owner.path !== null || state.status === "dormant" || state.outcome === "defeat" || state.outcome === "release"))
+    throw Error("Legendary history is incompatible with its current owner.");
 }
 
 /** Bind current creature ownership to canonical encounter history. Historical
@@ -98,32 +128,14 @@ export function reconcileCreatureEncounterCustody(custody: CreatureCustodySource
   }
   const primeOwners: { anchorId: string; owner: CreatureEncounterOwner | null }[] = [];
   for (const [anchorId, state] of Object.entries(sources.primeEncounters).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
-    const unit = primes.get(anchorId), owner = unit?.owner ?? null;
-    if (state.status === "defeated") {
-      if (owner || state.entityId !== null || state.custodyId != null) throw Error("Defeated Prime still has living custody.");
-    } else {
-      if (!unit || !owner || owner.kind !== state.kind || state.specimenId !== undefined && state.specimenId !== owner.specimenId
-        || state.entityId !== (owner.body?.id ?? null)) throw Error("Prime history does not match its current body/specimen.");
-      if (state.status === "captured") {
-        if (!state.specimenId || !state.custodyId || state.custodyId !== unit.custodyId || owner.path === null)
-          throw Error("Captured Prime has no exact current container owner.");
-      } else if (owner.path !== null || owner.body === null || state.custodyId != null)
-        throw Error("Free Prime has an incompatible stored owner.");
-    }
+    const unit = primes.get(anchorId) ?? null, owner = unit?.owner ?? null;
+    assertPrimeCreatureEncounterOwner(state, unit);
     primeOwners.push({ anchorId, owner });
   }
   const legendaryOwners: { siteId: string; owner: CreatureEncounterOwner | null }[] = [];
   for (const [siteId, state] of Object.entries(sources.legendaryEncounters).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
-    const unit = legendaries.get(siteId), owner = unit?.owner ?? null;
-    if (owner && owner.kind !== LEGENDARY_ENCOUNTERS[state.encounterId].kind) throw Error("Legendary owner has the wrong authored species.");
-    if (state.outcome === "capture") {
-      // Deployment moves legendary custody to the current body. Prime custody
-      // above deliberately remains orb-owned: these are distinct live rules.
-      const current = owner?.body ? `creature:${owner.body.id}` : unit?.custodyId;
-      if (!owner || current !== state.custodyEntityId || !owner.body && !current?.startsWith("orb:"))
-        throw Error("Captured legendary has no exact current body/orb owner.");
-    } else if (owner && (owner.path !== null || state.status === "dormant" || state.outcome === "defeat" || state.outcome === "release"))
-      throw Error("Legendary history is incompatible with its current owner.");
+    const unit = legendaries.get(siteId) ?? null, owner = unit?.owner ?? null;
+    assertLegendaryCreatureEncounterOwner(state, unit);
     // Dormant sites and completed release/defeat histories have no live owner;
     // active/covenant sites may be unmaterialized. Generated-site closure is a
     // separate selector, never manufactured from this history record.

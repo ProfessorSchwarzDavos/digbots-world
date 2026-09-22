@@ -569,6 +569,7 @@ import type { WorldCreatureCustodySource } from "./creature-custody-sources";
 import { collectWorldCreatureCustodyHolders } from "./creature-custody-holders";
 import { assertCreatureOriginsAgree, newCreatureOrigins, readCreatureMetadataOrigins, readCreatureOrigins, type CreatureOrigins } from "./creature-origins";
 import { planCreatureEncounterRecall, reconcileCreatureEncounterCustody } from "./creature-encounter-custody";
+import { reconcileUniverseCreatureCustody } from "./universe-creature-custody";
 import { canonicalJson, cloneUniverseJson, freezeUniverseJson } from "./universe-json";
 import { encodeAttachmentSource, snapshotAttachmentSaveSources, type AttachmentSaveSources } from "./attachment-source-preimage";
 import { selectAsteroidProductionStations } from "./asteroid-attachment-production";
@@ -22395,6 +22396,35 @@ export class VoxelEngine {
     if (repository.snapshot.manifest.currentLocationId !== runtime.physical.frame.orbitId)
       throw Error("Attachment repository differs from the active orbital source.");
     return freezeUniverseJson({ runtime, repository });
+  }
+
+  /** Read-only global creature ownership, without first assuming all encounter
+   * history is local. This does not replace the physical/source admission gate
+   * above, pause shared simulation, save, change custody or permit travel. */
+  async snapshotUniverseCreatureCustody() {
+    const storage = this.worldStorage;
+    if (!storage) throw Error("Global creature custody lacks universe storage.");
+    const observe = () => {
+      if (this.worldStorage !== storage || this.checkpointPromise || this.pendingFieldSurvey || this.pendingSpaceArrival
+        || this.locationTransitioning || this.evaCargoLine) throw Error("Finish pending world/cargo transactions before global custody inspection.");
+      const manifest = storage.currentManifest, stamp = storage.currentStamp;
+      if (!manifest || !stamp || manifest.currentLocationId !== stamp.locationId)
+        throw Error("Global creature custody lacks its current durable location owner.");
+      const raw = { actorId: this.localPlayerId(), manifest, stamp, persistenceRevision: this.persistenceRevision,
+        ...this.snapshotAttachmentCreatureSources(), actors: this.snapshotAttachmentActorBodies() };
+      const source = encodeAttachmentSource(raw);
+      return { runtime: freezeUniverseJson(structuredClone(raw)), source };
+    };
+    const observed = observe(), repository = await storage.snapshotAttachmentSource();
+    if (JSON.stringify(observed.source) !== JSON.stringify(observe().source))
+      throw Error("Global creature custody changed during repository observation.");
+    const { runtime } = observed;
+    const custody = reconcileUniverseCreatureCustody(repository.snapshot, {
+      universeId: parseLocationId(runtime.stamp.locationId).universeId, repositoryRevision: runtime.manifest.revision,
+      playerId: runtime.manifest.currentPlayerId, locationId: runtime.stamp.locationId, actorId: runtime.actorId,
+      actors: runtime.actors, source: runtime.source, encounterSources: runtime.encounterSources,
+    });
+    return freezeUniverseJson({ runtime, runtimeSource: observed.source, repository: structuredClone(repository), custody });
   }
 
   /** Synchronous host-owned body/connection/seat snapshot for future attachment

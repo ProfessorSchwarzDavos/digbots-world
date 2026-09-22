@@ -959,8 +959,6 @@ import {
   type OrbMorphLoomState,
 } from "./orb-morphing";
 import {
-  addDigitalCreatureCell,
-  addDigitalItemCell,
   createDigitalCreatureArchive,
   createDigitalItemVault,
   depositCreatureOrb,
@@ -970,13 +968,11 @@ import {
   digitalStackSignature,
   normalizeDigitalCreatureArchive,
   normalizeDigitalItemVault,
-  removeDigitalCreatureCell,
-  removeDigitalItemCell,
   stepDigitalCreatureHealing,
   type DigitalCreatureArchive,
   type DigitalItemVault,
-  type DigitalStorageTier,
 } from "./digital-storage";
+import { prepareWaygridCapacity, waygridBlockCapacity, type WaygridCapacityPlan } from "./waygrid-capacity";
 import {
   canRideReedstrider,
   createPeelopSheddingState,
@@ -10253,7 +10249,7 @@ export class VoxelEngine {
         && action.edits[0].facing !== undefined && isDirectionallyPlacedBlock(action.edits[0].type as BlockId)
         && this.world.getBlock(action.edits[0].x, action.edits[0].y, action.edits[0].z) === action.edits[0].type;
       const uniqueCells = new Set(action.edits.map(edit => blockKey(edit.x, edit.y, edit.z))).size === action.edits.length;
-      const valid = Boolean(remote) && action.actorId === peer.identity?.id && uniqueCells && placement.valid && (!action.interaction || !!interaction)
+      let valid = Boolean(remote) && action.actorId === peer.identity?.id && uniqueCells && placement.valid && (!action.interaction || !!interaction)
         && (!action.effect || action.edits.every(edit => edit.type === BlockId.Air))
         && validPressureDoorEdits(action.edits, point => this.world.getBlock(point.x, point.y, point.z)) && action.edits.length > 0 && action.edits.length <= 2_048 && action.edits.every((edit) => {
         if (!peer.identity || !this.stationActorAccess(peer.identity.id, edit.x, edit.y, edit.z, edit.type === BlockId.Air ? "extract" : "build") || this.stationStructurePinned(edit.x, edit.y, edit.z)) return false;
@@ -10290,6 +10286,10 @@ export class VoxelEngine {
         const reachSquared = action.kind === "batch" ? 32 * 32 : 8 * 8;
         return Boolean(definition) && edit.y >= MIN_Y && edit.y <= MAX_Y && dx * dx + dy * dy + dz * dz <= reachSquared && !occupiesPlayer;
       });
+      let waygridPlan: WaygridCapacityPlan | null = null;
+      let waygridRefusal: string | undefined;
+      if (valid) try { waygridPlan = this.prepareWaygridEdits(action.edits); }
+      catch (error) { valid = false; waygridRefusal = error instanceof Error ? error.message : "Waygrid capacity preflight refused."; }
       const resolved: BlockAction = valid
         ? { ...action, status: "accepted" }
         : {
@@ -10300,7 +10300,7 @@ export class VoxelEngine {
             return { ...edit, type, ...(isDirectionallyPlacedBlock(type) ? { facing } : {}) };
           }),
           status: "rejected",
-          reason: "The host rejected an out-of-range, occupied, or invalid block edit.",
+          reason: waygridRefusal ?? "The host rejected an out-of-range, occupied, or invalid block edit.",
         };
       if (valid) {
         if (playerState && !placement.consumed && !interaction) this.multiplayerPlayerStates.set(playerState.playerId, playerState);
@@ -10325,6 +10325,7 @@ export class VoxelEngine {
           true,
           action.effect?.kind === "tree-fell",
         );
+        this.commitWaygridEdits(waygridPlan);
         this.applyBlockEditFacings(action.edits, true);
         if (interaction && peer.identity) {
           this.multiplayerPlayerStates.set(peer.identity.id, interaction.state);
@@ -13290,13 +13291,6 @@ export class VoxelEngine {
     return state;
   }
 
-  waygridCellTier(type: BlockId): DigitalStorageTier | null {
-    if (type === BlockId.WaygridCellI) return 1;
-    if (type === BlockId.WaygridCellII) return 2;
-    if (type === BlockId.WaygridCellIII) return 3;
-    return null;
-  }
-
   private clearWayworksModels(onlyKey?: string) {
     for (const [key, group] of this.wayworksModels ?? []) {
       if (onlyKey !== undefined && key !== onlyKey) continue;
@@ -13972,39 +13966,36 @@ export class VoxelEngine {
     }
   }
 
-  registerWaygridBlock(type: BlockId, key: string) {
-    if (type === BlockId.WaygridVaultTerminal) {
-      this.digitalItemVault = addDigitalItemCell(this.digitalItemVault, { id: `terminal:item:${key}`, tier: 1 });
-      return;
-    }
-    if (type === BlockId.WaygridCreatureArchive) {
-      this.digitalCreatureArchive = addDigitalCreatureCell(this.digitalCreatureArchive, { id: `terminal:creature:${key}`, tier: 1 });
-      return;
-    }
-    const tier = this.waygridCellTier(type);
-    if (!tier) return;
-    this.digitalItemVault = addDigitalItemCell(this.digitalItemVault, { id: `cell:${key}`, tier });
-    this.digitalCreatureArchive = addDigitalCreatureCell(this.digitalCreatureArchive, { id: `cell:${key}`, tier });
+  private touchesWaygrid(edits: BlockAction["edits"]) {
+    return edits.some(edit => waygridBlockCapacity(edit.type as BlockId)
+      || waygridBlockCapacity(this.world.getBlock(edit.x, edit.y, edit.z) ?? BlockId.Air));
   }
 
-  unregisterWaygridBlock(type: BlockId, key: string, position: THREE.Vector3) {
-    const itemCellId = type === BlockId.WaygridVaultTerminal ? `terminal:item:${key}` : `cell:${key}`;
-    const creatureCellId = type === BlockId.WaygridCreatureArchive ? `terminal:creature:${key}` : `cell:${key}`;
-    if (type === BlockId.WaygridVaultTerminal || this.waygridCellTier(type)) {
-      const removed = removeDigitalItemCell(this.digitalItemVault, itemCellId);
-      this.digitalItemVault = removed.state;
-      for (const slot of removed.overflow) this.spawnDrop(slot.item, slot.count, position, slot.durability, slot.metadata);
-      if (removed.overflow.length) this.events.onToast("Waygrid capacity fell below usage; excess items spilled beside the network.");
+  private prepareWaygridEdits(edits: BlockAction["edits"], sequential = false): WaygridCapacityPlan | null {
+    if (!this.touchesWaygrid(edits)) return null;
+    if (this.multiplayer?.role === "guest") throw Error("Only the host can change Waygrid capacity.");
+    const proposed = new Map<string, BlockId>();
+    const changes = edits.map(edit => {
+      const key = blockKey(edit.x, edit.y, edit.z);
+      const before = proposed.get(key) ?? this.world.getBlock(edit.x, edit.y, edit.z);
+      if (before === undefined) throw Error("Waygrid edit terrain is unavailable.");
+      proposed.set(key, edit.type as BlockId);
+      return { x: edit.x, y: edit.y, z: edit.z, before, after: edit.type as BlockId };
+    });
+    let plan: WaygridCapacityPlan = { vault: this.digitalItemVault, archive: this.digitalCreatureArchive, spills: [] };
+    for (const batch of sequential ? changes.map(change => [change]) : [changes]) {
+      plan = prepareWaygridCapacity(this.world.locationScope.locationId, plan.vault, plan.archive, batch);
+      // Ordinary drops have a finite eviction pool. Until a durable overflow
+      // destination exists, refusing is the only lossless capacity reduction.
+      if (plan.spills.length) throw Error("Withdraw Waygrid contents before reducing capacity; world drops cannot safely hold the overflow.");
     }
-    if (type === BlockId.WaygridCreatureArchive || this.waygridCellTier(type)) {
-      const removed = removeDigitalCreatureCell(this.digitalCreatureArchive, creatureCellId);
-      this.digitalCreatureArchive = removed.state;
-      for (const orb of removed.overflow) {
-        const slot = captureOrbInventorySlot(orb);
-        this.spawnDrop(slot.item, 1, position, slot.durability, slot.metadata);
-      }
-      if (removed.overflow.length) this.events.onToast("Creature Archive capacity fell; excess Capture Orbs were safely ejected.");
-    }
+    return plan;
+  }
+
+  private commitWaygridEdits(plan: WaygridCapacityPlan | null) {
+    if (!plan) return;
+    // Both stores were validated together before the caller changed any terrain.
+    this.digitalItemVault = plan.vault; this.digitalCreatureArchive = plan.archive;
   }
 
   openOverlay(kind: OverlayKind, key?: string) {
@@ -20730,9 +20721,18 @@ export class VoxelEngine {
     if (placedEdits.some(edit => !this.stationActorAccess("local", edit.x, edit.y, edit.z, "build"))) {
       this.events.onToast("Every part of this structure requires claim construction permission."); return;
     }
+    if (this.multiplayer?.role === "guest" && this.touchesWaygrid(placedEdits)) {
+      this.publishBlockEdits(placedEdits, placedEdits.length > 1 ? "batch" : "place", undefined, this.mode === "survival" ? slot.item : undefined);
+      this.placeCooldown = 0.16;
+      return;
+    }
+    let waygridPlan: WaygridCapacityPlan | null;
+    try { waygridPlan = this.prepareWaygridEdits(placedEdits); }
+    catch (error) { this.events.onToast(error instanceof Error ? error.message : "Waygrid capacity preflight refused."); return; }
     const playerEditFeedback = this.world.beginPlayerEditFeedback?.("place");
     if (placedEdits.length > 1) this.world.setBlocksBatch(placedEdits, true, true);
     else this.world.setBlock(x, y, z, type, true, true);
+    this.commitWaygridEdits(waygridPlan);
     for (const edit of placedEdits) if (edit.facing !== undefined) this.world.setBlockFacing?.(edit.x, edit.y, edit.z, edit.facing, true);
     if (playerEditFeedback !== undefined) this.world.completePlayerEditFeedback?.(playerEditFeedback);
     this.publishBlockEdits(
@@ -20766,7 +20766,6 @@ export class VoxelEngine {
     if (type === BlockId.GolemForge) this.golemForges.set(placedKey, createGolemForgeState());
     if (ARCHIVE_SHELF_BLOCK_SET.has(type)) this.archiveShelves.set(placedKey, normalizeArchiveShelf(null));
     if (type === BlockId.TomeDisplay) this.tomeDisplays.set(placedKey, normalizeTomeDisplay(null));
-    this.registerWaygridBlock(type, placedKey);
     if (type === BlockId.Wayshrine) this.mapKnowledge = placeWayshrine(this.mapKnowledge, {
       id: `wayshrine:${placedKey}`,
       name: "Wayfarer's Wayshrine",
@@ -21023,7 +21022,6 @@ export class VoxelEngine {
   teardownBrokenBlockState(type: BlockId, x: number, y: number, z: number) {
     const key = blockKey(x, y, z);
     const position = new THREE.Vector3(x, y, z);
-    this.unregisterWaygridBlock(type, key, position);
     if (type === BlockId.Furnace) {
       const furnace = this.furnaces.get(key);
       if (furnace) for (const slot of [furnace.input, furnace.fuel, furnace.output]) if (slot) {
@@ -21191,9 +21189,18 @@ export class VoxelEngine {
     if (brokenEdits.some(edit => !this.stationActorAccess("local", edit.x, edit.y, edit.z, "extract") || this.stationStructurePinned(edit.x, edit.y, edit.z))) {
       this.events.onToast("Every part of this structure requires claim extraction permission."); return;
     }
+    if (this.multiplayer?.role === "guest" && this.touchesWaygrid(brokenEdits)) {
+      this.publishBlockEdits(brokenEdits, brokenEdits.length > 1 ? "batch" : "break");
+      this.miningProgress = 0; this.target = null; this.emitHud(true);
+      return;
+    }
+    let waygridPlan: WaygridCapacityPlan | null;
+    try { waygridPlan = this.prepareWaygridEdits(brokenEdits); }
+    catch (error) { this.events.onToast(error instanceof Error ? error.message : "Waygrid capacity preflight refused."); return; }
     const playerEditFeedback = this.world.beginPlayerEditFeedback?.("break");
     if (brokenEdits.length > 1) this.world.setBlocksBatch(brokenEdits, true, true);
     else this.world.setBlock(x, y, z, brokenEdits[0].type, true, true);
+    this.commitWaygridEdits(waygridPlan);
     for (const edit of brokenEdits) this.breakUnsupportedAround(edit.x, edit.y, edit.z);
     for (const edit of brokenEdits) this.notifyLiquidChanged(edit.x, edit.y, edit.z);
     this.publishBlockEdits(brokenEdits, brokenEdits.length > 1 ? "batch" : "break");
@@ -21209,7 +21216,6 @@ export class VoxelEngine {
       this.damageSelectedTool();
     }
     const key = blockKey(x, y, z);
-    this.unregisterWaygridBlock(type, key, new THREE.Vector3(x, y, z));
     if (machineKindForBlock(type)) this.wayworks.delete(key);
     if (isEnvironmentLightBlock(type)) this.lightRefreshTimer = 0;
     for (const edit of brokenEdits) this.saplings.delete(blockKey(edit.x, edit.y, edit.z));
@@ -34964,10 +34970,14 @@ export class VoxelEngine {
         if (transfer.source[0]) return blocked("inventory_full", `The drone pack cannot hold ${count} ${ITEMS[item]?.name ?? "resource"}.`);
         working = transfer.target as Array<InventorySlot | null>;
       }
+      const edits = blocks.map((cell) => ({ x: cell.x, y: cell.y, z: cell.z, type: BlockId.Air }));
+      let waygridPlan: WaygridCapacityPlan | null;
+      try { waygridPlan = this.prepareWaygridEdits(edits); }
+      catch (error) { return blocked("waygrid_capacity_conflict", error instanceof Error ? error.message : "Waygrid capacity preflight refused."); }
       const lease = this.agentAuthority.acquireLease(blocks.map((cell) => `block:${blockKey(cell.x, cell.y, cell.z)}`), command.commandId, command.agentId, command.expiresAt);
       if (!lease.ok) return blocked("work_lease_conflict", "Another worker already owns part of that resource.", { conflict: lease.conflict });
-      const edits = blocks.map((cell) => ({ x: cell.x, y: cell.y, z: cell.z, type: BlockId.Air }));
       this.world.setBlocksBatch(edits, true, true);
+      this.commitWaygridEdits(waygridPlan);
       this.publishBlockEdits(edits, "batch");
       this.agentInventories.set(command.agentId, working);
       this.bumpAgentInventoryRevision(command.agentId);
@@ -35001,6 +35011,8 @@ export class VoxelEngine {
         const belowPlanned = placements.some((candidate) => candidate.x === placement.x && candidate.y === placement.y - 1 && candidate.z === placement.z);
         if (!belowPlanned && !BLOCKS[this.world.getBlock(placement.x, placement.y - 1, placement.z) ?? BlockId.Air]?.solid) warnings.push(`${cellKey} has no solid support`);
       }
+      try { this.prepareWaygridEdits(this.agentBuildEdits({ placements, removals }), true); }
+      catch (error) { return blocked("waygrid_capacity_conflict", error instanceof Error ? error.message : "Waygrid capacity preflight refused."); }
       const requirements = buildMaterialRequirements(placements, this.agentInventories.get(command.agentId) ?? []);
       const missing = requirements.filter((entry) => entry.missing > 0);
       if (missing.length) return this.publishAgentResult(createAgentResult(command, "blocked", revision, "insufficient_materials", `The plan is short ${missing.map((entry) => `${entry.missing} ${entry.name ?? entry.block}`).join(", ")}.`, { materials: requirements, choices: ["modify_plan", "stop", "get_more_resources"] }));
@@ -35024,6 +35036,8 @@ export class VoxelEngine {
       const preview = this.agentBuildPreviews.get(previewId);
       if (!preview || preview.agentId !== command.agentId || preview.expiresAt <= Date.now()) return blocked("preview_not_found", "That build preview does not belong to this drone or has expired.");
       if (preview.worldRevision !== revision) return blocked("world_revision_conflict", "The world changed after preview. Re-plan before committing.");
+      try { this.prepareWaygridEdits(this.agentBuildEdits(preview), true); }
+      catch (error) { return blocked("waygrid_capacity_conflict", error instanceof Error ? error.message : "Waygrid capacity preflight refused."); }
       const leaseKeys = [...preview.placements.map((cell) => `block:${blockKey(cell.x, cell.y, cell.z)}`), ...preview.removals.map((cell) => `block:${blockKey(cell.x, cell.y, cell.z)}`)];
       const lease = this.agentAuthority.acquireLease(leaseKeys, command.commandId, command.agentId, command.expiresAt);
       if (!lease.ok) return blocked("work_lease_conflict", "Another worker owns part of this build site.", { conflict: lease.conflict });
@@ -35158,24 +35172,39 @@ export class VoxelEngine {
     }
   }
 
+  private agentBuildEdits(preview: Pick<AgentBuildPreview, "placements" | "removals">, removalIndex = 0, placementIndex = 0): BlockAction["edits"] {
+    return [...preview.removals.slice(removalIndex).map(cell => ({ ...cell, type: BlockId.Air })),
+      ...preview.placements.slice(placementIndex).map(cell => ({ x: cell.x, y: cell.y, z: cell.z, type: cell.block }))];
+  }
+
   private updateAgentBuildJobs() {
     const frameStartedAt = performance.now();
     for (const [agentId, job] of this.agentBuildJobs) {
       const record = this.agentAuthority.get(agentId);
       if (!record || record.status !== "approved") continue;
+      // A capacity conflict can arise after preview/reservation without a voxel
+      // revision change. Refuse the whole remaining batch before its first edit.
+      try { this.prepareWaygridEdits(this.agentBuildEdits(job.preview, job.removalIndex, job.placementIndex), true); }
+      catch (error) { this.cancelAgentBuild(agentId, "waygrid_capacity_conflict", error instanceof Error ? error.message : "Waygrid capacity preflight refused."); continue; }
       let steps = 0;
-      while (steps < 8 && performance.now() - frameStartedAt < 1.25) {
+      while (steps < 8 && (steps === 0 || performance.now() - frameStartedAt < 1.25)) {
         if (job.removalIndex < job.preview.removals.length) {
-          const cell = job.preview.removals[job.removalIndex++];
+          const cell = job.preview.removals[job.removalIndex];
           if (!this.stationActorAccess(agentId, cell.x, cell.y, cell.z, "extract") || this.stationStructurePinned(cell.x, cell.y, cell.z)) { this.cancelAgentBuild(agentId, "station_access_changed", "Claim permission changed; unplaced materials were returned."); break; }
           const current = this.world.getBlock(cell.x, cell.y, cell.z);
           if (machineKindForBlock(current)) { this.cancelAgentBuild(agentId, "workshop_site_changed", "A machine entered the build site. Use typed sealed pickup first."); break; }
           if (current === undefined) { this.cancelAgentBuild(agentId, "build_chunk_unloaded", `The build stopped before ${blockKey(cell.x, cell.y, cell.z)} because its chunk unloaded.`); break; }
           if (current !== BlockId.Air) {
+            const edits = [{ x: cell.x, y: cell.y, z: cell.z, type: BlockId.Air }];
+            let waygridPlan: WaygridCapacityPlan | null;
+            try { waygridPlan = this.prepareWaygridEdits(edits); }
+            catch (error) { this.cancelAgentBuild(agentId, "waygrid_capacity_conflict", error instanceof Error ? error.message : "Waygrid capacity preflight refused."); break; }
             this.world.setBlock(cell.x, cell.y, cell.z, BlockId.Air, true, true);
+            this.commitWaygridEdits(waygridPlan);
             this.publishBlockEdits([{ x: cell.x, y: cell.y, z: cell.z, type: BlockId.Air }], "break");
             this.markAgentWork(agentId, cell, 0xe7a84f);
           }
+          job.removalIndex += 1;
           job.committed += 1;
           steps += 1;
           continue;
@@ -35193,7 +35222,11 @@ export class VoxelEngine {
           const item = itemForBlock(cell.block as BlockId);
           const remaining = job.reserved.get(item) ?? 0;
           if (remaining <= 0) { this.cancelAgentBuild(agentId, "reservation_missing", "The internal material reservation no longer matches the approved plan."); break; }
+          let waygridPlan: WaygridCapacityPlan | null;
+          try { waygridPlan = this.prepareWaygridEdits([{ x: cell.x, y: cell.y, z: cell.z, type: cell.block }]); }
+          catch (error) { this.cancelAgentBuild(agentId, "waygrid_capacity_conflict", error instanceof Error ? error.message : "Waygrid capacity preflight refused."); break; }
           this.world.setBlock(cell.x, cell.y, cell.z, cell.block as BlockId, true, true);
+          this.commitWaygridEdits(waygridPlan);
           if (cell.facing !== undefined) this.world.setBlockFacing(cell.x, cell.y, cell.z, cell.facing, true);
           this.publishBlockEdits([{ x: cell.x, y: cell.y, z: cell.z, type: cell.block as BlockId, ...(cell.facing === undefined ? {} : { facing: cell.facing }) }], "place");
           job.reserved.set(item, remaining - 1);

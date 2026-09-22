@@ -2161,7 +2161,6 @@ test("all ordinary saplings can be placed directly on Meadow Grass", () => {
     engine.events = { onToast: () => undefined } as unknown as VoxelEngine["events"];
     engine.publishBlockEdits = () => undefined;
     engine.notifyLiquidChanged = () => undefined;
-    engine.registerWaygridBlock = () => undefined;
     engine.schedulePlantGrowth = () => undefined;
     engine.audio = { play: () => undefined } as unknown as VoxelEngine["audio"];
     engine.spawnParticles = () => undefined;

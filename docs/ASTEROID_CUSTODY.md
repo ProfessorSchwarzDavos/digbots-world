@@ -361,6 +361,23 @@ Fence joins read and bind all four canonical neighbors, including unloaded and
 outside cells, without turning those read dependencies into copied ownership.
 This does not close other authored sites or Waygrid capacity ownership.
 
+Waygrid capacity lifecycle now uses a canonical full location/cell/kind identity,
+retained without the historical 80-character truncation. Local player, host-owned
+guest and agent edits preflight both universe-owned stores before touching the
+terrain, inventory or tool. Guests send intent only; reply/snapshot presentation
+does not register capacity. Matching cell tiers require both store records.
+Conflicting bare-coordinate legacy IDs refuse rather than guessing a location or
+double-crediting the block. Unrelated legacy custom capacity remains unresolved.
+
+Capacity reduction that needs overflow refuses with a withdraw-first message:
+the ordinary 120-drop eviction pool cannot safely receive a full memory cell.
+The pure planner computes bounded, exact overflow proposals, but the engine does
+not emit them. Agent previews, reservation commits and queued batches validate
+the actual removal-then-placement sequence, not only its final net capacity;
+later conflicts cancel safely and return unplaced material reservations. This
+is lifecycle integrity, not global physical-owner resolution, a Waygrid attachment
+selector, terminal power-dependency closure, or local-frame admission.
+
 A separate isolated native IndexedDB check now covers a declared synthetic paid
 vehicle transition, fresh repository/facade open, and ordinary save/reopen.
 Origin-qualified equal specimen IDs, equal numeric bodies in different locations,

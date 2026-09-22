@@ -2,6 +2,20 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Revision16 Waygrid lifecycle uses full location-qualified capacity IDs and
+  shared both-store preflight across local, host/guest and agent edits. Guest
+  edits are intent-only; queued jobs revalidate before reservation and each batch.
+  Unknown conflicting legacy coordinate owners refuse without guessing. Full
+  global ownership/attachment/power-dependency integration remains open.
+  Independent review found ordinary120-drop eviction could destroy large spills,
+  and final-net-capacity preview differed from sequential queued execution.
+  Both corrected: engine refuses overflow before any mutation, requiring content
+  withdrawal; queued preflight simulates actual order. Pure overflow proposals
+  remain exact/bounded, not a runtime spill-delivery claim. Reviewer rechecked,
+  no remaining concrete findings. Worker26PASS; runtime-r1 13PASS/11FAIL from
+  test-only wrong block-vs-item IDs/missing command stamp; r2 49PASS/1FAIL from
+  insufficient test pickaxe tier; corrected to real item IDs/stamp/Star Pickaxe.
+  Expandedr3 226PASS, static157/158 and lint130PASS. No entry opening or full gate.
 - Revision16 architecture closure binds exact ordinary/pressure-door and bed
   pairs through canonical unloaded pages, refuses split/orphan/mismatched halves,
   and accounts for fence/gate post protrusions with actual shared renderer

@@ -1,5 +1,6 @@
 import { type InventorySlot, type ItemCode } from "./data";
 import { inventorySlotStackLimit, isFilledCaptureOrbSlot } from "./inventory-convenience";
+import { readWaygridCapacityId } from "./waygrid-capacity-identity";
 import {
   decodeCaptureOrb,
   encodeCaptureOrb,
@@ -37,7 +38,9 @@ export type DigitalCreatureArchive = Readonly<{
 }>;
 
 const cleanCell = (cell: DigitalStorageCell): DigitalStorageCell => ({
-  id: cell.id.trim().slice(0, 80) || "storage-cell",
+  // Canonical physical identities include the complete location tuple. Legacy
+  // display names retain their historical limit; scoped IDs must never truncate.
+  id: readWaygridCapacityId(cell.id) ? cell.id : cell.id.trim().slice(0, 80) || "storage-cell",
   tier: cell.tier === 2 || cell.tier === 3 ? cell.tier : 1,
 });
 

@@ -39,7 +39,7 @@ function identifier(value: unknown, maximum = 160): asserts value is string {
   if (typeof value !== "string" || !value || value.length > maximum || value.trim() !== value)
     throw Error("Invalid creature custody identity.");
 }
-function pathKey(path: CreatureCustodyPath): string {
+export function creatureCustodyPathKey(path: CreatureCustodyPath): string {
   if (!Array.isArray(path) || !path.length) throw Error("Missing canonical creature custody path.");
   for (const part of path) {
     if (typeof part === "number") {
@@ -48,12 +48,26 @@ function pathKey(path: CreatureCustodyPath): string {
   }
   return canonicalJson(path);
 }
-function directOrb(orb: CaptureOrb | string | null): StoredCreatureCustody | null {
+export function readDirectCreatureCustody(orb: CaptureOrb | string | null): StoredCreatureCustody | null {
   if (orb === null) return null;
   const encoded = typeof orb === "string" ? orb : custodyJsonIdentity(orb), read = readExactEncodedCaptureOrb(encoded);
   if (!read.creature) return null;
   return { format: "capture-orb", containerId: read.orbId, capturedAt: read.capturedAt,
     creature: read.creature, attunement: read.attunement ?? null, encoded };
+}
+
+/** Shared strict body values; callers separately guard supported fields and
+ * choose the scope in which body and specimen identities must be unique. */
+export function assertCreatureCustodyBody(creature: SavedCreature): void {
+  custodyJsonIdentity(creature);
+  if (!isUniverseRecord(creature) || !Number.isSafeInteger(creature.id) || creature.id < 0
+    || !Object.hasOwn(MOB_DEFS, creature.kind) || ![creature.x, creature.y, creature.z, creature.yaw, creature.health, creature.age].every(Number.isFinite)
+    || creature.health < 0 || creature.age < 0) throw Error("Invalid or duplicate creature custody body.");
+  for (const key of ["specimenId", "attunedOrbId", "creatureOwnerId"] as const) {
+    if (!Object.hasOwn(creature, key)) continue;
+    if (key !== "specimenId" && creature[key] === null) continue;
+    identifier(creature[key], key === "attunedOrbId" ? 80 : 160);
+  }
 }
 
 /** Reconcile all PROVIDED canonical vessels and live/sleeping bodies. The caller
@@ -68,7 +82,7 @@ export function indexCreatureCustody(sources: CreatureCustodySources): CreatureC
   const paths = new Set<string>(), containers = new Set<string>(), specimens = new Set<string>();
   const stored: { path: CreatureCustodyPath; custody: StoredCreatureCustody; body: CreatureCustodyBody | null }[] = [];
   const register = (path: CreatureCustodyPath, custody: StoredCreatureCustody | null) => {
-    const key = pathKey(path);
+    const key = creatureCustodyPathKey(path);
     if (paths.has(key)) throw Error("Duplicate canonical creature custody path.");
     paths.add(key);
     if (!custody) return;
@@ -85,7 +99,7 @@ export function indexCreatureCustody(sources: CreatureCustodySources): CreatureC
   for (const value of sources.orbRecords) {
     if (!isUniverseRecord(value)) throw Error("Invalid creature custody orb source.");
     assertExactKeys(value, ["path", "orb"], "Creature custody orb source");
-    register(value.path, directOrb(value.orb));
+    register(value.path, readDirectCreatureCustody(value.orb));
   }
   const residents = sources.residents.map(value => {
     if (!isUniverseRecord(value)) throw Error("Invalid housed creature custody source.");
@@ -99,15 +113,8 @@ export function indexCreatureCustody(sources: CreatureCustodySources): CreatureC
   assertKnownAsteroidEntityFields({ creatures: sources.creatures, sleepingCreatures: sources.sleepingCreatures, boats: [], drops: [], leads: [] });
   const bodies = new Map<number, CreatureCustodyBody>(), bodySpecimens = new Set<string>();
   for (const collection of ["creatures", "sleepingCreatures"] as const) for (const creature of sources[collection]) {
-    custodyJsonIdentity(creature);
-    if (!isUniverseRecord(creature) || !Number.isSafeInteger(creature.id) || creature.id < 0 || bodies.has(creature.id)
-      || !Object.hasOwn(MOB_DEFS, creature.kind) || ![creature.x, creature.y, creature.z, creature.yaw, creature.health, creature.age].every(Number.isFinite)
-      || creature.health < 0 || creature.age < 0) throw Error("Invalid or duplicate creature custody body.");
-    for (const key of ["specimenId", "attunedOrbId", "creatureOwnerId"] as const) {
-      if (!Object.hasOwn(creature, key)) continue;
-      if (key !== "specimenId" && creature[key] === null) continue;
-      identifier(creature[key], key === "attunedOrbId" ? 80 : 160);
-    }
+    assertCreatureCustodyBody(creature);
+    if (bodies.has(creature.id)) throw Error("Invalid or duplicate creature custody body.");
     if (creature.specimenId !== undefined) {
       if (bodySpecimens.has(creature.specimenId)) throw Error("Duplicate live or sleeping specimen custody.");
       bodySpecimens.add(creature.specimenId);

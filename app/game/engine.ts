@@ -570,7 +570,7 @@ import { collectWorldCreatureCustodyHolders } from "./creature-custody-holders";
 import { assertCreatureOriginsAgree, newCreatureOrigins, readCreatureMetadataOrigins, readCreatureOrigins, type CreatureOrigins } from "./creature-origins";
 import { planCreatureEncounterRecall, reconcileCreatureEncounterCustody } from "./creature-encounter-custody";
 import { canonicalJson, cloneUniverseJson, freezeUniverseJson } from "./universe-json";
-import { snapshotAttachmentSaveSources, type AttachmentSaveSources } from "./attachment-source-preimage";
+import { encodeAttachmentSource, snapshotAttachmentSaveSources, type AttachmentSaveSources } from "./attachment-source-preimage";
 import { selectAsteroidProductionStations } from "./asteroid-attachment-production";
 import { selectAsteroidBookFurniture } from "./asteroid-attachment-book-furniture";
 import { itemPresentationFamily } from "./item-presentation";
@@ -22314,21 +22314,7 @@ export class VoxelEngine {
     const bookFurniture = selectAsteroidBookFurniture(physical.frame, {
       archiveShelves: Object.fromEntries(this.archiveShelves), tomeDisplays: Object.fromEntries(this.tomeDisplays),
     }, canonicalWorld);
-    const mobs = this.mobs.map(mob => {
-      // Rendering object graphs are not source state. Their authoritative body
-      // positions are copied explicitly; every other own field is retained.
-      const visuals = { group: true, presentationRoot: true, visual: true, sentientLod: true,
-        parts: true, shadeSaddle: true, scaleAttachments: true } satisfies Partial<Record<keyof MobEntity, true>>;
-      const raw: Record<string, unknown> = {};
-      if (Object.getOwnPropertySymbols(mob).length) throw Error("Attachment creature source cannot contain hidden symbols.");
-      for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(mob))) {
-        if (Object.hasOwn(visuals, key)) continue;
-        if (!("value" in descriptor)) throw Error("Attachment creature source cannot contain accessors.");
-        const value: unknown = descriptor.value;
-        raw[key] = value instanceof THREE.Vector3 || value instanceof THREE.Vector2 ? value.toArray() : value;
-      }
-      return { fields: raw, position: mob.group.position.toArray() };
-    });
+    const mobs = this.snapshotAttachmentCreatureBodySource();
     const fields: AttachmentSaveSources = {
       version: 2, generatorVersion: GENERATOR_VERSION, generatorProfile: this.world.generationOptions.profile,
       lastSavedGameVersion: GAME_VERSION, seed: this.world.seedText, mode: this.mode,
@@ -22463,15 +22449,40 @@ export class VoxelEngine {
     }));
   }
 
-  /** Host-only finite storage preimage. Unlike serialize(), this does not migrate
+  private snapshotAttachmentCreatureBodySource() {
+    return this.mobs.map(mob => {
+      // Rendering object graphs are not source state. Their authoritative body
+      // positions are copied explicitly; every other own field is retained.
+      const visuals = { group: true, presentationRoot: true, visual: true, sentientLod: true,
+        parts: true, shadeSaddle: true, scaleAttachments: true } satisfies Partial<Record<keyof MobEntity, true>>;
+      const raw: Record<string, unknown> = {};
+      if (Object.getOwnPropertySymbols(mob).length) throw Error("Attachment creature source cannot contain hidden symbols.");
+      for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(mob))) {
+        if (Object.hasOwn(visuals, key)) continue;
+        if (!("value" in descriptor)) throw Error("Attachment creature source cannot contain accessors.");
+        const value: unknown = descriptor.value;
+        raw[key] = value instanceof THREE.Vector3 || value instanceof THREE.Vector2 ? value.toArray() : value;
+      }
+      const group = Object.getOwnPropertyDescriptor(mob, "group");
+      if (!group || !("value" in group)) throw Error("Attachment creature position lacks its own rendering group.");
+      return { fields: raw, position: (group.value as THREE.Group).position.toArray() };
+    });
+  }
+
+  /** Host-only raw finite storage preimage. Unlike serialize(), this does not migrate
    * stock, capture pages, advance clocks or convert active build reservations.
    * Current actors, inactive location owners and atomic authority remain separate.
    * Apiary display bodies accompany their canonical hive, not a second inventory. */
-  snapshotAttachmentCreatureCustody() {
+  snapshotAttachmentCreatureSources() {
     if (this.multiplayer && (this.multiplayer.role !== "host" || !["hosting", "connected"].includes(this.multiplayer.state)))
       throw Error("Creature custody sources require the current host.");
     if (this.agentBuildJobs.size || this.agentBuildPreviews.size || this.agentRuntimeTasks.size)
       throw Error("Finish active agent work before inspecting attachment custody.");
+    // SavedCreature is the existing semantic projection, not the raw body
+    // preimage. Keep both; inspect raw descriptors before that projection can
+    // normalize optional fields. Sleeping records remain their exact raw data.
+    const bodySource = this.snapshotAttachmentCreatureBodySource();
+    encodeAttachmentSource({ bodySource, sleepingCreatures: this.sleepingCreatures, apiaries: Object.fromEntries(this.apiaries) });
     const apiary = this.snapshotAttachmentApiarySources();
     const agents: Record<string, AgentCustodySave["agents"][string]> = Object.create(null);
     for (const id of new Set([...this.agentInventories.keys(), ...this.agentEquipment.keys(),
@@ -22490,14 +22501,26 @@ export class VoxelEngine {
       orbRacks: Object.fromEntries(this.orbRacks), healingStations: Object.fromEntries(this.healingStations), morphLooms: Object.fromEntries(this.morphLooms),
       digitalItemVault: this.digitalItemVault, digitalCreatureArchive: this.digitalCreatureArchive,
       multiplayerPlayers: Object.fromEntries(this.multiplayerPlayerStates), agentCustody: { schema: 1, agents }, spacefleet: this.spacefleet,
-      apiaries: apiary.apiaries, aquariums: Object.fromEntries(this.aquariums), fieldPerches: Object.fromEntries(this.fieldPerches),
-      creatures: [...apiary.creatures], sleepingCreatures: [...apiary.sleepingCreatures],
+      apiaries: Object.fromEntries(this.apiaries), aquariums: Object.fromEntries(this.aquariums), fieldPerches: Object.fromEntries(this.fieldPerches),
+      creatures: [...apiary.creatures], sleepingCreatures: this.sleepingCreatures,
     };
-    const custody = collectWorldCreatureCustodyHolders(source, this.localPlayerId());
-    const encounters = reconcileCreatureEncounterCustody(custody.sources, {
+    const observed = { source, encounterSources: {
       primeEncounters: Object.fromEntries(this.primeEncounters), legendaryEncounters: Object.fromEntries(this.legendaryEncounters),
-    });
-    return freezeUniverseJson(cloneUniverseJson({ source, custody, encounters, apiaryVisuals: apiary.visuals }));
+    }, apiaryVisuals: apiary.visuals, bodySource };
+    // Raw observation must not erase own-undefined/-0 before the later global
+    // validators see it. Validate descriptors, then detach without JSON loss.
+    encodeAttachmentSource(observed);
+    return freezeUniverseJson(structuredClone(observed));
+  }
+
+  /** Existing local preflight remains strict. The raw producer above allows a
+   * future global join to inspect remote histories before attempting this local
+   * assumption; observing a raw source does not authorize transfer. */
+  snapshotAttachmentCreatureCustody() {
+    const { source, encounterSources, apiaryVisuals } = this.snapshotAttachmentCreatureSources();
+    const custody = collectWorldCreatureCustodyHolders(source, this.localPlayerId());
+    const encounters = reconcileCreatureEncounterCustody(custody.sources, encounterSources);
+    return freezeUniverseJson(cloneUniverseJson({ source, custody, encounters, apiaryVisuals }));
   }
 
   /** Medium and large ground creatures have horizontal presence without becoming unstable moving platforms. */

@@ -283,13 +283,38 @@ reconstruct when the host identity/origins change, so reused numeric IDs do not
 carry old provenance into a later body. These presentation fields grant no
 guest transfer authority.
 
-This does not yet qualify the custody index globally. Equal bare Prime,
-legendary and specimen IDs may occur legitimately in different locations;
-legacy ambiguity remains an unsupported-provenance gate, not corruption to
-repair or a reason to infer origin from a seed, holder or current coordinates.
+`collectCreatureCustodyPartition()` now visits one actual save owner without
+inventing empty tables belonging to other owners. Descriptor checks precede
+field access, so hidden fields and getters cannot bypass partition ownership.
+`collectUniverseCreatureCustody()` replaces only the manifest-bound active
+universe/player/location slices with the complete synchronous runtime source;
+all inactive players and locations come from the same verified repository view.
+Shared archives, guests and fleet cargo occur once. Repository player `host`
+is explicitly bound to its current transport actor rather than assumed equal.
+Typed present human guests have the current holder location; offline guests and
+archives remain unknown. Agents belong to their location and ships use their
+recorded location. Canonical attachment owners hydrate inactive orbit rows;
+duplicate mirrors and unsupported local-asteroid hydration still refuse.
+
+`indexScopedCreatureCustody()` qualifies body IDs by actual location and specimen
+IDs by explicit specimen origin. Different known origins may share a bare ID;
+duplicate qualified owners or a repeated ID with unknown origin refuse. Filled
+vessel copies also refuse rather than being deduplicated. A deployed orb links
+only the matching body in its holder location, never a convenient numeric ID
+elsewhere. Encoded vessels, nested paths, boat aliases and resident families
+remain exact. Neither present holder nor historical coordinates invent origin.
+
+The host raw producer is separate from the existing strict local reconciler.
+It retains unfiltered body preimages alongside SavedCreature projections and
+preserves raw sleeping/hive/metadata records before semantic checks. Unresolved
+remote histories remain visible. The pure universe collector retains each
+location's history but does NOT yet reconcile encounter semantics globally or
+replace the runtime physical selector's local assumptions. Its structural unit
+fixtures are not native persistence or ordinary entry/return evidence. Exact
+repository/runtime source, lease, physical and transaction checks remain required.
 
 This remains a prerequisite, not a complete admission gate. Exhaustive authored
-sites/environment integration, inactive location owners, transition consent and
+sites/environment integration, scoped encounter reconciliation, transition consent and
 atomic finite-resource transfer still require their integration checks.
 Conservative all-phase model spheres may refuse an
 installation very close to the frame boundary. There is no new local-entry UI,

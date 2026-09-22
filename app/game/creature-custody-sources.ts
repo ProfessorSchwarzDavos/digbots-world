@@ -11,6 +11,8 @@ import { custodyJsonIdentity, validCustodyItem } from "./wayworks-custody";
 import { readExactCreatureMetadata, readExactEncodedCaptureOrb, readStoredCreatureCustody } from "./stored-creature-custody";
 import { indexCreatureCustody, type CreatureCustodyPath, type CreatureCustodySources } from "./creature-custody-index";
 import { canonicalJson, cloneUniverseJson, freezeUniverseJson, isUniverseRecord } from "./universe-json";
+import { WORLD_SAVE_OWNERS, type SaveOwner } from "./universe-save";
+import { encodeAttachmentSource } from "./attachment-source-preimage";
 
 /** Explicit storage-bearing slice, not an arbitrary recursive scan of a save.
  * The host supplies this from canonical owners, never the mutating serializer.
@@ -22,12 +24,13 @@ export type WorldCreatureCustodySource = Readonly<Pick<WorldSave,
   | "digitalCreatureArchive" | "multiplayerPlayers" | "agentCustody" | "spacefleet" | "apiaries"
   | "aquariums" | "fieldPerches" | "creatures" | "sleepingCreatures"
 >>;
-const fields = {
+export const CREATURE_CUSTODY_FIELDS = Object.freeze({
   inventory: true, cursor: true, trash: true, craftGrid: true, equipment: true, offhand: true, furnaces: true,
   wheatMills: true, wayworks: true, chests: true, boats: true, drops: true, orbRacks: true, healingStations: true,
   morphLooms: true, digitalItemVault: true, digitalCreatureArchive: true, multiplayerPlayers: true, agentCustody: true,
   spacefleet: true, apiaries: true, aquariums: true, fieldPerches: true, creatures: true, sleepingCreatures: true,
-} satisfies Record<keyof WorldCreatureCustodySource, true>;
+} satisfies Record<keyof WorldCreatureCustodySource, true>);
+export type CreatureCustodyPartitionSource = Readonly<Partial<WorldCreatureCustodySource>>;
 type Alias = Readonly<{ path: CreatureCustodyPath; canonicalPath: CreatureCustodyPath }>;
 function entries<T>(value: Readonly<Record<string, T>> | undefined): [string, T][] {
   if (value === undefined) return [];
@@ -55,13 +58,35 @@ function cargoCapacity(custom: CreatureMetadata["custom"], key: "dragonCargo" | 
   return growth.chestModules * 27;
 }
 
-export function collectWorldCreatureCustody(source: WorldCreatureCustodySource) {
-  if (!isUniverseRecord(source) || Object.keys(source).some(key => !Object.hasOwn(fields, key) || source[key as keyof WorldCreatureCustodySource] === undefined))
+function validateSource(source: CreatureCustodyPartitionSource, required: readonly (keyof WorldCreatureCustodySource)[]) {
+  encodeAttachmentSource(source);
+  if (!isUniverseRecord(source) || Object.keys(source).some(key => !Object.hasOwn(CREATURE_CUSTODY_FIELDS, key) || source[key as keyof WorldCreatureCustodySource] === undefined))
     throw Error("Unsupported or undefined creature custody source field.");
-  if (!Object.hasOwn(source, "inventory") || !Object.hasOwn(source, "furnaces") || !Object.hasOwn(source, "chests"))
+  if (required.some(key => !Object.hasOwn(source, key)))
     throw Error("Missing canonical creature custody owner table.");
   for (const key of Object.keys(source) as (keyof WorldCreatureCustodySource)[])
     if (source[key] === null && !["cursor", "trash", "offhand"].includes(key)) throw Error("Invalid null creature custody owner table.");
+}
+
+/** The original complete-world API retains its local reconciliation contract. */
+export function collectWorldCreatureCustody(source: WorldCreatureCustodySource) {
+  validateSource(source, ["inventory", "furnaces", "chests"]);
+  const collected = collectSources(source), index = indexCreatureCustody(collected.sources);
+  return freezeUniverseJson(cloneUniverseJson({ ...collected, index }));
+}
+
+/** Enumerate one actual owner partition without fabricating another owner's
+ * empty tables. This is a visitor, not a complete or globally reconciled index.
+ * Deployed bodies/encounter histories can live in other observed partitions. */
+export function collectCreatureCustodyPartition(source: CreatureCustodyPartitionSource, owner: SaveOwner) {
+  if (!["player", "location", "universe"].includes(owner)) throw Error("Unknown creature custody partition owner.");
+  validateSource(source, owner === "player" ? ["inventory"] : owner === "location" ? ["furnaces", "chests"] : []);
+  for (const key of Object.keys(source) as (keyof WorldCreatureCustodySource)[])
+    if (WORLD_SAVE_OWNERS[key] !== owner) throw Error("Creature custody field belongs to a different partition owner.");
+  return collectSources(source);
+}
+
+function collectSources(source: CreatureCustodyPartitionSource) {
   const inventorySlots: { path: CreatureCustodyPath; slot: InventorySlot | null }[] = [];
   const orbRecords: { path: CreatureCustodyPath; orb: CaptureOrb | string | null }[] = [];
   const residents: { path: CreatureCustodyPath; creature: CreatureMetadata }[] = [];
@@ -133,7 +158,7 @@ export function collectWorldCreatureCustody(source: WorldCreatureCustodySource) 
     if (!validCustodyItem(unit)) throw Error("Invalid bulk creature custody inventory.");
     readStoredCreatureCustody(unit);
   };
-  slots(["inventory"], source.inventory);
+  if (source.inventory) slots(["inventory"], source.inventory);
   for (const key of ["cursor", "trash", "offhand"] as const) if (Object.hasOwn(source, key)) slot([key], source[key]!);
   if (source.craftGrid) slots(["craftGrid"], source.craftGrid);
   equipment(["equipment"], source.equipment);
@@ -151,6 +176,7 @@ export function collectWorldCreatureCustody(source: WorldCreatureCustodySource) 
   for (const creature of [...creatures, ...sleepingCreatures]) {
     custodyJsonIdentity(creature);
     if (!Number.isSafeInteger(creature.id) || creature.id < 0 || bodies.has(creature.id)) throw Error("Invalid or duplicate creature cargo body.");
+    if (!source.chests) throw Error("Creature body lacks its canonical cargo owner table.");
     checkBodyCargo(creature, source.chests); bodies.set(creature.id, creature);
   }
   for (const [key, values] of entries(source.chests)) {
@@ -209,8 +235,7 @@ export function collectWorldCreatureCustody(source: WorldCreatureCustodySource) 
     if (perch.resident !== null) resident(["fieldPerches", key, "resident"], perch.resident);
   }
   const sources: CreatureCustodySources = { inventorySlots, orbRecords, residents, creatures, sleepingCreatures };
-  const index = indexCreatureCustody(sources);
-  return freezeUniverseJson(cloneUniverseJson({ sourceBaseline: canonicalJson(source), sources, aliases, index }));
+  return freezeUniverseJson(cloneUniverseJson({ sourceBaseline: canonicalJson(source), sources, aliases }));
 }
 
 function checkBodyCargo(creature: SavedCreature, chests: WorldSave["chests"]) {

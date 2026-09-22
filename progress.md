@@ -2,6 +2,21 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Revision16 global-custody prerequisite separates raw host observation from
+  local semantic checks, adds strict owner-partition visitors, a location/origin-
+  qualified index and a pure same-snapshot universe owner collector. Active
+  manifest-bound slices replace persisted counterparts; inactive owners remain
+  distinct and shared archives/guests/fleet appear once. Unknown holder location
+  never resolves a deployed numeric ID by guessing. Hydration retains duplicate-
+  mirror and local-asteroid refusal. Read-only review found hidden-field bypass
+  in the public visitor; fixed with direct regressions. Parent also retained raw
+  sleeping/hive/body preimages ahead of lossy semantic projection. Focusedr3:
+  36PASS, r4:42PASS/1FAIL (wrong Item vs BlockId fixture), correctedr5:58PASS.
+  Static148 retained a structural actor-bounds fixture type failure; corrected.
+  Expandedr6:111PASS/r7:115PASS; static147/149 and lint124PASS. Exact commit/build/browser
+  pending. No runtime global
+  encounter/physical join or atomic entry/return; local entry remains CLOSED.
+
 - Revision16 creature-origin prerequisite adds explicit canonical specimen and
   encounter provenance without changing existing IDs or filling unknown legacy
   records. New births stamp their creation location; capture/release/cold saves,
@@ -11,7 +26,9 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
   apiary birth context. Focusedr1:30PASS, r2:33PASS, apiaryr3:48PASS, expandedr4:
   130PASS; finalr5:131PASS. Static144 caught a readonly negative-test deletion;
   corrected with Reflect.deleteProperty. Static145/146 and lint122/123PASS.
-  Exact committed repeat/build/browser pending.
+  Exact committedr6:131PASS/build43 uKydNKAPWbYlDtEw2Kvxy/official43PASS;
+  image reviewed, jobs drained and director acceptedc9b8f1e in
+  CF6_R16_ORIGIN_ACCEPTANCE.md. Frozen origin-checkpoint retains all receipts.
   This is not the global owner join or atomic entry/return; local entry CLOSED.
 
 - Revision16 repository-source binding reads all ten native IndexedDB stores,

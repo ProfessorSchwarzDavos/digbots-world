@@ -26,7 +26,7 @@ function fixture() {
     digitalCreatureArchive: createDigitalCreatureArchive(), multiplayerPlayerStates: new Map(), spacefleet: { schema: 1, vehicles: {} },
     primeEncounters: new Map(), legendaryEncounters: new Map(),
     apiaries: new Map([["1,30,2", hive]]), aquariums: new Map(), fieldPerches: new Map(),
-    mobs: [{ id: 1, beeHiveKey: "1,30,2" }], sleepingCreatures: [], temporarySummons: new Map(),
+    mobs: [{ id: 1, beeHiveKey: "1,30,2", group: { position: new THREE.Vector3(1, 30.86, 2) } }], sleepingCreatures: [], temporarySummons: new Map(),
     agentBuildJobs: new Map(), agentBuildPreviews: new Map(), agentRuntimeTasks: new Map(), agentInventories: new Map(),
     agentEquipment: new Map([["equipment-only", blankEquipment()]]), agentReturningMaterials: new Map([["returning-only", [{ item: Item.RawIron, count: 2000 }]]]),
     agentInventoryRevisions: new Map([["revision-only", 17]]),
@@ -59,10 +59,67 @@ test("guest/stale-host sessions and active agent jobs, previews or tasks cannot 
   for (const multiplayer of [{ role: "guest", state: "connected" }, { role: "host", state: "disconnected" }]) {
     const { engine } = fixture(); Object.assign(engine, { multiplayer });
     assert.throws(() => engine.snapshotAttachmentCreatureCustody(), /current host/);
+    assert.throws(() => engine.snapshotAttachmentCreatureSources(), /current host/);
   }
   for (const name of ["agentBuildJobs", "agentBuildPreviews", "agentRuntimeTasks"]) {
     const { engine } = fixture(); Object.assign(engine, { [name]: new Map([["active", {}]]) });
     assert.throws(() => engine.snapshotAttachmentCreatureCustody(), /active agent work/);
+    assert.throws(() => engine.snapshotAttachmentCreatureSources(), /active agent work/);
+  }
+});
+
+test("raw host source preserves unresolved remote-history custody while the local wrapper still refuses it", () => {
+  const { engine } = fixture(), anchor = "prime:petalfox:0:0";
+  const filled = captureOrbInventorySlot(captureIntoOrb(createEmptyCaptureOrb("remote-prime-orb"), {
+    schema: 1, entityId: "remote-prime-specimen", kind: "petalfox", health: 5, maxHealth: 7, ageTicks: 123, baby: false,
+    temperament: "Gentle", hostile: false, tamed: true, ownerId: "keeper", name: null, geneticSeed: 321, command: null,
+    custom: { primeAnchorId: anchor },
+  }, 42)!);
+  engine.inventory = [filled];
+  const before = JSON.stringify(filled), now = Date.now;
+  Date.now = () => { throw Error("raw custody source read clock"); };
+  try {
+    const raw = engine.snapshotAttachmentCreatureSources();
+    assert.deepEqual(raw.source.inventory, [filled]);
+    assert.deepEqual(raw.encounterSources, { primeEncounters: {}, legendaryEncounters: {} });
+    assert(!Object.hasOwn(raw, "custody")); assert(!Object.hasOwn(raw, "encounters"));
+    assert(Object.isFrozen(raw.source.inventory));
+    assert.throws(() => engine.snapshotAttachmentCreatureCustody(), /unresolved Prime/);
+  } finally { Date.now = now; }
+  assert.equal(JSON.stringify(filled), before); assert.equal(engine.primeEncounters.size, 0);
+});
+
+test("raw source does not erase own undefined before semantic validation or execute metadata accessors", () => {
+  const { engine, filled } = fixture();
+  Object.assign(filled.metadata!, { futureField: undefined });
+  const raw = engine.snapshotAttachmentCreatureSources();
+  assert(Object.hasOwn(raw.source.inventory[0]!.metadata!, "futureField"));
+  assert.equal(raw.source.inventory[0]!.metadata!.futureField, undefined);
+  assert.throws(() => engine.snapshotAttachmentCreatureCustody());
+  let accessed = false;
+  Object.defineProperty(filled.metadata!, "futureField", { enumerable: true, configurable: true,
+    get: () => { accessed = true; return "not raw"; } });
+  assert.throws(() => engine.snapshotAttachmentCreatureSources(), /accessors/);
+  assert.equal(accessed, false);
+});
+
+test("raw hive, sleeping and live body preimages precede lossy semantic projections", () => {
+  const { engine, hive } = fixture();
+  Object.assign(hive, { futureField: undefined });
+  const sleeping: SavedCreature = { id: 2, kind: "peelop", x: 0, y: 30, z: 0, yaw: 0, health: 5, age: 12 };
+  Object.assign(sleeping, { futureField: undefined }); engine.sleepingCreatures = [sleeping];
+  Object.assign(engine.mobs[0], { futureField: undefined, milkCooldown: -2 });
+  const raw = engine.snapshotAttachmentCreatureSources();
+  assert(Object.hasOwn(raw.source.apiaries!["1,30,2"], "futureField"));
+  assert(Object.hasOwn(raw.source.sleepingCreatures![0], "futureField"));
+  assert(Object.hasOwn(raw.bodySource[0].fields, "futureField"));
+  assert.equal(raw.bodySource[0].fields.milkCooldown, -2);
+  assert.throws(() => engine.snapshotAttachmentCreatureCustody());
+  for (const value of [hive, sleeping, engine.mobs[0]]) {
+    let accessed = false;
+    Object.defineProperty(value, "futureField", { enumerable: true, configurable: true, get() { accessed = true; return 1; } });
+    assert.throws(() => engine.snapshotAttachmentCreatureSources(), /accessors/); assert.equal(accessed, false);
+    Object.defineProperty(value, "futureField", { enumerable: true, configurable: true, value: undefined });
   }
 });
 

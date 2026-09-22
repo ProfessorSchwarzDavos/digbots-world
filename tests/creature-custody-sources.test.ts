@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { collectWorldCreatureCustody, type WorldCreatureCustodySource } from "../app/game/creature-custody-sources";
+import { collectCreatureCustodyPartition, collectWorldCreatureCustody, type WorldCreatureCustodySource } from "../app/game/creature-custody-sources";
+import { WORLD_SAVE_OWNERS } from "../app/game/universe-save";
 import { captureIntoOrb, captureOrbInventorySlot, createEmptyCaptureOrb, createOrbRack, createCreatureHealer } from "../app/game/capture-orbs";
 import type { CreatureMetadata } from "../app/game/creature-cage";
 import { createDigitalCreatureArchive, createDigitalItemVault } from "../app/game/digital-storage";
@@ -67,6 +68,66 @@ test("the explicit storage slice enumerates every inventory/orb family and keeps
   assert.equal(new Set(result.index.stored.map(value => value.custody.creature.entityId)).size, result.index.stored.length);
   assert.equal(canonicalJson(source), before); assert.equal(result.sourceBaseline, before);
   assert(!Object.isFrozen(source)); assert(Object.isFrozen(result.sources.inventorySlots));
+});
+
+test("owner-partition visitors reproduce every canonical source without repeating shared holdings or padding empty owners", () => {
+  const source = completeFixture(), whole = collectWorldCreatureCustody(source), before = canonicalJson(source);
+  const parts = (["player", "location", "universe"] as const).map(owner => {
+    const fields = Object.fromEntries(Object.entries(source).filter(([key]) => WORLD_SAVE_OWNERS[key as keyof WorldCreatureCustodySource] === owner));
+    const result = collectCreatureCustodyPartition(fields, owner);
+    assert.equal(result.sourceBaseline, canonicalJson(fields)); assert(!Object.hasOwn(result, "index"));
+    return result;
+  });
+  for (const family of ["inventorySlots", "orbRecords", "residents", "creatures", "sleepingCreatures"] as const) {
+    const actual = parts.flatMap(part => part.sources[family].map(value => canonicalJson(value))).sort();
+    assert.deepEqual(actual, whole.sources[family].map(value => canonicalJson(value)).sort(), family);
+  }
+  assert.deepEqual(parts.flatMap(part => part.aliases), whole.aliases);
+  assert.equal(canonicalJson(source), before);
+  assert.deepEqual(JSON.parse(parts[2].sourceBaseline).inventory, undefined);
+  assert.deepEqual(JSON.parse(parts[0].sourceBaseline).chests, undefined);
+});
+
+test("partition boundaries reject wrong-owner, missing, undefined and unsupported fields without normalizing them", () => {
+  assert.throws(() => collectCreatureCustodyPartition({}, "player"), /Missing/);
+  assert.throws(() => collectCreatureCustodyPartition({ chests: {} }, "location"), /Missing/);
+  assert.throws(() => collectCreatureCustodyPartition({ inventory: [], chests: {} }, "player"), /different partition/);
+  assert.throws(() => collectCreatureCustodyPartition({ inventory: [] }, "universe"), /different partition/);
+  assert.throws(() => collectCreatureCustodyPartition({ furnaces: {}, chests: {}, digitalCreatureArchive: createDigitalCreatureArchive() }, "location"), /different partition/);
+  assert.throws(() => collectCreatureCustodyPartition({ inventory: undefined }, "player"), /undefined/);
+  assert.throws(() => collectCreatureCustodyPartition({ unexpected: [] } as never, "universe"), /Unsupported/);
+  assert.throws(() => collectCreatureCustodyPartition({}, "pretend" as never), /Unknown/);
+  assert.equal(collectCreatureCustodyPartition({}, "universe").sourceBaseline, "{}");
+});
+
+test("unreconciled partition visits retain deployed and duplicate records for the later global join", () => {
+  const stored = { ...orb("remote"), attunement: { ownerId: "keeper", attunedAt: 42, activeEntityId: "12", recalledAt: 0, recallCount: 0, fainted: false } };
+  const slot = captureOrbInventorySlot(stored), source = { inventory: [slot, structuredClone(slot)] };
+  const baseline = canonicalJson(source), now = Date.now;
+  Date.now = () => { throw Error("partition visitor read clock"); };
+  try {
+    for (let count = 0; count < 100; count++) {
+      const result = collectCreatureCustodyPartition(JSON.parse(baseline), "player");
+      assert.equal(result.sources.inventorySlots.length, 2);
+      assert.equal(result.sources.creatures.length, 0); assert(!Object.hasOwn(result, "index"));
+      assert.equal(result.sourceBaseline, baseline); assert(Object.isFrozen(result.sources));
+    }
+  } finally { Date.now = now; }
+  assert.throws(() => collectWorldCreatureCustody({ ...empty(), ...source }), /Duplicate/);
+  assert.equal(canonicalJson(source), baseline);
+});
+
+test("direct partition visitors reject hidden or accessor fields before inspecting their owner", () => {
+  const source = { inventory: [] };
+  Object.defineProperty(source, "digitalCreatureArchive", { configurable: true, enumerable: false,
+    value: { ...createDigitalCreatureArchive(), orbs: [orb("hidden-owner")] } });
+  assert.throws(() => collectCreatureCustodyPartition(source, "player"), /hidden properties/);
+  let accessed = false;
+  Object.defineProperty(source, "digitalCreatureArchive", { configurable: true, enumerable: true,
+    get() { accessed = true; return createDigitalCreatureArchive(); } });
+  assert.throws(() => collectCreatureCustodyPartition(source, "player"), /accessors/);
+  assert.equal(accessed, false);
+  assert.throws(() => collectCreatureCustodyPartition({ inventory: [], [Symbol("hidden")]: [] }, "player"), /hidden properties/);
 });
 
 test("one hundred cold collections never migrate originals, normalize bulk counts, read clocks or invent IDs", () => {

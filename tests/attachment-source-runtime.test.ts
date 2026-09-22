@@ -56,8 +56,24 @@ function fixture() {
   return { engine, asteroid, pressure, edits };
 }
 
+test("actual full source refuses orphan architecture and observes exact paired cells", () => {
+  const { engine, asteroid, edits } = fixture();
+  const x = asteroid.center.x, y = asteroid.center.y + 10, z = asteroid.center.z;
+  const cx = Math.floor(x / 16), cz = Math.floor(z / 16), chunk = `${cx},${cz}`;
+  const index = (y + 64) * 256 + (z - cz * 16) * 16 + x - cx * 16;
+  edits[chunk] = [[index, BlockId.DoorClosedLower]];
+  assert.throws(() => engine.snapshotAttachmentSourceObservation(asteroid.id), /counterpart/);
+  edits[chunk].push([index + 256, BlockId.DoorClosedUpper]);
+  const source = engine.snapshotAttachmentSourceObservation(asteroid.id);
+  assert.equal(source.architecture.installations.length, 1);
+  assert.equal(source.architecture.installations[0].cells.length, 2);
+  assert.equal(source.architecture.installations[0].attached, true);
+  edits[chunk][1][1] = BlockId.DoorOpenUpper;
+  assert.throws(() => engine.snapshotAttachmentSourceObservation(asteroid.id), /counterpart/);
+});
+
 test("actual full scoped source observes remote history before physical selection and rechecks every authority input", async () => {
-  const { engine, asteroid, pressure } = fixture(), universe = universeId("runtime-complete-source");
+  const { engine, asteroid, pressure, edits } = fixture(), universe = universeId("runtime-complete-source");
   const home = locationId(homeLocation(universe)), orbit = engine.worldStorage.currentStamp!.locationId;
   const anchor = "prime:petalfox:0:0", value = captureIntoOrb(createEmptyCaptureOrb("remote-orb"), {
     schema: 1, entityId: "remote-specimen", kind: "petalfox", health: 5, maxHealth: 7, ageTicks: 123, baby: false,
@@ -88,7 +104,7 @@ test("actual full scoped source observes remote history before physical selectio
   assert.equal(result.physical.custody.encounters.primeOwners[0].owner?.encounterOriginLocationId, null);
   assert.equal(JSON.stringify(engine.inventory), before); assert(!Object.isFrozen(repository));
   assert(Object.isFrozen(result.runtime)); assert.equal(engine.primeEncounters.size, 0);
-  for (const fault of ["inventory", "pressure", "environment", "catalog", "catalogUndefined", "effects", "facade"] as const) {
+  for (const fault of ["inventory", "pressure", "environment", "catalog", "catalogUndefined", "architecture", "effects", "facade"] as const) {
     const priorInventory = engine.inventory, priorHealth = engine.health, priorCatalog = storage.currentCatalog;
     const oldInstallation = pressure.nextInstallation;
     mutate = () => {
@@ -97,11 +113,17 @@ test("actual full scoped source observes remote history before physical selectio
       if (fault === "environment") engine.health--;
       if (fault === "catalog") storage.currentCatalog = { ...priorCatalog!, catalogVersion: priorCatalog!.catalogVersion + 1 };
       if (fault === "catalogUndefined") Object.assign(storage, { currentCatalog: { ...priorCatalog, rawExtension: undefined } });
+      if (fault === "architecture") {
+        const { x, y, z } = asteroid.center, cx = Math.floor(x / 16), cz = Math.floor(z / 16);
+        const index = (y + 74) * 256 + (z - cz * 16) * 16 + x - cx * 16;
+        edits[`${cx},${cz}`] = [[index, BlockId.DoorClosedLower], [index + 256, BlockId.DoorClosedUpper]];
+      }
       if (fault === "effects") engine.projectiles.push({} as never);
       if (fault === "facade") Object.assign(engine, { worldStorage: { ...storage } });
     };
     await assert.rejects(engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /changed during repository|active effects/, fault);
     engine.inventory = priorInventory; engine.health = priorHealth; pressure.nextInstallation = oldInstallation;
+    for (const key of Object.keys(edits)) delete edits[key];
     storage.currentCatalog = priorCatalog; engine.projectiles.length = 0; Object.assign(engine, { worldStorage: storage });
   }
   mutate = null;

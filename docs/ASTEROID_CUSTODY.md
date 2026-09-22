@@ -350,6 +350,24 @@ These structural and actual-engine unit fixtures are not native persistence,
 transport authentication, simulation pause or ordinary entry/return evidence.
 Exact repository/lease and transaction checks remain required.
 
+The exhaustive observation also binds architectural pairs and fence geometry
+through `selectAsteroidArchitecture`: all ordinary door states, pressure-door
+families and bed orientations require exact matching counterparts on one side.
+Pressure-door halves must share facing. Missing/mismatched pairs refuse even
+outside the selected frame. The shared bed counterpart function preserves normal
+placement/break/respawn behavior. Shared fence renderer constants account for
+posts extending above a voxel; gate poses retain the same conservative envelope.
+Fence joins read and bind all four canonical neighbors, including unloaded and
+outside cells, without turning those read dependencies into copied ownership.
+This does not close other authored sites or Waygrid capacity ownership.
+
+A separate isolated native IndexedDB check now covers a declared synthetic paid
+vehicle transition, fresh repository/facade open, and ordinary save/reopen.
+Origin-qualified equal specimen IDs, equal numeric bodies in different locations,
+and a carried legacy Prime associated with inactive Home remain exact. Unknown
+origin stays unknown; the observation does not mutate committed records. This
+is not normal capture, actual-engine physical transfer or authentication proof.
+
 This remains a prerequisite, not a complete admission gate. Exhaustive authored
 sites/environment closure, native global persistence, transition consent and
 atomic finite-resource transfer still require their integration checks.

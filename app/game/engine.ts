@@ -574,6 +574,9 @@ import { canonicalJson, cloneUniverseJson, freezeUniverseJson } from "./universe
 import { encodeAttachmentSource, snapshotAttachmentSaveSources, type AttachmentSaveSources } from "./attachment-source-preimage";
 import { selectAsteroidProductionStations } from "./asteroid-attachment-production";
 import { selectAsteroidBookFurniture } from "./asteroid-attachment-book-furniture";
+import { selectAsteroidArchitecture } from "./asteroid-attachment-architecture";
+import { bedCounterpart } from "./beds";
+export { bedCounterpart } from "./beds";
 import { itemPresentationFamily } from "./item-presentation";
 import {
   boardSailboat,
@@ -2379,20 +2382,6 @@ export function bedPlacementForYaw(yaw: number): BedPlacement {
   return forwardZ >= 0
     ? { foot: BlockId.BedSouthFoot, head: BlockId.BedSouthHead, dx: 0, dz: 1 }
     : { foot: BlockId.BedNorthFoot, head: BlockId.BedNorthHead, dx: 0, dz: -1 };
-}
-
-export function bedCounterpart(type: BlockId, x: number, y: number, z: number) {
-  switch (type) {
-    case BlockId.BedNorthFoot: return { x, y, z: z - 1, type: BlockId.BedNorthHead };
-    case BlockId.BedNorthHead: return { x, y, z: z + 1, type: BlockId.BedNorthFoot };
-    case BlockId.BedSouthFoot: return { x, y, z: z + 1, type: BlockId.BedSouthHead };
-    case BlockId.BedSouthHead: return { x, y, z: z - 1, type: BlockId.BedSouthFoot };
-    case BlockId.BedEastFoot: return { x: x + 1, y, z, type: BlockId.BedEastHead };
-    case BlockId.BedEastHead: return { x: x - 1, y, z, type: BlockId.BedEastFoot };
-    case BlockId.BedWestFoot: return { x: x - 1, y, z, type: BlockId.BedWestHead };
-    case BlockId.BedWestHead: return { x: x + 1, y, z, type: BlockId.BedWestFoot };
-    default: return null;
-  }
 }
 
 export function bedRespawnCandidates(type: BlockId, x: number, y: number, z: number) {
@@ -22327,6 +22316,7 @@ export class VoxelEngine {
     const bookFurniture = selectAsteroidBookFurniture(physical.frame, {
       archiveShelves: Object.fromEntries(this.archiveShelves), tomeDisplays: Object.fromEntries(this.tomeDisplays),
     }, canonicalWorld);
+    const architecture = selectAsteroidArchitecture(physical.frame, canonicalWorld);
     const mobs = this.snapshotAttachmentCreatureBodySource();
     const fields: AttachmentSaveSources = {
       version: 2, generatorVersion: GENERATOR_VERSION, generatorProfile: this.world.generationOptions.profile,
@@ -22387,7 +22377,7 @@ export class VoxelEngine {
     });
     // Keep already-encoded authority records outside the field encoder: encoding
     // them again would multiply nesting depth for large, valid pressure rooms.
-    return freezeUniverseJson({ source, pressureSource, production, bookFurniture });
+    return freezeUniverseJson({ source, pressureSource, production, bookFurniture, architecture });
   }
 
   snapshotAttachmentSource(asteroidId: string) {

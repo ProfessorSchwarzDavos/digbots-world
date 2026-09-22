@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { blocksSky } from "./environment-queries";
 import { FURNACE_FRONT_PLATE } from "./custody-block-body";
+import { FENCE_POST_TOP, FENCE_GATE_TOP, fenceConnectsTo } from "./fence-body";
 import { stationPanelFace } from "./station-kit";
 import { homeLocation, locationId, parseLocationId, universeId, locationStamp as validateLocationStamp, type LocationStamp } from "./location-address";
 import { celestialTerrainSeed, createCelestialTerrain, normalizeCelestialGenerationState, MORROW_REGIONS, type CelestialTerrain, type CelestialGenerationState } from "./celestial-terrain";
@@ -8616,11 +8617,10 @@ export class ChunkWorld {
             addQuad(bucket, [[x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [x1, y0, z0]], [0, 0, -1], tile, 0.76, tint, 0, 0, 0, 0, environment);
           };
           if (definition.shape === "fence") {
-            addWoodCuboid(lx - 0.14, y - 0.5, lz - 0.14, lx + 0.14, y + 0.75, lz + 0.14);
+            addWoodCuboid(lx - 0.14, y - 0.5, lz - 0.14, lx + 0.14, y + FENCE_POST_TOP, lz + 0.14);
             const connectable = (dx: number, dz: number) => {
               const neighbor = neighborAt(lx + dx, y, lz + dz);
-              const next = BLOCKS[neighbor];
-              return next?.connectGroup === "fence" || Boolean(next?.solid && (!next.shape || next.shape === "cube"));
+              return fenceConnectsTo(neighbor);
             };
             if (connectable(1, 0)) for (const railY of [-0.06, 0.38]) addWoodCuboid(lx + 0.08, y + railY - 0.1, lz - 0.09, lx + 0.5, y + railY + 0.1, lz + 0.09);
             if (connectable(-1, 0)) for (const railY of [-0.06, 0.38]) addWoodCuboid(lx - 0.5, y + railY - 0.1, lz - 0.09, lx - 0.08, y + railY + 0.1, lz + 0.09);
@@ -8630,8 +8630,8 @@ export class ChunkWorld {
             const northSouth = type === BlockId.FenceGateNorthSouthClosed || type === BlockId.FenceGateNorthSouthOpen;
             const open = type === BlockId.FenceGateNorthSouthOpen || type === BlockId.FenceGateEastWestOpen;
             if (northSouth) {
-              addWoodCuboid(lx - 0.48, y - 0.5, lz - 0.12, lx - 0.34, y + 0.72, lz + 0.12);
-              addWoodCuboid(lx + 0.34, y - 0.5, lz - 0.12, lx + 0.48, y + 0.72, lz + 0.12);
+              addWoodCuboid(lx - 0.48, y - 0.5, lz - 0.12, lx - 0.34, y + FENCE_GATE_TOP, lz + 0.12);
+              addWoodCuboid(lx + 0.34, y - 0.5, lz - 0.12, lx + 0.48, y + FENCE_GATE_TOP, lz + 0.12);
               if (open) {
                 for (const railY of [-0.06, 0.36]) {
                   addWoodCuboid(lx - 0.46, y + railY - 0.09, lz - 0.12, lx - 0.34, y + railY + 0.09, lz + 0.34);
@@ -8639,8 +8639,8 @@ export class ChunkWorld {
                 }
               } else for (const railY of [-0.06, 0.36]) addWoodCuboid(lx - 0.36, y + railY - 0.09, lz - 0.08, lx + 0.36, y + railY + 0.09, lz + 0.08);
             } else {
-              addWoodCuboid(lx - 0.12, y - 0.5, lz - 0.48, lx + 0.12, y + 0.72, lz - 0.34);
-              addWoodCuboid(lx - 0.12, y - 0.5, lz + 0.34, lx + 0.12, y + 0.72, lz + 0.48);
+              addWoodCuboid(lx - 0.12, y - 0.5, lz - 0.48, lx + 0.12, y + FENCE_GATE_TOP, lz - 0.34);
+              addWoodCuboid(lx - 0.12, y - 0.5, lz + 0.34, lx + 0.12, y + FENCE_GATE_TOP, lz + 0.48);
               if (open) {
                 for (const railY of [-0.06, 0.36]) {
                   addWoodCuboid(lx - 0.12, y + railY - 0.09, lz - 0.46, lx + 0.34, y + railY + 0.09, lz - 0.34);

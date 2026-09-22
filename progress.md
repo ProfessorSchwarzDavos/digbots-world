@@ -2,6 +2,25 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Revision16 architecture closure binds exact ordinary/pressure-door and bed
+  pairs through canonical unloaded pages, refuses split/orphan/mismatched halves,
+  and accounts for fence/gate post protrusions with actual shared renderer
+  constants. Fence joins retain four exact canonical neighbor reads. Actual
+  full-source integration and same-revision async-change regression included.
+  Focused29PASS, expanded156PASS/static156PASS; expandedr2 accidentally named
+  nonexistent pressure-devices.test.ts, so only the six existing files count.
+  Explicit pressure/connected-geometry expansionr3:176PASS, lint129PASS. Bounded
+  independent architecture review found no actionable defects; pressure leaves
+  shrink as they open and complete fitting geometry stays in the paired cells.
+  Production build/official visual repeat remains pending at this source slice.
+- Scoped physical3b2ce8f/build46 accepted by director with74files/12Gitblobs/
+  17receipts and independent28PASS. Exact manager184PASS, production/official
+  browser PASS, image personally reviewed; no errors. Native global follow-on
+  separately passes3 real-IDB/repository/facade checks with declared synthetic
+  actors/paid-flight fixture; not full actual-engine physical travel. One
+  read-only Waygrid audit found locationless capacity IDs; design tracked in
+  WAYGRID_PHYSICAL_GROUNDING.md, not silently inferred from current coordinates.
+
 - Revision16 scoped physical integration separates raw physical/full-field
   observation from the unchanged strict local wrappers. New async global path
   binds exact before/after runtime and repository, reconciles all owners/history,

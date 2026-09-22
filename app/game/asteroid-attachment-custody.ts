@@ -1,5 +1,8 @@
 import { BlockId } from "./data";
-import { collectWorldCreatureCustodyHolders, type CreatureCustodyHolder } from "./creature-custody-holders";
+import { collectWorldCreatureCustodyHolders, creatureCustodyHolderForPath, type CreatureCustodyHolder } from "./creature-custody-holders";
+import type { CreatureCustodyPath } from "./creature-custody-index";
+import { reconcileUniverseCreatureCustody, type LiveUniverseCreatureCustody, type UniverseCreatureCustodySnapshot } from "./universe-creature-custody";
+import { encodeAttachmentSource } from "./attachment-source-preimage";
 import type { WorldCreatureCustodySource } from "./creature-custody-sources";
 import { asteroidAttachmentContainsCell, createAsteroidAttachmentFrame, type AsteroidAttachmentFrame } from "./asteroid-attachment-frame";
 import { asteroidAttachmentVolumeSide, asteroidCreatureFootprintSide } from "./asteroid-attachment-creature-footprint";
@@ -14,7 +17,7 @@ import { selectAsteroidCustodyBlocks } from "./asteroid-attachment-custody-block
 import { selectAsteroidHabitats } from "./asteroid-attachment-habitats";
 import { selectAsteroidInstallations } from "./asteroid-attachment-installations";
 import { createAsteroidAttachmentWorld, type AsteroidAttachmentWorldSource } from "./asteroid-attachment-world";
-import { parseCustodyCellKey } from "./chest-custody-owner";
+import { chestCustodyOwner, parseCustodyCellKey } from "./chest-custody-owner";
 import { buildAquariumTopology } from "./aquarium";
 import { buildExhibitTopology, type ExhibitResident } from "./butterfly-exhibit";
 import { aquariumBodyBounds, exhibitBodyBounds } from "./habitat-body";
@@ -40,10 +43,19 @@ export type AsteroidCustodyPhysicalContext = Readonly<{
  */
 export function selectAsteroidCreatureCustody(frame: AsteroidAttachmentFrame, source: WorldCreatureCustodySource,
   hostPlayerId: string, context: AsteroidCustodyPhysicalContext) {
+  const custody = collectWorldCreatureCustodyHolders(source, hostPlayerId);
+  return selectPhysicalHolders(frame, source, hostPlayerId, context, custody.holders);
+}
+
+type PhysicalHolders = ReturnType<typeof collectWorldCreatureCustodyHolders>["holders"];
+
+/** Shared whole-holder geometry, only called after an entry point reconciles
+ * actual custody. This private primitive cannot accept an external authority. */
+function selectPhysicalHolders(frame: AsteroidAttachmentFrame, source: WorldCreatureCustodySource,
+  hostPlayerId: string, context: AsteroidCustodyPhysicalContext, holders: PhysicalHolders) {
   const world = createAsteroidAttachmentWorld(context.world);
   if (canonicalJson(frame) !== canonicalJson(createAsteroidAttachmentFrame(world.source.registry, frame.asteroidId)))
     throw Error("Custody frame differs from its canonical world source.");
-  const custody = collectWorldCreatureCustodyHolders(source, hostPlayerId);
   const side = (attached: boolean): AsteroidCustodySide => attached ? "attached" : "orbit";
   const cellSide = (key: string) => side(asteroidAttachmentContainsCell(frame, key, "orbit"));
   const actors = new Map<string, { body: AttachmentActorBody; side: AsteroidCustodySide }>();
@@ -59,7 +71,7 @@ export function selectAsteroidCreatureCustody(frame: AsteroidAttachmentFrame, so
   const boats = new Map((source.boats ?? []).map(boat => [boat.id, side(asteroidSailboatFootprintSide(frame, boat, "orbit"))]));
   const drops = new Set(asteroidAttachedDropIndices(frame, source.drops ?? [], "orbit"));
   const basic = new Map(selectAsteroidCustodyBlocks(frame, source, world).map(value => [`${value.field}:${value.key}`, side(value.attached)]));
-  const blockChests = Object.fromEntries(custody.holders.chests.filter(value => value.holder.kind === "block-chest")
+  const blockChests = Object.fromEntries(holders.chests.filter(value => value.holder.kind === "block-chest")
     .map(value => [value.key, source.chests[value.key]]));
   projectAsteroidBlockChests(frame, blockChests, world);
   projectAsteroidMachines(frame, source.wayworks ?? {}, world.block);
@@ -124,19 +136,94 @@ export function selectAsteroidCreatureCustody(frame: AsteroidAttachmentFrame, so
     bindings.set(identity, { holder, side: result }); return result;
   };
   // Include empty physical chests and actor ledgers, not only occupied vessels.
-  for (const chest of custody.holders.chests) resolve(chest.holder);
+  for (const chest of holders.chests) resolve(chest.holder);
   resolve({ kind: "player", playerId: hostPlayerId, storage: "host" });
   for (const playerId of Object.keys(source.multiplayerPlayers ?? {})) resolve({ kind: "player", playerId, storage: "guest" });
   for (const agentId of Object.keys(source.agentCustody?.agents ?? {})) resolve({ kind: "agent", agentId });
-  const stored = custody.holders.stored.map(value => {
+  const stored = holders.stored.map(value => {
     const physicalSide = resolve(value.holder);
     if (value.body && required(bodies, value.body.id) !== physicalSide)
       throw Error("Deployed creature body and its canonical orb holder cross the frame boundary.");
     return { ...value, side: physicalSide };
   });
-  const residents = custody.holders.residents.map(value => ({ ...value, side: resolve(value.holder) }));
+  const residents = holders.residents.map(value => ({ ...value, side: resolve(value.holder) }));
   return freezeUniverseJson(cloneUniverseJson({ sourceBaseline: canonicalJson({ frame, source, hostPlayerId, context }),
     bindings: [...bindings.values()], stored, residents,
-    freeBodies: custody.holders.freeBodies.map(value => ({ ...value, side: required(bodies, value.id) })),
+    freeBodies: holders.freeBodies.map(value => ({ ...value, side: required(bodies, value.id) })),
     apiaryDependencies: apiary.dependencies, installations }));
+}
+
+/** Reconcile ALL repository/runtime owners and encounter references first, then
+ * classify the actual current physical holders. Inactive owners stay qualified;
+ * no local-history flattening, fabricated positions or duplicate owner tables.
+ * This is still read-only selection, not authentication or transfer authority. */
+export function selectUniverseAsteroidCreatureCustody(frame: AsteroidAttachmentFrame,
+  snapshot: UniverseCreatureCustodySnapshot, live: LiveUniverseCreatureCustody, context: AsteroidCustodyPhysicalContext) {
+  const source = encodeAttachmentSource({ frame, snapshot, live, context });
+  if (live.locationId !== frame.orbitId || canonicalJson(live.actors) !== canonicalJson(context.actors))
+    throw Error("Scoped physical custody differs from its actual location or actors.");
+  const custody = reconcileUniverseCreatureCustody(snapshot, live);
+  const paths = new Map(custody.paths.map(row => [canonicalJson(row.path), row]));
+  const provenance = (path: CreatureCustodyPath) => {
+    const row = paths.get(canonicalJson(path));
+    if (!row) throw Error("Scoped physical custody lacks explicit path provenance.");
+    return row;
+  };
+  const currentPath = (path: CreatureCustodyPath) => {
+    const row = provenance(path);
+    if (row.locationId !== null && row.locationId !== live.locationId) return false;
+    return row.owner === "universe" || row.owner === "player" && row.ownerId === live.playerId
+      || row.owner === "location" && row.ownerId === live.locationId;
+  };
+  const holder = (path: CreatureCustodyPath) => creatureCustodyHolderForPath(live.source, live.actorId, provenance(path).localPath);
+  const containers = new Map<string, PhysicalHolders["stored"][number]["containing"][number]>();
+  for (const value of custody.index.stored) containers.set(canonicalJson(value.path),
+    { path: value.path, specimenId: value.custody.creature.entityId, format: "stored" });
+  for (const value of custody.index.residents) containers.set(canonicalJson(value.path),
+    { path: value.path, specimenId: value.creature.entityId, format: "housed" });
+  const containing = (path: CreatureCustodyPath) => {
+    const result: PhysicalHolders["stored"][number]["containing"][number][] = [];
+    for (let length = 1; length < path.length; length++) {
+      const parent = containers.get(canonicalJson(path.slice(0, length)));
+      if (parent) result.push(parent);
+    }
+    return result;
+  };
+  const holders: PhysicalHolders = {
+    hostPlayerId: live.actorId,
+    chests: Object.keys(live.source.chests).sort().map(key => ({ key, holder: chestCustodyOwner(key) })),
+    stored: custody.index.stored.filter(value => currentPath(value.path)).map(value => ({
+      path: value.path, specimenId: value.custody.creature.entityId, holder: holder(value.path), containing: containing(value.path),
+      body: value.body ? { collection: value.body.collection, id: value.body.creature.id } : null })),
+    residents: custody.index.residents.filter(value => currentPath(value.path)).map(value => ({
+      path: value.path, specimenId: value.creature.entityId, holder: holder(value.path), containing: containing(value.path) })),
+    freeBodies: custody.index.freeBodies.filter(value => value.locationId === live.locationId).map(value => ({
+      collection: value.collection, id: value.creature.id, specimenId: value.creature.specimenId ?? null })),
+  };
+  const current = selectPhysicalHolders(frame, live.source, live.actorId, context, holders);
+  const storedByPath = new Map(current.stored.map(row => [canonicalJson(row.path), row]));
+  const residentsByPath = new Map(current.residents.map(row => [canonicalJson(row.path), row]));
+  const inactiveSide = (path: CreatureCustodyPath): AsteroidCustodySide => {
+    const row = provenance(path);
+    if (row.owner === "player" && row.ownerId !== live.playerId) return "inactive-player";
+    if (row.locationId !== null && row.locationId !== live.locationId) return "other-location";
+    throw Error("Unresolved noncurrent physical custody owner.");
+  };
+  const stored = custody.index.stored.map(value => {
+    const physical = storedByPath.get(canonicalJson(value.path)) ?? null;
+    if (!physical && value.body?.locationId === live.locationId)
+      throw Error("Current deployed body has no present physical holder.");
+    return { ...value, provenance: provenance(value.path), physical, side: physical?.side ?? inactiveSide(value.path) };
+  });
+  const residents = custody.index.residents.map(value => {
+    const physical = residentsByPath.get(canonicalJson(value.path)) ?? null;
+    return { ...value, provenance: provenance(value.path), physical, side: physical?.side ?? inactiveSide(value.path) };
+  });
+  const bodySides = new Map(current.freeBodies.map(row => [row.id, row.side]));
+  const freeBodies = custody.index.freeBodies.map(value => {
+    const side = value.locationId === live.locationId ? bodySides.get(value.creature.id) : "other-location";
+    if (!side) throw Error("Missing current free-body physical classification.");
+    return { ...value, side };
+  });
+  return freezeUniverseJson(structuredClone({ source, custody, current, stored, residents, freeBodies }));
 }

@@ -14,6 +14,8 @@ import { canonicalJson } from "../app/game/universe-json";
 import { createGolemForgeState } from "../app/game/v1-cultures";
 import { SPELL_TOME_ITEMS } from "../app/game/dragon-world";
 import type { ChunkEditSave } from "../app/game/world";
+import { captureIntoOrb, captureOrbInventorySlot, createEmptyCaptureOrb } from "../app/game/capture-orbs";
+import { createPrimeEncounterState, planPrimeEncounter, transferPrimeEncounterCustody } from "../app/game/creature-rarity";
 
 const additionalMaps = ["saplings", "veinRegrowth", "roadEvents", "golemForges", "alchemyStands", "distilleries", "sugarworks",
   "archiveShelves", "tomeDisplays", "settlements", "merchants", "liquidCells", "ecologySectors", "multiplayerPlayerProgressions",
@@ -53,6 +55,62 @@ function fixture() {
   }) as VoxelEngine;
   return { engine, asteroid, pressure, edits };
 }
+
+test("actual full scoped source observes remote history before physical selection and rechecks every authority input", async () => {
+  const { engine, asteroid, pressure } = fixture(), universe = universeId("runtime-complete-source");
+  const home = locationId(homeLocation(universe)), orbit = engine.worldStorage.currentStamp!.locationId;
+  const anchor = "prime:petalfox:0:0", value = captureIntoOrb(createEmptyCaptureOrb("remote-orb"), {
+    schema: 1, entityId: "remote-specimen", kind: "petalfox", health: 5, maxHealth: 7, ageTicks: 123, baby: false,
+    temperament: "Gentle", hostile: false, tamed: true, ownerId: "local", name: null, geneticSeed: 321, command: null,
+    custom: { primeAnchorId: anchor } }, 42)!;
+  const history = transferPrimeEncounterCustody(createPrimeEncounterState(planPrimeEncounter("petalfox", { worldSeed: "fixture", x: 0,
+    z: 0, y: 30, surfaceY: 30, biomeName: "Glimmerwood", weather: "clear", daylight: .8 })!, "petalfox", 23, 100),
+    "captured", "remote-specimen", "orb:remote-orb", null, 200);
+  const manifest = { id: universe, universeId: universe, revision: 5, currentLocationId: orbit, currentPlayerId: "host", deletedAt: null };
+  // Existing exact repository API is represented by a declared transport adapter;
+  // this exercises real engine observation/selection, not native IDB or consent.
+  const repository = { snapshot: { manifest, universe: { fields: {} },
+    players: [{ playerId: "host", locationId: orbit, fields: { inventory: [] } }], locations: [
+      { descriptor: { id: orbit, universeId: universe, revision: 7 }, fields: { furnaces: {}, chests: {} } },
+      { descriptor: { id: home, universeId: universe, revision: 2 }, fields: { furnaces: {}, chests: {}, primeEncounters: { [anchor]: history } } },
+    ] }, source: ["repository-adapter"] };
+  let mutate: (() => void) | null = null, reads = 0;
+  const storage = { ...engine.worldStorage, currentManifest: manifest,
+    currentCatalog: engine.worldStorage.currentCatalog, currentStamp: engine.worldStorage.currentStamp,
+    snapshotAttachmentSource: async () => { reads++; mutate?.(); return repository; } };
+  Object.assign(engine, { worldStorage: storage, inventory: [captureOrbInventorySlot(value)] });
+  assert.throws(() => engine.snapshotAttachmentSource(asteroid.id), /unresolved Prime/);
+  const raw = engine.snapshotAttachmentSourceObservation(asteroid.id);
+  assert.equal(raw.physical.encounterSources.primeEncounters[anchor], undefined);
+  const before = JSON.stringify(engine.inventory), result = await engine.snapshotScopedAttachmentUniverseSource(asteroid.id);
+  assert.equal(reads, 1); assert.equal(result.physical.stored[0].side, "attached");
+  assert.equal(result.physical.custody.encounters.primeOwners[0].locationId, home);
+  assert.equal(result.physical.custody.encounters.primeOwners[0].owner?.encounterOriginLocationId, null);
+  assert.equal(JSON.stringify(engine.inventory), before); assert(!Object.isFrozen(repository));
+  assert(Object.isFrozen(result.runtime)); assert.equal(engine.primeEncounters.size, 0);
+  for (const fault of ["inventory", "pressure", "environment", "catalog", "catalogUndefined", "effects", "facade"] as const) {
+    const priorInventory = engine.inventory, priorHealth = engine.health, priorCatalog = storage.currentCatalog;
+    const oldInstallation = pressure.nextInstallation;
+    mutate = () => {
+      if (fault === "inventory") engine.inventory = [];
+      if (fault === "pressure") pressure.nextInstallation++;
+      if (fault === "environment") engine.health--;
+      if (fault === "catalog") storage.currentCatalog = { ...priorCatalog!, catalogVersion: priorCatalog!.catalogVersion + 1 };
+      if (fault === "catalogUndefined") Object.assign(storage, { currentCatalog: { ...priorCatalog, rawExtension: undefined } });
+      if (fault === "effects") engine.projectiles.push({} as never);
+      if (fault === "facade") Object.assign(engine, { worldStorage: { ...storage } });
+    };
+    await assert.rejects(engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /changed during repository|active effects/, fault);
+    engine.inventory = priorInventory; engine.health = priorHealth; pressure.nextInstallation = oldInstallation;
+    storage.currentCatalog = priorCatalog; engine.projectiles.length = 0; Object.assign(engine, { worldStorage: storage });
+  }
+  mutate = null;
+  for (const field of ["checkpointPromise", "pendingFieldSurvey", "pendingSpaceArrival", "locationTransitioning", "evaCargoLine"]) {
+    Object.assign(engine, { [field]: true }); const prior: number = reads;
+    await assert.rejects(engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /pending world\/cargo/); assert.equal(reads, prior);
+    Object.assign(engine, { [field]: null });
+  }
+});
 
 test("actual exhaustive source binds installed production and detects ledger changes at the same revision", () => {
   const { engine, asteroid, edits } = fixture(), { x, y, z } = asteroid.center;

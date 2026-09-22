@@ -3,6 +3,7 @@ import type { SailboatSave } from "./boats";
 import type { SavedLeadAnchor } from "./farming";
 import { cloneUniverseJson } from "./universe-json";
 import { readCreatureOrigins } from "./creature-origins";
+import { CreatureSpecimenIdentitySet } from "./creature-specimen-identity";
 import { rebaseAsteroidPosition, type AsteroidAttachmentFrame, type AsteroidAttachmentView } from "./asteroid-attachment-frame";
 
 export type AsteroidAttachedEntities = Readonly<{
@@ -51,14 +52,15 @@ export function rebaseAsteroidEntities(frame: AsteroidAttachmentFrame, input: As
   from: AsteroidAttachmentView, movingActorIds: readonly string[], localActorId = "local"): AsteroidAttachedEntities {
   supported(input, ENTITY_COLLECTIONS);
   for (const creature of [...input.creatures, ...input.sleepingCreatures]) readCreatureOrigins(creature);
-  const output = cloneUniverseJson(input), ids = new Set<number>(), specimens = new Set<string>(), boats = new Set<string>();
+  const output = cloneUniverseJson(input), ids = new Set<number>(), specimens = new CreatureSpecimenIdentitySet(), boats = new Set<string>();
   const moving = new Set(movingActorIds), seated = new Set<string>();
   const point = (p: { x: number; y: number; z: number }) => rebaseAsteroidPosition(frame, p, from);
   for (const creature of [...output.creatures, ...output.sleepingCreatures]) {
     supported(creature, CREATURE_FIELDS);
     if (!Number.isSafeInteger(creature.id) || creature.id < 0 || ids.has(creature.id)
-      || creature.specimenId !== undefined && (!creature.specimenId || specimens.has(creature.specimenId))) throw Error("Duplicate or invalid attached creature identity.");
-    ids.add(creature.id); if (creature.specimenId) specimens.add(creature.specimenId);
+      || creature.specimenId !== undefined && (typeof creature.specimenId !== "string" || !creature.specimenId)) throw Error("Duplicate or invalid attached creature identity.");
+    ids.add(creature.id);
+    if (creature.specimenId !== undefined) specimens.add(creature.specimenId, creature, "Duplicate or invalid attached creature identity.");
     Object.assign(creature, point(creature));
     if (creature.morrowRoost) creature.morrowRoost = point(creature.morrowRoost);
     if (creature.creatureWork?.home) creature.creatureWork = { ...creature.creatureWork, home: point(creature.creatureWork.home) };

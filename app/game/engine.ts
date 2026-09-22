@@ -564,7 +564,7 @@ import type { AsteroidApiarySources } from "./asteroid-attachment-apiaries";
 import { createAsteroidAttachmentWorld, type AsteroidAttachmentWorldSource } from "./asteroid-attachment-world";
 import { HEALER_ACTIVE_FUEL } from "./custody-block-body";
 import { createAsteroidAttachmentFrame } from "./asteroid-attachment-frame";
-import { selectAsteroidCreatureCustody, type AsteroidCustodyPhysicalContext } from "./asteroid-attachment-custody";
+import { selectAsteroidCreatureCustody, selectUniverseAsteroidCreatureCustody, type AsteroidCustodyPhysicalContext } from "./asteroid-attachment-custody";
 import type { WorldCreatureCustodySource } from "./creature-custody-sources";
 import { collectWorldCreatureCustodyHolders } from "./creature-custody-holders";
 import { assertCreatureOriginsAgree, newCreatureOrigins, readCreatureMetadataOrigins, readCreatureOrigins, type CreatureOrigins } from "./creature-origins";
@@ -22241,19 +22241,18 @@ export class VoxelEngine {
     return freezeUniverseJson(cloneUniverseJson({ stamp, originalRegistry, world: checked.source }));
   }
 
-  /** One synchronous physical-custody envelope. Read actual owner maps once,
-   * never serialize/save/advance a clock. This is NOT complete frame admission:
-   * authored sites, environmental queries, inactive location owners and durable
-   * actor/consent/resource authority remain mandatory separate gates. */
-  snapshotAttachmentPhysicalCustodySource(asteroidId: string) {
+  /** Observe physical inputs before assuming all specimen/history identities
+   * are local. No semantic custody grant; all existing world/owner guards stay. */
+  snapshotAttachmentPhysicalObservation(asteroidId: string) {
     if (this.checkpointPromise || this.pendingFieldSurvey || this.pendingSpaceArrival || this.locationTransitioning || this.evaCargoLine)
       throw Error("Finish pending world/cargo transactions before attachment inspection.");
     const voxels = this.snapshotAttachmentWorldSource(), actors = this.snapshotAttachmentActorBodies();
     const manifest = this.worldStorage.currentManifest, catalog = this.worldStorage.currentCatalog;
+    encodeAttachmentSource({ stamp: voxels.stamp, manifest, catalog });
     if (!manifest || !catalog || manifest.currentLocationId !== voxels.stamp.locationId || !this.pressureRuntime)
       throw Error("Attachment custody lacks its current durable owner or pressure source.");
     const ownerBaseline = canonicalJson({ stamp: voxels.stamp, manifest, catalog });
-    const custody = this.snapshotAttachmentCreatureCustody(), hostPlayerId = this.localPlayerId();
+    const custody = this.snapshotAttachmentCreatureSources(), hostPlayerId = this.localPlayerId();
     const exhibitResidents: Record<string, ExhibitResident[]> = {};
     for (const [key, slots] of Object.entries(custody.source.chests)) if (key.startsWith("exhibit:"))
       exhibitResidents[key] = slots.flatMap((slot, index) => {
@@ -22266,16 +22265,29 @@ export class VoxelEngine {
         // CF6 has no live wayanchor producer. Any recorded lease remains
         // unresolved and is rejected by the station selector, never guessed.
         wayanchorCells: {} } };
-    const physical = selectAsteroidCreatureCustody(frame, custody.source, hostPlayerId, context);
     if (ownerBaseline !== canonicalJson({ stamp: this.worldStorage.currentStamp,
       manifest: this.worldStorage.currentManifest, catalog: this.worldStorage.currentCatalog }))
       throw Error("Attachment durable owner changed during source inspection.");
-    return freezeUniverseJson(cloneUniverseJson({ frame, stamp: voxels.stamp, manifest, catalog,
+    const observed = { frame, stamp: voxels.stamp, manifest, catalog,
       originalRegistry: voxels.originalRegistry, persistenceRevision: this.persistenceRevision,
-      hostPlayerId, source: custody.source, encounters: custody.encounters, context, physical,
+      hostPlayerId, source: custody.source, encounterSources: custody.encounterSources, bodySource: custody.bodySource, context,
       navigation: { player: { x: this.position.x, y: this.position.y, z: this.position.z, yaw: this.yaw, pitch: this.pitch },
         spawn: { x: this.spawn.x, y: this.spawn.y, z: this.spawn.z },
-        locationPlayerState: this.locationPlayerSnapshot(this.attachmentBodyEnvironment().gravityG) } }));
+        locationPlayerState: this.locationPlayerSnapshot(this.attachmentBodyEnvironment().gravityG) } };
+    encodeAttachmentSource(observed);
+    return freezeUniverseJson(structuredClone(observed));
+  }
+
+  /** Existing strict local preflight, recomposed from the same raw observation.
+   * The global path must reconcile all owners before its physical projection. */
+  snapshotAttachmentPhysicalCustodySource(asteroidId: string) {
+    const { encounterSources, bodySource: _bodySource, ...observed } = this.snapshotAttachmentPhysicalObservation(asteroidId);
+    // Raw body bytes are bound by the full-source API, not added to the legacy envelope.
+    void _bodySource;
+    const custody = collectWorldCreatureCustodyHolders(observed.source, observed.hostPlayerId);
+    const encounters = reconcileCreatureEncounterCustody(custody.sources, encounterSources);
+    const physical = selectAsteroidCreatureCustody(observed.frame, observed.source, observed.hostPlayerId, observed.context);
+    return freezeUniverseJson(cloneUniverseJson({ ...observed, encounters, physical }));
   }
 
   /** Prospective async commit boundary: counters alone do not cover direct
@@ -22297,7 +22309,8 @@ export class VoxelEngine {
    * history limits, clock reconciliation, loot allocation or save side effects.
    * Comparison preimage only: it is not a save payload, simulation pause, actor
    * consent, inactive-owner proof or an atomic admission/transfer grant. */
-  snapshotAttachmentSource(asteroidId: string) {
+  private snapshotAttachmentSourceForPhysical(physical: Pick<ReturnType<VoxelEngine["snapshotAttachmentPhysicalObservation"]>,
+    "frame" | "context" | "navigation">) {
     if (this.fastTravelChannel || this.rangedReloadItem !== null || this.fallingTrees.length || this.projectiles.length
       || this.dragonEffects.length || this.temporarySummons.size || this.activeSpellFields.length
       || this.temporarySpellBlocks.size || this.playerCombatStatuses.length || this.stormstepDashSeconds > 0)
@@ -22306,7 +22319,6 @@ export class VoxelEngine {
       throw Error("Finish pending liquid propagation before attachment source capture.");
     if (!this.pressureRuntime) throw Error("Attachment source lacks pressure authority.");
     const pressureSource = this.pressureRuntime.snapshotAttachmentSource();
-    const physical = this.snapshotAttachmentPhysicalCustodySource(asteroidId);
     const canonicalWorld = createAsteroidAttachmentWorld(physical.context.world);
     const production = selectAsteroidProductionStations(physical.frame, {
       golemForges: Object.fromEntries(this.golemForges), alchemyStands: Object.fromEntries(this.alchemyStands),
@@ -22375,7 +22387,38 @@ export class VoxelEngine {
     });
     // Keep already-encoded authority records outside the field encoder: encoding
     // them again would multiply nesting depth for large, valid pressure rooms.
-    return freezeUniverseJson({ physical, source, pressureSource, production, bookFurniture });
+    return freezeUniverseJson({ source, pressureSource, production, bookFurniture });
+  }
+
+  snapshotAttachmentSource(asteroidId: string) {
+    const physical = this.snapshotAttachmentPhysicalCustodySource(asteroidId);
+    return freezeUniverseJson({ physical, ...this.snapshotAttachmentSourceForPhysical(physical) });
+  }
+
+  /** Full raw observation for a later global semantic join. This retains the
+   * exhaustive field/effect/liquid/pressure guards but does not filter owners. */
+  snapshotAttachmentSourceObservation(asteroidId: string) {
+    const physical = this.snapshotAttachmentPhysicalObservation(asteroidId);
+    return freezeUniverseJson({ physical, physicalSource: encodeAttachmentSource(physical), ...this.snapshotAttachmentSourceForPhysical(physical) });
+  }
+
+  /** Full raw source, verified repository, global encounter association, then
+   * whole physical selection. No local-only reconciliation precedes the global
+   * join. Read-only: complete site/authority/atomic transfer gates still apply. */
+  async snapshotScopedAttachmentUniverseSource(asteroidId: string) {
+    const storage = this.worldStorage;
+    if (!storage) throw Error("Scoped attachment source lacks universe storage.");
+    const runtime = this.snapshotAttachmentSourceObservation(asteroidId);
+    const repository = await storage.snapshotAttachmentSource();
+    if (this.worldStorage !== storage || JSON.stringify(runtime) !== JSON.stringify(this.snapshotAttachmentSourceObservation(asteroidId)))
+      throw Error("Scoped attachment source changed during repository observation.");
+    const observed = runtime.physical;
+    const physical = selectUniverseAsteroidCreatureCustody(observed.frame, repository.snapshot, {
+      universeId: parseLocationId(observed.stamp.locationId).universeId, repositoryRevision: observed.manifest.revision,
+      playerId: observed.manifest.currentPlayerId, locationId: observed.stamp.locationId, actorId: observed.hostPlayerId,
+      actors: observed.context.actors, source: observed.source, encounterSources: observed.encounterSources,
+    }, observed.context);
+    return freezeUniverseJson({ runtime, repository: structuredClone(repository), physical });
   }
 
   assertAttachmentSourceUnchanged(source: ReturnType<VoxelEngine["snapshotAttachmentSource"]>) {

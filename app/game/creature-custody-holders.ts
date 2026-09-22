@@ -25,50 +25,56 @@ function identity(value: unknown): asserts value is string {
  * position for a player/agent/digital ledger or mistaking a nested metadata point
  * for an anchor. This is an ephemeral dependency index, NOT physical admission,
  * actor authentication, a second storage owner or permission to transfer cargo. */
+export function creatureCustodyHolderForPath(source: WorldCreatureCustodySource, hostPlayerId: string,
+  path: CreatureCustodyPath): CreatureCustodyHolder {
+  identity(hostPlayerId);
+  const value = path[0];
+  if (typeof value !== "string" || !Object.hasOwn(roots, value)) throw Error("Unknown canonical creature holder family.");
+  const root = value as keyof WorldCreatureCustodySource;
+  switch (root) {
+    case "inventory": case "cursor": case "trash": case "craftGrid": case "equipment": case "offhand":
+      return { kind: "player", playerId: hostPlayerId, storage: "host" };
+    case "digitalItemVault": case "digitalCreatureArchive": return { kind: "universe", field: root };
+    case "multiplayerPlayers": {
+      const playerId = path[1]; identity(playerId); return { kind: "player", playerId, storage: "guest" };
+    }
+    case "agentCustody": {
+      const agentId = path[1]; identity(agentId); return { kind: "agent", agentId };
+    }
+    case "spacefleet": {
+      const vehicleId = path[1]; identity(vehicleId);
+      const vehicle = source.spacefleet?.vehicles[vehicleId];
+      if (!vehicle) throw Error("Missing actual spacecraft holder.");
+      identity(vehicle.locationId); return { kind: "spacecraft", vehicleId, locationId: vehicle.locationId };
+    }
+    case "boats": { const id = path[1]; identity(id); return { kind: "boat", id }; }
+    case "drops": {
+      const sourceIndex = path[1];
+      if (typeof sourceIndex !== "number" || !Number.isSafeInteger(sourceIndex) || sourceIndex < 0 || !source.drops?.[sourceIndex])
+        throw Error("Missing actual drop holder.");
+      return { kind: "drop", sourceIndex };
+    }
+    case "chests": {
+      const key = path[1]; identity(key);
+      if (!Object.hasOwn(source.chests, key)) throw Error("Missing actual chest holder.");
+      return chestCustodyOwner(key);
+    }
+    case "furnaces": case "wheatMills": case "wayworks": case "orbRacks": case "healingStations":
+    case "morphLooms": case "apiaries": case "aquariums": case "fieldPerches": {
+      const key = path[1]; identity(key); parseCustodyCellKey(key); return { kind: "block", field: root, key };
+    }
+    case "creatures": case "sleepingCreatures": throw Error("Free bodies are not portable container slots.");
+    default: { const unsupported: never = root; throw Error(`Unsupported creature holder family: ${unsupported}`); }
+  }
+}
+
+/** Existing local index and holder output remain strict. The path resolver above
+ * is only a mapping primitive, not a validator or a grant of physical custody. */
 export function collectWorldCreatureCustodyHolders(source: WorldCreatureCustodySource, hostPlayerId: string) {
   identity(hostPlayerId);
   const custody = collectWorldCreatureCustody(source);
   const chests = Object.keys(source.chests).sort().map(key => ({ key, holder: chestCustodyOwner(key) }));
-  const chestOwners = new Map(chests.map(value => [value.key, value.holder]));
-  const holder = (path: CreatureCustodyPath): CreatureCustodyHolder => {
-    const value = path[0];
-    if (typeof value !== "string" || !Object.hasOwn(roots, value)) throw Error("Unknown canonical creature holder family.");
-    const root = value as keyof WorldCreatureCustodySource;
-    switch (root) {
-      case "inventory": case "cursor": case "trash": case "craftGrid": case "equipment": case "offhand":
-        return { kind: "player", playerId: hostPlayerId, storage: "host" };
-      case "digitalItemVault": case "digitalCreatureArchive": return { kind: "universe", field: root };
-      case "multiplayerPlayers": {
-        const playerId = path[1]; identity(playerId); return { kind: "player", playerId, storage: "guest" };
-      }
-      case "agentCustody": {
-        const agentId = path[1]; identity(agentId); return { kind: "agent", agentId };
-      }
-      case "spacefleet": {
-        const vehicleId = path[1]; identity(vehicleId);
-        const vehicle = source.spacefleet?.vehicles[vehicleId];
-        if (!vehicle) throw Error("Missing actual spacecraft holder.");
-        identity(vehicle.locationId); return { kind: "spacecraft", vehicleId, locationId: vehicle.locationId };
-      }
-      case "boats": { const id = path[1]; identity(id); return { kind: "boat", id }; }
-      case "drops": {
-        const sourceIndex = path[1];
-        if (typeof sourceIndex !== "number" || !Number.isSafeInteger(sourceIndex) || sourceIndex < 0 || !source.drops?.[sourceIndex])
-          throw Error("Missing actual drop holder.");
-        return { kind: "drop", sourceIndex };
-      }
-      case "chests": {
-        const key = path[1]; identity(key); const found = chestOwners.get(key);
-        if (!found) throw Error("Missing actual chest holder."); return found;
-      }
-      case "furnaces": case "wheatMills": case "wayworks": case "orbRacks": case "healingStations":
-      case "morphLooms": case "apiaries": case "aquariums": case "fieldPerches": {
-        const key = path[1]; identity(key); parseCustodyCellKey(key); return { kind: "block", field: root, key };
-      }
-      case "creatures": case "sleepingCreatures": throw Error("Free bodies are not portable container slots.");
-      default: { const unsupported: never = root; throw Error(`Unsupported creature holder family: ${unsupported}`); }
-    }
-  };
+  const holder = (path: CreatureCustodyPath) => creatureCustodyHolderForPath(source, hostPlayerId, path);
   const containers = new Map<string, { path: CreatureCustodyPath; specimenId: string; format: "stored" | "housed" }>();
   for (const stored of custody.index.stored) containers.set(canonicalJson(stored.path),
     { path: stored.path, specimenId: stored.custody.creature.entityId, format: "stored" });

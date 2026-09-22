@@ -2,6 +2,21 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Revision16 scoped physical integration separates raw physical/full-field
+  observation from the unchanged strict local wrappers. New async global path
+  binds exact before/after runtime and repository, reconciles all owners/history,
+  then uses shared whole-holder geometry with explicit path provenance and
+  current/inactive/shared/other-location ownership. No guessed offline positions
+  or flattened numeric body IDs. Apiary/entity/relationship identities now use
+  explicit specimen origins; duplicate unknown origins and vessel/body IDs still
+  refuse. Ambiguous repeated-ID bee capture stays closed. Parentr1:17PASS,
+  r2:28PASS/r3:14PASS/r4:31PASS; expandedr5/r6:184PASS; worker52/55/55PASS.
+  Static153 found test-only accessor-spread/readonly fixture errors, static154
+  found an invalid catalog probe property; corrected to the real catalogVersion.
+  Static155/lint128PASS; lint127 had one now-resolved unused-binding warning.
+  Independent parent and worker-scope reviews found no actionable issues.
+  Build46/native integration pending; local entry CLOSED and CF7 gated.
+
 - Revision16 scoped encounter join associates every global Prime/legendary
   reference before filtering, with explicit encounter origin or a unique exact
   compatible legacy association. Unknown origins remain unknown; equal local
@@ -13,7 +28,9 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
   returned repository; r3:64PASS, expandedr4:130PASS. Static150/152 and lint125/126
   PASS; static151 retained TS7022 on a test loop counter, fixed with its numeric
   annotation. Independent read-only review found no actionable issues. Build45,
-  exact committed repeat and ordinary browser regression remain pending.
+  exact committedr5:130PASS, build45rkUjMy4WoluHm06W2C_Bh/official45PASS and image
+  reviewed. Director acceptedb46a6e2 with56files/9Gitblobs/12receipts plus31
+  independent tests. Bounded prerequisite only; frozen evidence retained.
 
 - Revision16 global-custody prerequisite separates raw host observation from
   local semantic checks, adds strict owner-partition visitors, a location/origin-

@@ -3,6 +3,7 @@ import { APIARY_FORAGING_SCAN, APIARY_HONEY_CAP, APIARY_JELLY_CAP, APIARY_NECTAR
 import { Item } from "./data";
 import type { CaptureOrb } from "./capture-orbs";
 import { assertCreatureOriginsAgree, readCreatureOrigins } from "./creature-origins";
+import { creatureSpecimenIdentityKey, CreatureSpecimenIdentitySet } from "./creature-specimen-identity";
 import { readExactEncodedCaptureOrb, readStoredCreatureCustody } from "./stored-creature-custody";
 import { validCustodyItem } from "./wayworks-custody";
 import { assertKnownAsteroidEntityFields } from "./asteroid-attachment-entities";
@@ -62,10 +63,16 @@ function validateBee(bee: ApiaryBee, role: ApiaryBee["role"]): void {
   }
 }
 function beeKind(bee: ApiaryBee) { return bee.role === "queen" ? "hive-queen" : "honeybee"; }
-function canonicalBees(sources: AsteroidApiarySources): Map<string, ApiaryBee> {
-  const bees = Object.values(sources.apiaries).flatMap(hive => [...(hive.queen ? [hive.queen] : []), ...hive.workers]);
-  for (const creature of [...sources.creatures, ...sources.sleepingCreatures]) if (creature.apiaryBee) bees.push(creature.apiaryBee);
-  return new Map(bees.map(bee => [bee.id, bee]));
+function canonicalBees(sources: AsteroidApiarySources): Map<string, { bee: ApiaryBee; holder: string }[]> {
+  const bees = new Map<string, { bee: ApiaryBee; holder: string }[]>();
+  const add = (bee: ApiaryBee, holder: string) => bees.set(bee.id, [...(bees.get(bee.id) ?? []), { bee, holder }]);
+  for (const [key, hive] of Object.entries(sources.apiaries)) {
+    if (hive.queen) add(hive.queen, canonicalJson(["hive", key, "queen"]));
+    for (const bee of hive.workers) add(bee, canonicalJson(["hive", key, "worker"]));
+  }
+  for (const creature of [...sources.creatures, ...sources.sleepingCreatures])
+    if (creature.apiaryBee) add(creature.apiaryBee, canonicalJson(["body", creature.id]));
+  return bees;
 }
 function readApiaryOrb<T>(read: () => T): T {
   try { return read(); }
@@ -89,20 +96,21 @@ function selection(frame: AsteroidAttachmentFrame, sources: AsteroidApiarySource
   assertKnownAsteroidEntityFields({ creatures: [...sources.creatures, ...sources.visuals.map(value => value.creature)],
     sleepingCreatures: sources.sleepingCreatures, boats: [], drops: [], leads: [] });
   const bees = new Map<string, { bee: ApiaryBee; side: boolean; hiveKey: string | null }>(), hiveSides = new Map<string, boolean>();
-  const orbIds = new Set<string>(), storedSpecimens = new Set<string>();
+  const orbIds = new Set<string>(), storedSpecimens = new CreatureSpecimenIdentitySet(), beeIdentities = new CreatureSpecimenIdentitySet();
   const registerOrb = (orb: Pick<CaptureOrb, "orbId" | "creature" | "attunement"> | null, bee: ApiaryBee, queenSlot = false) => {
     // The encoded custody payload remains byte-for-byte opaque; decoding here
     // establishes only its existing identity, species and non-deployed state.
     const customBee = orb?.creature?.custom.apiaryBee;
     const identity = queenSlot && isUniverseRecord(customBee) ? customBee.id : orb?.creature?.entityId;
     if (!orb?.creature || orb.creature.kind !== beeKind(bee) || identity !== bee.id || orb.attunement?.activeEntityId
-      || orbIds.has(orb.orbId) || storedSpecimens.has(orb.creature.entityId)) throw Error("Unresolved or duplicate attached apiary orb custody.");
+      || orbIds.has(orb.orbId)) throw Error("Unresolved or duplicate attached apiary orb custody.");
     assertCreatureOriginsAgree(bee, orb.creature.custom);
-    orbIds.add(orb.orbId); storedSpecimens.add(orb.creature.entityId);
+    storedSpecimens.add(orb.creature.entityId, orb.creature.custom, "Unresolved or duplicate attached apiary orb custody.");
+    orbIds.add(orb.orbId);
   };
   const registerBee = (bee: ApiaryBee, side: boolean, hiveKey: string | null) => {
-    if (bees.has(bee.id)) throw Error("Duplicate attached bee custody.");
-    bees.set(bee.id, { bee, side, hiveKey });
+    beeIdentities.add(bee.id, bee, "Duplicate attached bee custody.");
+    bees.set(creatureSpecimenIdentityKey(bee.id, bee), { bee, side, hiveKey });
     if (bee.storedOrb) registerOrb(readApiaryOrb(() => readExactEncodedCaptureOrb(bee.storedOrb!.captureOrb)), bee);
   };
   for (const [key, hive] of Object.entries(sources.apiaries)) {
@@ -128,11 +136,12 @@ function selection(frame: AsteroidAttachmentFrame, sources: AsteroidApiarySource
     for (const worker of hive.workers) { validateBee(worker, "worker"); registerBee(worker, side, key); }
     hiveSides.set(key, side);
   }
-  const creatureIds = new Set<number>(), specimens = new Set<string>(), dependencies: AsteroidEntityDependency[] = [];
+  const creatureIds = new Set<number>(), specimens = new CreatureSpecimenIdentitySet(), dependencies: AsteroidEntityDependency[] = [];
   const identify = (creature: SavedCreature) => {
     if (!counter(creature.id) || creatureIds.has(creature.id) || creature.specimenId !== undefined
-      && (!textId(creature.specimenId, 160) || specimens.has(creature.specimenId))) throw Error("Duplicate or invalid apiary actor identity.");
-    creatureIds.add(creature.id); if (creature.specimenId !== undefined) specimens.add(creature.specimenId);
+      && !textId(creature.specimenId, 160)) throw Error("Duplicate or invalid apiary actor identity.");
+    creatureIds.add(creature.id);
+    if (creature.specimenId !== undefined) specimens.add(creature.specimenId, creature, "Duplicate or invalid apiary actor identity.");
   };
   for (const creature of [...sources.creatures, ...sources.sleepingCreatures]) {
     identify(creature);
@@ -141,15 +150,16 @@ function selection(frame: AsteroidAttachmentFrame, sources: AsteroidApiarySource
     assertCreatureOriginsAgree(creature, bee);
     if (creature.kind !== beeKind(bee)) throw Error("Free bee differs from its saved species.");
     const side = asteroidCreatureFootprintSide(frame, creature, "orbit"); registerBee(bee, side, null);
-    dependencies.push({ kind: "apiary-bee", id: bee.id, attached: side });
+    dependencies.push({ kind: "apiary-bee", id: bee.id, attached: side,
+      ...(bee.specimenOriginLocationId !== undefined ? { specimenOriginLocationId: bee.specimenOriginLocationId } : {}) });
   }
   const visualBeeIds = new Set<string>(), visualCreatureIds: number[] = [];
   for (const visual of sources.visuals) {
     assertExactKeys(visual, ["hiveKey", "creature"], "Apiary visual"); identify(visual.creature);
     const creature = visual.creature, bee = creature.apiaryBee;
     if (!bee) throw Error("Apiary visual lacks its resident identity.");
-    validateBee(bee, bee.role); const owner = bees.get(bee.id);
-    if (!owner || owner.hiveKey !== visual.hiveKey || !hiveSides.has(visual.hiveKey) || visualBeeIds.has(bee.id)
+    validateBee(bee, bee.role); const identity = creatureSpecimenIdentityKey(bee.id, bee), owner = bees.get(identity);
+    if (!owner || owner.hiveKey !== visual.hiveKey || !hiveSides.has(visual.hiveKey) || visualBeeIds.has(identity)
       || creature.kind !== beeKind(owner.bee) || !owner.bee.alive) throw Error("Unresolved or duplicate apiary visual owner.");
     // Flight/nectar animation differs legitimately. Identity/ownership changes
     // must first reconcile with the canonical hive, never disappear on unload.
@@ -158,7 +168,7 @@ function selection(frame: AsteroidAttachmentFrame, sources: AsteroidApiarySource
     if (canonicalJson(bee.storedOrb ?? null) !== canonicalJson(owner.bee.storedOrb ?? null)) throw Error("Apiary visual has different stored custody.");
     assertCreatureOriginsAgree(bee, owner.bee);
     assertCreatureOriginsAgree(creature, owner.bee);
-    visualBeeIds.add(bee.id);
+    visualBeeIds.add(identity);
     if (asteroidCreatureFootprintSide(frame, creature, "orbit") !== owner.side) throw Error("Apiary visual crosses its hive attachment boundary.");
     if (owner.side) visualCreatureIds.push(creature.id);
   }
@@ -183,10 +193,25 @@ export function captureAsteroidApiaries(frame: AsteroidAttachmentFrame, sources:
   const apiaries = captureAsteroidBlocks(frame, sources.apiaries, baseline.apiaries, edited, codec);
   const afterSources = { ...cloneUniverseJson(after), apiaries };
   selection(frame, afterSources);
-  const beforeBees = canonicalBees(sources);
-  for (const [id, bee] of canonicalBees(afterSources)) {
-    const original = beforeBees.get(id);
-    if (original) assertCreatureOriginsAgree(original, bee);
+  const beforeBees = canonicalBees(sources), afterBees = canonicalBees(afterSources);
+  for (const id of new Set([...beforeBees.keys(), ...afterBees.keys()])) {
+    const originals = beforeBees.get(id) ?? [], updated = afterBees.get(id) ?? [];
+    if (originals.length <= 1 && updated.length <= 1) {
+      if (originals.length && updated.length) assertCreatureOriginsAgree(originals[0].bee, updated[0].bee);
+      continue;
+    }
+    // Repeated bare IDs have no independent transition token. Require a unique,
+    // unchanged holder binding; matching only qualified keys would hide origin
+    // swaps, additions and removals. Ambiguous worker slots also fail closed.
+    const holders = new Map(originals.map(value => [value.holder, value.bee]));
+    if (originals.length !== updated.length || holders.size !== originals.length
+      || new Set(updated.map(value => value.holder)).size !== updated.length)
+      throw Error("Unsupported ambiguous apiary provenance transition.");
+    for (const { bee, holder } of updated) {
+      const original = holders.get(holder);
+      if (!original) throw Error("Unsupported ambiguous apiary provenance transition.");
+      assertCreatureOriginsAgree(original, bee);
+    }
   }
   return apiaries;
 }

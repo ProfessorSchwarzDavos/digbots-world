@@ -323,13 +323,35 @@ join without passing through the local encounter assumption. It binds the raw
 runtime storage/body/actor/manifest/stamp preimage before and after the existing
 verified repository read; pending transactions, source changes and facade
 replacement refuse. Returned repository data is detached, not frozen in place.
-This does NOT replace the runtime physical selector's local assumptions, observe
-every environmental source, pause shared simulation or grant atomic rights.
-Its structural unit fixtures are not native persistence or ordinary entry/return evidence. Exact
-repository/runtime source, lease, physical and transaction checks remain required.
+That custody-only API does not observe every environmental source or grant
+atomic rights. The separate `snapshotScopedAttachmentUniverseSource()` now
+observes the complete existing attachment field/pressure/effect/liquid preimage,
+joins the verified repository, reconciles every global owner and encounter, and
+then performs whole-holder physical selection. Exact tagged physical sources
+also retain manifest/catalog own-undefined and negative-zero changes. A changed
+runtime or storage facade across the await refuses the result. Existing strict
+local APIs retain their behavior; the new path does not flatten remote histories.
+
+Physical results retain global storage paths, explicit local path provenance,
+body location and recorded specimen origins. Only actual current holders enter
+current geometry. Inactive players have no invented pose; other-location fleet
+cargo never binds an equal current numeric body ID. Shared archives remain shared,
+and a current deployed body requires a present holder on its same physical side.
+Nested packed cargo still follows the actual outer holder.
+
+Apiary, entity and relationship checks distinguish known-origin specimen
+identities while retaining repeated unknown-origin refusal, body-ID and vessel-ID
+uniqueness. Bee dependencies carry explicit origin through producer and consumer.
+Capture does not infer lineage: repeated bare bee IDs require unchanged unique
+holder bindings; ambiguous same-hive repeated worker IDs remain unsupported for
+capture even when their read-only projection is valid.
+
+These structural and actual-engine unit fixtures are not native persistence,
+transport authentication, simulation pause or ordinary entry/return evidence.
+Exact repository/lease and transaction checks remain required.
 
 This remains a prerequisite, not a complete admission gate. Exhaustive authored
-sites/environment integration, scoped physical-source integration, transition consent and
+sites/environment closure, native global persistence, transition consent and
 atomic finite-resource transfer still require their integration checks.
 Conservative all-phase model spheres may refuse an
 installation very close to the frame boundary. There is no new local-entry UI,

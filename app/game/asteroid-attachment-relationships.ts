@@ -3,6 +3,9 @@ import type { CelestialBounds, CelestialPoint } from "./celestial-terrain";
 import { MOB_DEFS } from "./mobs";
 import { SAILBOAT_CAPACITY } from "./boats";
 import { historicalResidentReference, type HistoricalResidentKind } from "./authored-residents";
+import { assertCreatureOriginsAgree } from "./creature-origins";
+import { creatureSpecimenIdentityKey, CreatureSpecimenIdentitySet } from "./creature-specimen-identity";
+import type { LocationId } from "./location-address";
 import { assertKnownAsteroidEntityFields, type AsteroidAttachedEntities } from "./asteroid-attachment-entities";
 import { asteroidAttachmentVolumeSide, asteroidCreatureFootprintSide } from "./asteroid-attachment-creature-footprint";
 import { asteroidSailboatFootprintSide } from "./asteroid-attachment-vehicle-footprint";
@@ -14,7 +17,9 @@ export type AsteroidEntityDependencyKind = "poi" | "legendary" | "prime" | "summ
  * These are NOT save records, guest claims, or permission grants. A boolean
  * alone cannot establish an owner's geometry, revision or finite custody. */
 export type AsteroidEntityDependency = Readonly<{
-  kind: AsteroidEntityDependencyKind; id: string; attached: boolean;
+  kind: Exclude<AsteroidEntityDependencyKind, "apiary-bee">; id: string; attached: boolean;
+} | {
+  kind: "apiary-bee"; id: string; attached: boolean; specimenOriginLocationId?: LocationId;
 } | {
   /** Shared canonical history, not a structure that must move with its NPC. */
   kind: HistoricalResidentKind; id: string; attached: null;
@@ -103,15 +108,14 @@ export function asteroidEntityRelationshipPartition(frame: AsteroidAttachmentFra
   }> {
   assertKnownAsteroidEntityFields(input);
   identifier(context.localActorId);
-  const creatures = new Map<number, SavedCreature>(), sides = new Map<number, boolean>(), specimens = new Set<string>();
+  const creatures = new Map<number, SavedCreature>(), sides = new Map<number, boolean>(), specimens = new CreatureSpecimenIdentitySet();
   const groups = new Map<string, boolean>();
   for (const creature of [...input.creatures, ...input.sleepingCreatures]) {
     numericId(creature.id);
     if (creatures.has(creature.id)) throw Error("Duplicate attachment creature identity.");
     if (creature.specimenId !== undefined) {
       identifier(creature.specimenId);
-      if (specimens.has(creature.specimenId)) throw Error("Duplicate attachment specimen identity.");
-      specimens.add(creature.specimenId);
+      specimens.add(creature.specimenId, creature, "Duplicate attachment specimen identity.");
     }
     creatures.set(creature.id, creature);
     const side = asteroidCreatureFootprintSide(frame, creature, view); sides.set(creature.id, side);
@@ -194,8 +198,12 @@ export function asteroidEntityRelationshipPartition(frame: AsteroidAttachmentFra
     }
   }
   const dependencies = new Map<string, AsteroidEntityDependency>(), usedDependencies = new Set<string>();
+  const beeDependencies = new CreatureSpecimenIdentitySet(), beeActors = new CreatureSpecimenIdentitySet();
   for (const dependency of context.dependencies) {
-    identifier(dependency.id); const key = idKey(dependency.kind, dependency.id);
+    identifier(dependency.id);
+    if (dependency.kind === "apiary-bee") beeDependencies.add(dependency.id, dependency, "Invalid or duplicate attachment dependency.");
+    const key = idKey(dependency.kind, dependency.kind === "apiary-bee"
+      ? creatureSpecimenIdentityKey(dependency.id, dependency) : dependency.id);
     const historical = dependency.kind === "road-event" || dependency.kind === "guild-companion";
     if ((historical ? dependency.attached !== null : !dependencyKinds.has(dependency.kind as AsteroidEntityDependencyKind)
       || typeof dependency.attached !== "boolean") || dependencies.has(key)) throw Error("Invalid or duplicate attachment dependency.");
@@ -203,8 +211,8 @@ export function asteroidEntityRelationshipPartition(frame: AsteroidAttachmentFra
   }
   for (const creature of creatures.values()) {
     const side = sides.get(creature.id)!;
-    const requireDependency = (kind: AsteroidEntityDependencyKind, id: string) => {
-      identifier(id); const key = idKey(kind, id), dependency = dependencies.get(key);
+    const requireDependency = (kind: AsteroidEntityDependencyKind, id: string, originSource?: unknown) => {
+      identifier(id); const key = idKey(kind, kind === "apiary-bee" ? creatureSpecimenIdentityKey(id, originSource) : id), dependency = dependencies.get(key);
       if (!dependency || dependency.attached === null) throw Error(`Unresolved attachment ${kind} dependency.`);
       usedDependencies.add(key); sameSide(side, dependency.attached, `${kind} dependency`);
     };
@@ -233,7 +241,11 @@ export function asteroidEntityRelationshipPartition(frame: AsteroidAttachmentFra
         usedDependencies.add(key);
       }
     }
-    if (creature.apiaryBee) requireDependency("apiary-bee", creature.apiaryBee.id);
+    if (creature.apiaryBee) {
+      assertCreatureOriginsAgree(creature, creature.apiaryBee);
+      beeActors.add(creature.apiaryBee.id, creature.apiaryBee, "Duplicate attachment bee identity.");
+      requireDependency("apiary-bee", creature.apiaryBee.id, creature.apiaryBee);
+    }
     if (creature.attunedOrbId != null) requireDependency("orb", creature.attunedOrbId);
     if (creature.dragonState?.home) requireDependency("dragon-lair", asteroidEntityCompoundId(creature.dragonState.home.dimension, creature.dragonState.home.lairId));
     if (creature.dragonState?.onShoulder) {

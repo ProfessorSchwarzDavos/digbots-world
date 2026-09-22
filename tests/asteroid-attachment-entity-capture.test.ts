@@ -4,7 +4,7 @@ import { createAsteroidRegistry } from "../app/game/asteroid-custody";
 import { createAsteroidAttachmentFrame } from "../app/game/asteroid-attachment-frame";
 import { rebaseAsteroidEntities, type AsteroidAttachedEntities } from "../app/game/asteroid-attachment-entities";
 import { captureAsteroidEntityUnit } from "../app/game/asteroid-attachment-entity-capture";
-import { homeLocation, locationAddress, universeId } from "../app/game/location-address";
+import { homeLocation, locationAddress, locationId, universeId } from "../app/game/location-address";
 import { createDragonState } from "../app/game/dragons";
 import { createCreatureWorkState } from "../app/game/creature-ecology";
 import { Item } from "../app/game/data";
@@ -33,6 +33,20 @@ function fixture(): AsteroidAttachedEntities {
   };
 }
 const project = (value: AsteroidAttachedEntities) => rebaseAsteroidEntities(frame, value, "orbit", ["host"]);
+
+test("frame projection preserves explicit origin and refuses rewriting or losing it on capture", () => {
+  const canonical = fixture(), origin = locationId(homeLocation(universeId("entity-capture")));
+  Object.assign(canonical.creatures[0], { specimenOriginLocationId: origin, encounterOriginLocationId: origin });
+  const baseline = project(canonical);
+  assert.equal(baseline.creatures[0].specimenOriginLocationId, origin);
+  assert.deepEqual(captureAsteroidEntityUnit(frame, canonical, baseline, baseline, ["host"], [0, 1]), canonical);
+  for (const change of [undefined, locationId(orbit)]) {
+    const edited = structuredClone(baseline);
+    if (change === undefined) Reflect.deleteProperty(edited.creatures[0], "specimenOriginLocationId");
+    else Object.assign(edited.creatures[0], { specimenOriginLocationId: change });
+    assert.throws(() => captureAsteroidEntityUnit(frame, canonical, baseline, edited, ["host"], [0, 1]), /origin provenance disagree/);
+  }
+});
 
 test("baseline capture avoids demonstrated floating-point drift and retains finite opaque metadata", () => {
   const canonical = fixture(), before = structuredClone(canonical), baseline = project(canonical);

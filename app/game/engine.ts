@@ -567,6 +567,7 @@ import { createAsteroidAttachmentFrame } from "./asteroid-attachment-frame";
 import { selectAsteroidCreatureCustody, type AsteroidCustodyPhysicalContext } from "./asteroid-attachment-custody";
 import type { WorldCreatureCustodySource } from "./creature-custody-sources";
 import { collectWorldCreatureCustodyHolders } from "./creature-custody-holders";
+import { assertCreatureOriginsAgree, newCreatureOrigins, readCreatureMetadataOrigins, readCreatureOrigins, type CreatureOrigins } from "./creature-origins";
 import { planCreatureEncounterRecall, reconcileCreatureEncounterCustody } from "./creature-encounter-custody";
 import { canonicalJson, cloneUniverseJson, freezeUniverseJson } from "./universe-json";
 import { snapshotAttachmentSaveSources, type AttachmentSaveSources } from "./attachment-source-preimage";
@@ -1421,7 +1422,7 @@ export type HudState = {
   cardforge: TcgHudState;
 };
 
-export type SavedCreature = {
+export type SavedCreature = CreatureOrigins & {
   id: number;
   /** Host habitat dose survives save, sleep and location transfer. */
   habitatExposureSeconds?: number;
@@ -1754,7 +1755,7 @@ type VoxelHit = {
   distance: number;
 };
 
-type MobEntity = {
+type MobEntity = CreatureOrigins & {
   id: number;
   geneticSeed?: number;
   habitatExposureSeconds?: number;
@@ -1932,6 +1933,9 @@ type MorphLoomFurnitureVisual = { group: THREE.Group; signature: string };
 
 type SpawnMobOptions = {
   id?: number;
+  /** Creation is explicit; every restoration defaults to unknown provenance. */
+  newSpecimen?: true;
+  custodyOrigins?: CreatureOrigins;
   specimenId?: string | null;
   geneticSeed?: number;
   health?: number;
@@ -3239,7 +3243,10 @@ export function apiaryWorkerTransferFromInventorySlot(slot: InventorySlot | null
   const orb = captureOrbFromInventorySlot(slot);
   const creature = orb?.creature;
   if (!orb || !creature || creature.kind !== "honeybee" || orb.attunement?.activeEntityId) return null;
+  let origins: CreatureOrigins;
+  try { origins = readCreatureMetadataOrigins(creature.custom); } catch { return null; }
   const worker: ApiaryBee = Object.freeze({
+    ...origins,
     id: creature.entityId,
     role: "worker",
     alive: creature.health > 0,
@@ -3435,7 +3442,7 @@ export function apiaryBeeCaptureSlot(bee: ApiaryBee): InventorySlot | null {
     name: bee.role === "queen" ? "Hive Queen" : "Honeybee",
     geneticSeed: bee.geneticSeed,
     command: bee.tamed ? "follow" : "wander",
-    custom: { apiaryBee: { ...serializableBee, home: false, outbound: false } },
+    custom: { ...readCreatureOrigins(bee), apiaryBee: { ...serializableBee, home: false, outbound: false } },
   };
   const orb = captureIntoOrb(createEmptyCaptureOrb(`apiary-${bee.id}`), metadata, Date.now());
   return orb ? captureOrbInventorySlot(orb) : null;
@@ -5967,9 +5974,9 @@ export class VoxelEngine {
     this.world.setBlocksBatch(edits, true, true);
 
     const specimens = [
-      this.spawnMob("meadow-cottontail", new THREE.Vector3(centerX - 2.2, groundY + MOB_DEFS["meadow-cottontail"].footOffset, centerZ - 5.2), { persistentPoiResident: true, yaw: Math.PI }),
-      this.spawnMob("peelop", new THREE.Vector3(centerX, groundY + MOB_DEFS.peelop.footOffset, centerZ - 5.2), { persistentPoiResident: true, yaw: Math.PI }),
-      this.spawnMob("ridgeback", new THREE.Vector3(centerX + 2.2, groundY + MOB_DEFS.ridgeback.footOffset, centerZ - 5.2), { persistentPoiResident: true, yaw: Math.PI }),
+      this.spawnMob("meadow-cottontail", new THREE.Vector3(centerX - 2.2, groundY + MOB_DEFS["meadow-cottontail"].footOffset, centerZ - 5.2), { newSpecimen: true, persistentPoiResident: true, yaw: Math.PI }),
+      this.spawnMob("peelop", new THREE.Vector3(centerX, groundY + MOB_DEFS.peelop.footOffset, centerZ - 5.2), { newSpecimen: true, persistentPoiResident: true, yaw: Math.PI }),
+      this.spawnMob("ridgeback", new THREE.Vector3(centerX + 2.2, groundY + MOB_DEFS.ridgeback.footOffset, centerZ - 5.2), { newSpecimen: true, persistentPoiResident: true, yaw: Math.PI }),
     ];
     for (const mob of specimens) {
       mob.state = "recover";
@@ -9543,6 +9550,7 @@ export class VoxelEngine {
         : null,
       specimenId: mob.specimenId,
       primeAnchorId: mob.primeAnchorId,
+      ...readCreatureOrigins(mob),
       ...(mob.progression ? {
         appearanceRevision: `${mob.progression.progressionSeed}:${mob.progression.shiny ? 1 : 0}:${mob.progression.rarityForm}:${mob.progression.phenotype.sizeScale}:${mob.progression.phenotype.hueShift}:${mob.progression.phenotype.markingMask}:${mob.progression.phenotype.markingIntensity}:${mob.progression.phenotype.accentVariant}:${mob.primeAnchorId ?? ""}`,
         appearance: {
@@ -9863,8 +9871,15 @@ export class VoxelEngine {
       if (tombstoneTick !== undefined) this.appliedMultiplayerTombstones.delete(`mob:${entry.id}`);
       if (this.pendingNetworkMobDeaths.has(entry.id)) continue;
       if (!(entry.kind in MOB_DEFS) || BUTTERFLY_ORDER.includes(entry.kind as ButterflyKind)) continue;
+      const origins = readCreatureOrigins(entry);
       let mob = this.mobs.find((candidate) => candidate.id === entry.id);
-      if (mob && entry.appearanceRevision && mob.group.userData.networkAppearanceRevision !== entry.appearanceRevision) {
+      // A numeric network ID can be reused after travel. Reconstruct changed
+      // host identities; never mutate an old body's immutable provenance or
+      // leave stale known origins on a later legacy/unknown replica.
+      if (mob && (entry.appearanceRevision && mob.group.userData.networkAppearanceRevision !== entry.appearanceRevision
+        || entry.specimenId !== undefined && mob.specimenId !== entry.specimenId
+        || mob.specimenOriginLocationId !== origins.specimenOriginLocationId
+        || mob.encounterOriginLocationId !== origins.encounterOriginLocationId)) {
         this.removeMob(this.mobs.indexOf(mob));
         mob = undefined;
       }
@@ -9875,6 +9890,7 @@ export class VoxelEngine {
           : null;
         mob = this.spawnMob(entry.kind as MobKind, new THREE.Vector3(entry.x, entry.y, entry.z), {
           id: entry.id,
+          custodyOrigins: origins,
           specimenId: entry.specimenId ?? null,
           primeAnchorId: entry.primeAnchorId ?? null,
           name: entry.name ?? null,
@@ -11087,6 +11103,7 @@ export class VoxelEngine {
           partner.careState = family.right;
           const identity = this.offspringIdentity(mob.kind, family.child.geneticSeed, mob, partner);
           this.spawnMob(mob.kind, mob.group.position.clone().add(new THREE.Vector3(0.58, 0, 0.42)), {
+            newSpecimen: true,
             careState: family.child,
             ...identity,
             ...(bonded ? { courserBond: { ...createReedstriderBond(), tamed: true, ownerId: peer.id, trust: 8 } } : {}),
@@ -11237,7 +11254,7 @@ export class VoxelEngine {
           const family = partner?.petState ? breedPeelops(mob.petState, partner.petState, peer.id) : null;
           if (family && partner) {
             mob.petState = family.left; partner.petState = family.right;
-            this.spawnMob("peelop", mob.group.position.clone().add(new THREE.Vector3(0.65, 0, 0.35)), { petState: family.child });
+            this.spawnMob("peelop", mob.group.position.clone().add(new THREE.Vector3(0.65, 0, 0.35)), { newSpecimen: true, petState: family.child });
             message = "A tiny Peelip tumbles into the grove.";
           } else message = `${mob.petState.name ?? "Peelop"} is fed and recovering.`;
           handledFood = true;
@@ -13180,6 +13197,7 @@ export class VoxelEngine {
       aligned: true,
       custom: {
         hiredByPlayerId: this.localPlayerId(),
+        ...newCreatureOrigins(this.world.locationScope.locationId, false),
         followCommand: "follow",
         forgedGolemType: result.golemType,
         ...(usesGenericCreatureBond(kind as CoreMobKind) ? {
@@ -15722,6 +15740,8 @@ export class VoxelEngine {
       if (!released) return false;
       const metadata = released.creature;
       const preserved = metadata.custom.apiaryBee as ApiaryBee | undefined;
+      let origins: CreatureOrigins;
+      try { origins = readCreatureMetadataOrigins(metadata.custom); } catch { return false; }
       if ((preserved?.angry || metadata.hostile) && !preserved?.tamed && !metadata.tamed) {
         this.events.onToast("An agitated wild queen will not activate a friendly apiary. Calm her with Royal Jelly first.");
         return false;
@@ -15730,6 +15750,7 @@ export class VoxelEngine {
       const queen: ApiaryBee = {
         ...base.queen,
         ...(preserved ?? {}),
+        ...origins,
         id: preserved?.id ?? metadata.entityId ?? base.queen.id,
         role: "queen",
         alive: true,
@@ -15754,7 +15775,7 @@ export class VoxelEngine {
     if (slot.item !== Item.QueenCell) return false;
     const queenId = typeof slot.metadata?.beeId === "string" ? slot.metadata.beeId : `queen-${key}-${this.day}`;
     const queenSeed = Number.isFinite(slot.metadata?.geneticSeed) ? Number(slot.metadata?.geneticSeed) : seed;
-    const next = insertQueenCellIntoApiary(state, Item.QueenCell, queenId, queenSeed, this.day);
+    const next = insertQueenCellIntoApiary(state, Item.QueenCell, queenId, queenSeed, this.day, this.world.locationScope.locationId);
     if (!next) return false;
     this.apiaries.set(key, next);
     this.persistentMachineLastStep.set(key, Date.now());
@@ -16737,6 +16758,7 @@ export class VoxelEngine {
     if (withinSimulation && showQueen && queen?.alive
       && !this.mobs.some((mob) => mob.beeHiveKey === key && mob.kind === "hive-queen" && mob.apiaryBee?.id === queen.id)) {
       this.spawnMob("hive-queen", new THREE.Vector3(x, y + 0.86, z), {
+        custodyOrigins: readCreatureOrigins(queen),
         apiaryBee: { ...queen, home: true, outbound: false },
         beeHiveKey: key,
         persistentPoiResident: true,
@@ -16749,6 +16771,7 @@ export class VoxelEngine {
       if (this.mobs.some((mob) => mob.beeHiveKey === key && mob.apiaryBee?.id === worker.id)) continue;
       const angle = index / Math.max(1, visualWorkers.length) * Math.PI * 2;
       this.spawnMob("honeybee", new THREE.Vector3(x + Math.cos(angle) * 0.42, y + 0.8, z + Math.sin(angle) * 0.42), {
+        custodyOrigins: readCreatureOrigins(worker),
         apiaryBee: { ...worker, home: false, outbound: true },
         beeHiveKey: key,
         persistentPoiResident: true,
@@ -16821,6 +16844,7 @@ export class VoxelEngine {
           deltaSeconds: elapsed,
           worldDay: this.day,
           workersCanReturn: attached,
+          creationLocationId: this.world.locationScope.locationId,
         });
         this.apiaries.set(entry.key, result.state);
         this.syncApiaryWorkerMobs(entry.key, result.state, phase);
@@ -17158,6 +17182,7 @@ export class VoxelEngine {
       settlementId: mob.settlementId,
       aligned: mob.aligned,
       custom: JSON.parse(JSON.stringify({
+        ...readCreatureOrigins(mob),
         ...(mob.habitatExposureSeconds ? { habitatExposureSeconds: normalizeHabitatExposure(mob.habitatExposureSeconds) } : {}),
         ...(mob.morrowExposure ? { morrowExposure: normalizeMorrowExposure(mob.morrowExposure) } : {}),
         ...(mob.morrowRoost ? { morrowRoost: mob.morrowRoost } : {}),
@@ -17942,6 +17967,7 @@ export class VoxelEngine {
     const resolvedPosition = this.creatureReleasePosition(metadata, releasePosition);
     if (!resolvedPosition) return null;
     const mob = this.spawnMob(metadata.kind, resolvedPosition, {
+      custodyOrigins: readCreatureMetadataOrigins(metadata.custom),
       health: metadata.health,
       specimenId: metadata.entityId,
       geneticSeed: metadata.geneticSeed,
@@ -18568,6 +18594,7 @@ export class VoxelEngine {
         : Math.imul(this.nextDropId ^ Math.floor(this.day * 31), 0x85ebca6b) >>> 0;
       const queen = createApiary(beeId, [], geneticSeed, this.day).queen;
       this.spawnMob("hive-queen", new THREE.Vector3(placement.x, placement.y + 0.82, placement.z), {
+        newSpecimen: true,
         apiaryBee: { ...queen, home: false, outbound: false, angry: false },
         persistentPoiResident: true,
       });
@@ -18631,7 +18658,7 @@ export class VoxelEngine {
         const state: DragonState = hatchling.home
           ? { ...hatchling, home: { ...hatchling.home, position: { x: placement.x, y: grounded + MOB_DEFS[kind].footOffset, z: placement.z } } }
           : hatchling;
-        const mob = this.spawnMob(kind, new THREE.Vector3(placement.x, grounded + MOB_DEFS[kind].footOffset, placement.z), { dragonState: state, persistentPoiResident: true });
+        const mob = this.spawnMob(kind, new THREE.Vector3(placement.x, grounded + MOB_DEFS[kind].footOffset, placement.z), { newSpecimen: true, dragonState: state, persistentPoiResident: true });
         this.recordBestiaryMilestone(kind, "hatched");
         this.consumeSelectedUnit();
         this.spawnParticles(mob.group.position.x, mob.group.position.y + 0.5, mob.group.position.z, BlockId.CrystalBlock, 14);
@@ -19479,6 +19506,7 @@ export class VoxelEngine {
                 partner.careState = family.right;
                 const identity = this.offspringIdentity("taffalo", family.child.geneticSeed, taffalo, partner);
                 this.spawnMob("taffalo", taffalo.group.position.clone().add(new THREE.Vector3(0.8, 0, 0.45)), {
+                  newSpecimen: true,
                   careState: family.child,
                   ...identity,
                   courserBond: { ...createReedstriderBond(), tamed: true, ownerId, trust: 8 },
@@ -19653,6 +19681,7 @@ export class VoxelEngine {
                 partner.careState = family.right;
                 const identity = this.offspringIdentity(companion.kind, family.child.geneticSeed, companion, partner);
                 this.spawnMob(companion.kind, companion.group.position.clone().add(new THREE.Vector3(0.58, 0, 0.42)), {
+                  newSpecimen: true,
                   careState: family.child,
                   ...identity,
                   courserBond: { ...createReedstriderBond(), tamed: true, ownerId, trust: 8 },
@@ -19845,7 +19874,7 @@ export class VoxelEngine {
           if (family && partner) {
             pet.petState = family.left;
             partner.petState = family.right;
-            this.spawnMob("peelop", pet.group.position.clone().add(new THREE.Vector3(0.65, 0, 0.35)), { petState: family.child });
+            this.spawnMob("peelop", pet.group.position.clone().add(new THREE.Vector3(0.65, 0, 0.35)), { newSpecimen: true, petState: family.child });
             this.bestiary.peelop.breeds = (this.bestiary.peelop.breeds ?? 0) + 1;
             this.events.onToast("A tiny Peelip tumbles into the grove.");
           } else this.events.onToast(`${pet.petState.name ?? "Peelop"} is fed and recovering.`);
@@ -19919,6 +19948,7 @@ export class VoxelEngine {
                 partner.careState = family.right;
                 const identity = this.offspringIdentity(companion.kind, family.child.geneticSeed, companion, partner);
                 this.spawnMob(companion.kind, companion.group.position.clone().add(new THREE.Vector3(0.55, 0, 0.38)), {
+                  newSpecimen: true,
                   careState: family.child,
                   ...identity,
                   courserBond: { ...createReedstriderBond(), tamed: true, ownerId, trust: 8 },
@@ -20078,7 +20108,7 @@ export class VoxelEngine {
             mob.careState = family.left;
             partner.careState = family.right;
             const identity = this.offspringIdentity(mob.kind, family.child.geneticSeed, mob, partner);
-            const child = this.spawnMob(mob.kind, mob.group.position.clone().add(new THREE.Vector3(0.58, 0, 0.42)), { careState: family.child, ...identity });
+            const child = this.spawnMob(mob.kind, mob.group.position.clone().add(new THREE.Vector3(0.58, 0, 0.42)), { newSpecimen: true, careState: family.child, ...identity });
             const childGroundY = this.mobMoveTarget(child, child.group.position.x, child.group.position.z);
             if (childGroundY !== null) child.group.position.y = childGroundY;
             child.baseY = child.group.position.y;
@@ -20948,6 +20978,7 @@ export class VoxelEngine {
     residents.forEach(({ kind, bee }, index) => {
       const angle = index / Math.max(1, residents.length) * Math.PI * 2;
       this.spawnMob(kind, position.clone().add(new THREE.Vector3(Math.cos(angle) * 0.45, 0.8 + (index % 3) * 0.16, Math.sin(angle) * 0.45)), {
+        custodyOrigins: readCreatureOrigins(bee),
         apiaryBee: { ...bee, home: false, outbound: false, angry: true },
         persistentPoiResident: true,
       });
@@ -21199,7 +21230,7 @@ export class VoxelEngine {
     }
     if (ownsBreakLoot && (type === BlockId.VeinmetalHeart || type === BlockId.LivingVein && Math.random() < 0.16)) {
       const defenderNearby = this.mobs.some((mob) => mob.kind === "veinling" && mob.group.position.distanceToSquared(new THREE.Vector3(x, y, z)) < 18 ** 2);
-      if (!defenderNearby) this.spawnMob("veinling", new THREE.Vector3(x + 0.5, y + MOB_DEFS.veinling.footOffset, z + 0.5));
+      if (!defenderNearby) this.spawnMob("veinling", new THREE.Vector3(x + 0.5, y + MOB_DEFS.veinling.footOffset, z + 0.5), { newSpecimen: true });
     }
     if (isWaterloggedFloraBlock(type) && this.world.getBlock(x, y - 1, z) === type) this.schedulePlantGrowth(x, y - 1, z, type, 1);
     if (ownsBreakLoot && this.isDoor(type) && this.mode === "survival" && harvested) this.spawnDrop(doorItem(type), 1, new THREE.Vector3(x, y, z));
@@ -25807,6 +25838,7 @@ export class VoxelEngine {
       const spawn = (kind: MobKind, name: string, hostile = false, factionId: FactionId | null = null, profession: string | null = null) => {
         const y = this.world.findWalkableY(x, z, marker.position.y) + MOB_DEFS[kind].footOffset;
         const mob = this.spawnMob(kind, new THREE.Vector3(x, y, z), {
+          newSpecimen: true,
           name, factionId, profession, residentId: `road-event:${anchorId}`, persistentPoiResident: false,
         });
         mob.hostile = hostile;
@@ -25904,6 +25936,7 @@ export class VoxelEngine {
           const ground = interiorGround ?? this.world.findWalkableY(residentX, residentZ, resident.position.y);
           const spawnY = settlement.environment === "underwater" ? resident.position.y : ground + MOB_DEFS[kind].footOffset;
           const child = this.spawnMob(kind, new THREE.Vector3(resident.position.x, spawnY, resident.position.z), {
+            newSpecimen: true,
             name: resident.name,
             factionId: settlement.ownerFactionId === "player" ? "player" : settlement.ownerFactionId,
             profession: resident.profession,
@@ -26752,7 +26785,8 @@ export class VoxelEngine {
           const breeding = planExhibitBreeding(specimens, topology.capacity, breedingCycle);
           const emptySlot = slots.findIndex((slot) => !slot);
           if (breeding && emptySlot >= 0) {
-            const captured = captureCreature(`conservatory-${breeding.child.entityId}`, breeding.child);
+            const child = { ...breeding.child, custom: { ...breeding.child.custom, ...newCreatureOrigins(this.world.locationScope.locationId, false) } };
+            const captured = captureCreature(`conservatory-${breeding.child.entityId}`, child);
             if (captured) {
               slots[emptySlot] = {
                 item: Item.CreatureCage,
@@ -26878,7 +26912,8 @@ export class VoxelEngine {
           state = { ...state, lastBreedingCycle: currentCycle };
           const breeding = planAquariumBreeding(state.residents, topology, currentCycle * AQUARIUM_BREED_SECONDS);
           if (breeding) {
-            const residents = storeAquariumResident(state.residents, topology, breeding.child, Date.now());
+            const child = { ...breeding.child, custom: { ...breeding.child.custom, ...newCreatureOrigins(this.world.locationScope.locationId, false) } };
+            const residents = storeAquariumResident(state.residents, topology, child, Date.now());
             if (residents) {
               state = { ...state, residents };
               const progress = this.bestiary[breeding.child.kind];
@@ -27268,6 +27303,7 @@ export class VoxelEngine {
     if (index >= 0) this.removeMob(index);
     const replacement = this.spawnMob(growth.kind, position, {
       id: mob.id,
+      custodyOrigins: readCreatureOrigins(mob),
       specimenId: mob.specimenId,
       geneticSeed: mob.geneticSeed,
       age: mob.age,
@@ -27287,6 +27323,10 @@ export class VoxelEngine {
       followCommand: mob.followCommand,
       attunedOrbId: mob.attunedOrbId,
       primeAnchorId: mob.primeAnchorId,
+      legendaryEncounterId: mob.legendaryEncounterId,
+      legendarySiteId: mob.legendarySiteId,
+      groundedSummonLineageId: mob.groundedSummonLineageId,
+      groundedSummonEntityId: mob.groundedSummonEntityId,
       progression: mob.progression,
       typeSources: mob.typeSources,
       combatStatuses: mob.combatStatuses,
@@ -28050,6 +28090,14 @@ export class VoxelEngine {
   }
 
   spawnMob(kind: MobKind, position: THREE.Vector3, options: SpawnMobOptions = {}) {
+    if (options.newSpecimen && Object.hasOwn(options, "custodyOrigins")) throw Error("A new specimen cannot replace existing origin provenance.");
+    const preservedOrigins = readCreatureOrigins(Object.hasOwn(options, "custodyOrigins") ? options.custodyOrigins : {});
+    const creationLocation = options.newSpecimen ? this.world.locationScope.locationId : null;
+    if (creationLocation) parseLocationId(creationLocation);
+    if (options.apiaryBee && Object.keys(readCreatureOrigins(options.apiaryBee)).length) {
+      if (creationLocation) throw Error("A new specimen cannot replace an existing bee origin.");
+      assertCreatureOriginsAgree(options.apiaryBee, preservedOrigins);
+    }
     const definition = MOB_DEFS[kind];
     const id = options.id ?? this.nextMobId++;
     this.nextMobId = Math.max(this.nextMobId, id + 1);
@@ -28080,7 +28128,6 @@ export class VoxelEngine {
       ? { ...(options.leviathanGrowth ?? createWildLeviathanGrowth(kind, id)) } : null;
     const aetherbellMorph = kind === "aetherbell-larva" || kind === "aetherbell-leviathan"
       ? { ...(options.aetherbellMorph ?? createAetherbellMorphState("sea")) } : null;
-    const apiaryBee = options.apiaryBee ? { ...options.apiaryBee } : null;
     const dragonState = isDragonKind(kind)
       ? normalizeDragonState(options.dragonState ?? createDragonState(dragonTypeForKind(kind), {
         dragonId: `${kind}:wild:${id}`,
@@ -28105,6 +28152,8 @@ export class VoxelEngine {
       && !this.primeEncounters.has(primePlan.anchorId));
     const primeAnchorId = options.primeAnchorId
       ?? (activatesPrime || options.progression?.rarityForm === "prime" ? primePlan?.anchorId ?? `prime:${kind}:legacy:${id}` : null);
+    const origins = creationLocation ? newCreatureOrigins(creationLocation, !!(primeAnchorId || options.legendarySiteId)) : preservedOrigins;
+    const apiaryBee = options.apiaryBee ? { ...options.apiaryBee, ...origins } : null;
     const primeProfile = primeAnchorId || activatesPrime || options.progression?.rarityForm === "prime"
       ? PRIME_FORM_PROFILES[kind] ?? null : null;
     const specimenId = options.specimenId?.trim().slice(0, 160)
@@ -28150,6 +28199,7 @@ export class VoxelEngine {
     const shadeHealthScale = shadeState ? shadecrawlerScale(shadeState) : 1;
     const ordinaryMaximumHealth = creatureMaximumHealth(definition, profile.stats, progression.level) * shadeHealthScale;
     const mob: MobEntity = {
+      ...origins,
       geneticSeed: Number.isInteger(options.geneticSeed) && options.geneticSeed! >= 0 && options.geneticSeed! <= 0xffff_ffff
         ? options.geneticSeed! : petState?.geneticSeed ?? apiaryBee?.geneticSeed ?? ((id * 2654435761) >>> 0),
       id, specimenId, kind, name: options.name?.trim() || primeProfile?.name || dragonState?.customName || petState?.name || definition.name, hostile: definition.hostile && !shadeState?.tamed && !dragonState?.tamed && (dragonState?.stage ?? 2) > 1, definition, group, presentationRoot, visual,
@@ -28249,6 +28299,7 @@ export class VoxelEngine {
   serializeCreature(mob: MobEntity): SavedCreature {
     return {
       id: mob.id,
+      ...readCreatureOrigins(mob),
       ...(normalizeHabitatExposure(mob.habitatExposureSeconds) > 0 ? { habitatExposureSeconds: normalizeHabitatExposure(mob.habitatExposureSeconds) } : {}),
       ...(mob.morrowExposure ? { morrowExposure: normalizeMorrowExposure(mob.morrowExposure) } : {}),
       ...(mob.morrowRoost ? { morrowRoost: { ...mob.morrowRoost } } : {}),
@@ -28354,6 +28405,7 @@ export class VoxelEngine {
     }
     const restored = this.spawnMob(migrated.kind, position, {
       id: migrated.id,
+      custodyOrigins: readCreatureOrigins(migrated),
       specimenId: migrated.specimenId ?? null,
       geneticSeed: migrated.geneticSeed,
       health: Math.max(0.1, Number(migrated.health) || MOB_DEFS[migrated.kind].health),
@@ -28592,7 +28644,7 @@ export class VoxelEngine {
           const current = this.ensureApiaryState(hiveKey);
           if (isStockedApiary(current)) {
             boundApiary = kind === "honeybee"
-              ? createApiary(current.queen.id, Array.from({ length: Math.min(APIARY_WORKER_CAP, marker.count) }, (_, index) => `${current.queen.id}-poi-worker-${index}`), current.queen.geneticSeed, this.day)
+              ? { ...createApiary(current.queen.id, Array.from({ length: Math.min(APIARY_WORKER_CAP, marker.count) }, (_, index) => `${current.queen.id}-poi-worker-${index}`), current.queen.geneticSeed, this.day), queen: current.queen }
               : current;
             this.apiaries.set(hiveKey, boundApiary);
           }
@@ -28619,6 +28671,9 @@ export class VoxelEngine {
             },
           }) : null;
           this.spawnMob(kind, new THREE.Vector3(x, spawnY, z), {
+            ...((kind === "hive-queen" || kind === "honeybee") && boundApiary
+              ? { custodyOrigins: readCreatureOrigins((kind === "hive-queen" ? boundApiary.queen : boundApiary.workers[index]) ?? {}) }
+              : { newSpecimen: true as const }),
             persistentPoiResident: marker.persistent,
             poiMarkerId: markerKey,
             legendaryEncounterId,
@@ -28761,6 +28816,7 @@ export class VoxelEngine {
         y = ground + MOB_DEFS[kind].footOffset;
       }
       spawned.push(this.spawnMob(kind, new THREE.Vector3(x, y, z), {
+        newSpecimen: true,
         socialGroupId: groupId,
         naturalSpawned: true,
         naturalPool: pool,
@@ -28908,7 +28964,7 @@ export class VoxelEngine {
       if (!this.ecologyAllowsSpecies(kind, x, z) || this.naturalSpawnVisibleToPlayer(x, ground, z, 48)) continue;
       const y = ground + definition.footOffset;
       if (!BLOCKS[this.world.getBlock(x, ground, z) ?? BlockId.Air]?.solid || !this.world.isWalkThrough(this.world.getBlock(x, ground + 1, z)) || !this.world.isWalkThrough(this.world.getBlock(x, ground + 2, z))) continue;
-      const mob = this.spawnMob(kind, new THREE.Vector3(x, y, z), { naturalSpawned: true, naturalPool: pool, persistentPoiResident: false });
+      const mob = this.spawnMob(kind, new THREE.Vector3(x, y, z), { newSpecimen: true, naturalSpawned: true, naturalPool: pool, persistentPoiResident: false });
       mob.morrowExposure = { exposureSeconds: 0, veilSeconds: kind === "morrow-owl" ? MORROW_OWL_VEIL_SECONDS : 0 };
       if (kind === "morrow-owl") mob.morrowRoost = { x, y, z };
       this.ecologyDiagnostics.successes += 1; this.ecologyDiagnostics.lastSuccess = { kind, pool, playerId: focus.id, x, z }; return;
@@ -32588,6 +32644,7 @@ export class VoxelEngine {
           const hatchling = stepped.hatchling;
           const position = drop.mesh.position.clone();
           this.spawnMob(hatchling.kind, position, {
+            newSpecimen: true,
             leviathanGrowth: hatchling,
             careState: createCreatureHusbandryState(hatchling.geneticSeed, true),
             aetherbellMorph: hatchling.species === "aetherbell-leviathan" ? createAetherbellMorphState("sea") : null,
@@ -32655,7 +32712,7 @@ export class VoxelEngine {
           const state: DragonState = hatchling.home
             ? { ...hatchling, home: { ...hatchling.home, position: { x: position.x, y: position.y, z: position.z } } }
             : hatchling;
-          this.spawnMob(kind, position, { dragonState: state, persistentPoiResident: true });
+          this.spawnMob(kind, position, { newSpecimen: true, dragonState: state, persistentPoiResident: true });
           this.recordBestiaryMilestone(kind, "hatched");
           this.removeDrop(index, "replaced");
           if (position.distanceToSquared(this.position) < 40 * 40) this.events.onToast(`A tiny ${MOB_DEFS[kind].name} breaks free of its shell.`);

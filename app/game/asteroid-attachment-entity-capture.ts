@@ -3,6 +3,7 @@ import type { CelestialPoint } from "./celestial-terrain";
 import type { AsteroidAttachmentFrame } from "./asteroid-attachment-frame";
 import { rebaseAsteroidEntities, type AsteroidAttachedEntities } from "./asteroid-attachment-entities";
 import { canonicalJson } from "./universe-json";
+import { assertCreatureOriginsAgree } from "./creature-origins";
 
 /** Ephemeral host-side lineage, never guest input or another saved resource ID.
  * A source is an index in the exact baseline drop array, not the edited array.
@@ -21,6 +22,7 @@ function retainUnchangedAxes(canonical: CelestialPoint, baseline: CelestialPoint
 function retainCreatureAnchors(canonical: SavedCreature, baseline: SavedCreature,
   edited: SavedCreature, captured: SavedCreature): void {
   if (canonical.specimenId !== edited.specimenId) throw Error("Attached creature specimen identity changed.");
+  assertCreatureOriginsAgree(canonical, edited);
   Object.assign(captured, retainUnchangedAxes(canonical, baseline, edited, captured));
   if (canonical.morrowRoost && baseline.morrowRoost && edited.morrowRoost && captured.morrowRoost)
     captured.morrowRoost = retainUnchangedAxes(canonical.morrowRoost, baseline.morrowRoost, edited.morrowRoost, captured.morrowRoost);

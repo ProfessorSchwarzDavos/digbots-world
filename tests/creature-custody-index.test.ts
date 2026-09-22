@@ -7,6 +7,7 @@ import { Item } from "../app/game/data";
 import { captureLanternJar } from "../app/game/lantern-jar";
 import { indexCreatureCustody, type CreatureCustodySources } from "../app/game/creature-custody-index";
 import { canonicalJson } from "../app/game/universe-json";
+import { homeLocation, locationAddress, locationId, universeId } from "../app/game/location-address";
 
 function metadata(id = "specimen", kind: CreatureMetadata["kind"] = "peelop"): CreatureMetadata {
   return { schema: 1, entityId: id, kind, health: 5, maxHealth: 7, ageTicks: 123, baby: false,
@@ -49,6 +50,19 @@ test("a deployed orb and its current live or sleeping body are one linked custod
     assert.equal(index.stored[0].custody.creature.health, 5);
     assert.equal(index.stored[0].body!.creature.health, 4);
     assert(!Object.hasOwn(index.stored[0], "attached")); assert(!Object.hasOwn(index.stored[0], "authorized"));
+  }
+});
+
+test("deployed bodies must retain the exact explicit origins of their owning orb", () => {
+  const home = locationId(homeLocation(universeId("deployed-origin")));
+  const orbit = locationId(locationAddress({ ...homeLocation(universeId("deployed-origin")), kind: "orbit", instanceId: "low" }));
+  const stored = { ...orb(), attunement: { ownerId: "keeper", attunedAt: 50, activeEntityId: "23", recalledAt: 0, recallCount: 0, fainted: false } };
+  Object.assign(stored.creature!.custom, { specimenOriginLocationId: home, encounterOriginLocationId: home });
+  const source = { ...empty(), orbRecords: [{ path: ["owner"], orb: stored }],
+    creatures: [{ ...body(), attunedOrbId: "orb", specimenOriginLocationId: home, encounterOriginLocationId: home }] };
+  assert.equal(indexCreatureCustody(source).stored[0].body!.creature.specimenOriginLocationId, home);
+  for (const origins of [{}, { specimenOriginLocationId: orbit, encounterOriginLocationId: home }, { specimenOriginLocationId: home }]) {
+    assert.throws(() => indexCreatureCustody({ ...source, creatures: [{ ...body(), attunedOrbId: "orb", ...origins }] }), /provenance disagree/);
   }
 });
 

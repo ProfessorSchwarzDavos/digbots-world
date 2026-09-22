@@ -2,6 +2,7 @@ import { Item, type InventorySlot } from "./data";
 import { decodeCaptureOrb, LEGACY_LENS_ORB_ITEMS, LEGACY_SPECIES_ORB_ITEMS, type CaptureOrb } from "./capture-orbs";
 import { decodeCapturedCreature, normalizeCreatureMetadata, type CapturedCreature, type CreatureMetadata } from "./creature-cage";
 import { custodyJsonIdentity, validCustodyItem } from "./wayworks-custody";
+import { readCreatureMetadataOrigins } from "./creature-origins";
 import { assertExactKeys, canonicalJson, cloneUniverseJson, freezeUniverseJson, isUniverseRecord } from "./universe-json";
 
 /** A read result, not a replacement item or a new custody owner. The original
@@ -25,6 +26,7 @@ function identity(value: unknown, maximum: number): asserts value is string {
 function checkCreature(raw: unknown, decoded: CreatureMetadata | null | undefined) {
   if (!decoded || canonicalJson(raw) !== canonicalJson(decoded)) throw Error("Stored creature requires migration or lossy normalization.");
   identity(decoded.entityId, 160);
+  readCreatureMetadataOrigins(decoded.custom);
 }
 
 /** Housed residents have creature metadata but no invented orb or cage. */

@@ -1,4 +1,6 @@
 import { Item, type InventorySlot, type ItemCode } from "./data";
+import { newCreatureOrigins, readCreatureOrigins, validCreatureOrigins, type CreatureOrigins } from "./creature-origins";
+import type { LocationId } from "./location-address";
 
 export const APIARY_WORKER_CAP = 8;
 /** Exact flower-query footprint used by the live engine and frame preflight. */
@@ -19,7 +21,7 @@ export type StoredCaptureOrb = Readonly<{
   captureOrb: string;
 }>;
 
-export type ApiaryBee = Readonly<{
+export type ApiaryBee = CreatureOrigins & Readonly<{
   id: string;
   role: BeeRole;
   alive: boolean;
@@ -81,6 +83,8 @@ export type ApiaryStepInput = Readonly<{
   worldDay?: number;
   /** False models a worker that cannot path home or whose home chunk is absent. */
   workersCanReturn?: boolean;
+  /** Explicit birth context only; never used to fill existing residents. */
+  creationLocationId?: LocationId;
 }>;
 
 export type DetachedApiary = Readonly<{
@@ -120,8 +124,12 @@ export function insertQueenCellIntoApiary(
   queenId: string,
   seed = 1,
   worldDay = 0,
+  creationLocationId?: LocationId,
 ) {
-  return apiary.attached && item === Item.QueenCell ? createApiary(queenId, [], seed, worldDay) : null;
+  if (!apiary.attached || item !== Item.QueenCell) return null;
+  const next = createApiary(queenId, [], seed, worldDay);
+  return creationLocationId === undefined ? next
+    : { ...next, queen: { ...next.queen, ...newCreatureOrigins(creationLocationId, false) } };
 }
 
 /** A worker removed from an apiary becomes a husbandry transfer capsule. */
@@ -167,7 +175,7 @@ function normalizeApiaryBee(value: unknown, expectedRole?: BeeRole): ApiaryBee |
   if (typeof raw.id !== "string" || raw.id.length === 0 || raw.id.length > 80
     || (raw.role !== "queen" && raw.role !== "worker") || (expectedRole && raw.role !== expectedRole)
     || typeof raw.alive !== "boolean" || typeof raw.geneticSeed !== "number" || !Number.isFinite(raw.geneticSeed)
-    || (raw.ownerId !== null && typeof raw.ownerId !== "string")) return null;
+    || (raw.ownerId !== null && typeof raw.ownerId !== "string") || !validCreatureOrigins(raw)) return null;
   const storedOrb = raw.storedOrb && typeof raw.storedOrb === "object"
     && raw.storedOrb.item === Item.CaptureOrb && raw.storedOrb.count === 1
     && typeof raw.storedOrb.captureOrb === "string"
@@ -175,6 +183,7 @@ function normalizeApiaryBee(value: unknown, expectedRole?: BeeRole): ApiaryBee |
     ? { item: Item.CaptureOrb, count: 1, captureOrb: raw.storedOrb.captureOrb } as const
     : null;
   return {
+    ...readCreatureOrigins(raw),
     id: raw.id,
     role: raw.role,
     alive: raw.alive,
@@ -425,9 +434,10 @@ export function breakApiary(state: ApiaryState): BrokenApiary {
   return { drops, released: detached.released };
 }
 
-const addWorker = (state: ApiaryState, worldDay: number): ApiaryState => {
+const addWorker = (state: ApiaryState, worldDay: number, creationLocationId?: LocationId): ApiaryState => {
   const serial = state.nextWorkerSerial;
-  const worker = bee(`${state.queen.id}-worker-${serial}`, "worker", state.queen.geneticSeed + serial * 977, worldDay);
+  const worker = { ...bee(`${state.queen.id}-worker-${serial}`, "worker", state.queen.geneticSeed + serial * 977, worldDay),
+    ...(creationLocationId === undefined ? {} : newCreatureOrigins(creationLocationId, false)) };
   const vacant = state.workers.findIndex((candidate) => !candidate.alive);
   const workers = vacant >= 0
     ? state.workers.map((candidate, index) => index === vacant ? worker : candidate)
@@ -492,7 +502,7 @@ export function stepApiary(state: ApiaryState, input: ApiaryStepInput): { state:
   const growthCycles = Math.min(APIARY_WORKER_CAP, Math.floor(workerGrowthClock / APIARY_WORKER_GROWTH_SECONDS));
   workerGrowthClock -= growthCycles * APIARY_WORKER_GROWTH_SECONDS;
   for (let cycle = 0; cycle < growthCycles && living < APIARY_WORKER_CAP; cycle += 1) {
-    next = addWorker(next, worldDay);
+    next = addWorker(next, worldDay, input.creationLocationId);
     living += 1;
     events.push("worker-created");
   }

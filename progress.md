@@ -2,6 +2,18 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
 
 ## Celestial Frontiers CF6 — asteroid runtime integration
 
+- Revision16 creature-origin prerequisite adds explicit canonical specimen and
+  encounter provenance without changing existing IDs or filling unknown legacy
+  records. New births stamp their creation location; capture/release/cold saves,
+  transformation and apiary housing/display preserve it. Frame and deployed
+  links reject contradictory origins. Review closed stale guest-replica fields,
+  contradictory nested bee metadata, mutable apiary frame origins and missing
+  apiary birth context. Focusedr1:30PASS, r2:33PASS, apiaryr3:48PASS, expandedr4:
+  130PASS; finalr5:131PASS. Static144 caught a readonly negative-test deletion;
+  corrected with Reflect.deleteProperty. Static145/146 and lint122/123PASS.
+  Exact committed repeat/build/browser pending.
+  This is not the global owner join or atomic entry/return; local entry CLOSED.
+
 - Revision16 repository-source binding reads all ten native IndexedDB stores,
   including inactive locations/players and the writer lease, in one readonly
   transaction. Exact raw tags precede decoding; pending journals and missing/
@@ -11,8 +23,10 @@ Original prompt: Rework recipes and the pack GUI/avatar; fix twitchy Ridgebacks;
   Actual engine joins before/after runtime observations. Focusedr1:32PASS,
   reviewed/hardenedr2:33PASS; native r1 five and r2 six checksPASS, including
   checksum-valid same-revision base divergence and JSON-invisible own-undefined
-  changes. Expandedr3:188PASS; static141/142 and lint120/121PASS. Exact committed
-  repeat/build/browser pending. No global
+  changes. Expandedr3 and exact committedr4:188PASS; static141/142 and lint120/121
+  PASS. Commit7f44071/build42 tjKYBg0ZJK-SDG_iIL7h5; native exact6checks and
+  official42PASS, image reviewed, jobs drained. Director accepted the bounded
+  repository prerequisite in CF6_R16_REPOSITORY_ACCEPTANCE.md. No global
   semantic custody join, shared pause, atomic authority or travel grant yet.
 
 - Revision16 book-furniture source now enumerates seven archive-shelf variants

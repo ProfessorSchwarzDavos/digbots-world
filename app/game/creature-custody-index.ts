@@ -6,6 +6,7 @@ import { MOB_DEFS } from "./mobs";
 import { assertKnownAsteroidEntityFields } from "./asteroid-attachment-entities";
 import { readExactCreatureMetadata, readExactEncodedCaptureOrb, readStoredCreatureCustody, type StoredCreatureCustody } from "./stored-creature-custody";
 import { custodyJsonIdentity } from "./wayworks-custody";
+import { assertCreatureOriginsAgree } from "./creature-origins";
 import { assertExactKeys, canonicalJson, cloneUniverseJson, freezeUniverseJson, isUniverseRecord } from "./universe-json";
 
 /** Paths name actual canonical storage, not display labels or physical bounds.
@@ -130,6 +131,7 @@ export function indexCreatureCustody(sources: CreatureCustodySources): CreatureC
       || creature.kind !== custody.creature.kind || creature.creatureOwnerId !== custody.attunement!.ownerId
       || creature.geneticSeed !== undefined && creature.geneticSeed !== custody.creature.geneticSeed)
       throw Error("Unresolved or mismatched deployed creature custody.");
+    assertCreatureOriginsAgree(creature, custody.creature.custom);
     deployed.add(creature.id); entry.body = body;
   }
   const freeBodies: CreatureCustodyBody[] = [];

@@ -2,6 +2,7 @@ import { APIARY_FORAGING_SCAN, APIARY_HONEY_CAP, APIARY_JELLY_CAP, APIARY_NECTAR
   type ApiaryBee, type ApiaryBlockState } from "./apiary";
 import { Item } from "./data";
 import type { CaptureOrb } from "./capture-orbs";
+import { assertCreatureOriginsAgree, readCreatureOrigins } from "./creature-origins";
 import { readExactEncodedCaptureOrb, readStoredCreatureCustody } from "./stored-creature-custody";
 import { validCustodyItem } from "./wayworks-custody";
 import { assertKnownAsteroidEntityFields } from "./asteroid-attachment-entities";
@@ -29,7 +30,8 @@ const fields = { schema: true, attached: true, queen: true, queenOrb: true, quee
   nectar: true, honey: true, royalJelly: true, honeyClock: true, jellyClock: true, workerGrowthClock: true,
   nextWorkerSerial: true } satisfies Record<keyof ApiaryBlockState, true>;
 const beeFields = { id: true, role: true, alive: true, home: true, outbound: true, carryingNectar: true, lastReturnDay: true,
-  disconnectedDay: true, geneticSeed: true, angry: true, tamed: true, ownerId: true, storedOrb: true } satisfies Record<keyof ApiaryBee, true>;
+  disconnectedDay: true, geneticSeed: true, angry: true, tamed: true, ownerId: true, storedOrb: true,
+  specimenOriginLocationId: true, encounterOriginLocationId: true } satisfies Record<keyof ApiaryBee, true>;
 const codec = opaqueAsteroidBlockCodec<ApiaryBlockState>();
 function record(value: unknown): asserts value is Record<string, unknown> {
   if (!isUniverseRecord(value)) throw Error("Invalid attached apiary record.");
@@ -45,8 +47,10 @@ function textId(value: unknown, max: number): value is string {
 }
 function validateBee(bee: ApiaryBee, role: ApiaryBee["role"]): void {
   record(bee);
-  const keys = Object.keys(beeFields).filter(key => key !== "storedOrb" || Object.hasOwn(bee, key));
+  const optional = ["storedOrb", "specimenOriginLocationId", "encounterOriginLocationId"];
+  const keys = Object.keys(beeFields).filter(key => !optional.includes(key) || Object.hasOwn(bee, key));
   assertExactKeys(bee, keys, "Attached bee");
+  readCreatureOrigins(bee);
   if (!textId(bee.id, 80) || !["queen", "worker"].includes(bee.role) || bee.role !== role || [bee.alive, bee.home, bee.outbound, bee.angry, bee.tamed].some(value => typeof value !== "boolean")
     || !bounded(bee.carryingNectar, 4) || !counter(bee.lastReturnDay) || bee.disconnectedDay !== null && !counter(bee.disconnectedDay)
     || !counter(bee.geneticSeed, 0xffffffff) || bee.ownerId !== null && (typeof bee.ownerId !== "string" || bee.ownerId.length > 160))
@@ -58,6 +62,11 @@ function validateBee(bee: ApiaryBee, role: ApiaryBee["role"]): void {
   }
 }
 function beeKind(bee: ApiaryBee) { return bee.role === "queen" ? "hive-queen" : "honeybee"; }
+function canonicalBees(sources: AsteroidApiarySources): Map<string, ApiaryBee> {
+  const bees = Object.values(sources.apiaries).flatMap(hive => [...(hive.queen ? [hive.queen] : []), ...hive.workers]);
+  for (const creature of [...sources.creatures, ...sources.sleepingCreatures]) if (creature.apiaryBee) bees.push(creature.apiaryBee);
+  return new Map(bees.map(bee => [bee.id, bee]));
+}
 function readApiaryOrb<T>(read: () => T): T {
   try { return read(); }
   catch (cause) { throw Error("Invalid attached apiary orb custody.", { cause }); }
@@ -88,6 +97,7 @@ function selection(frame: AsteroidAttachmentFrame, sources: AsteroidApiarySource
     const identity = queenSlot && isUniverseRecord(customBee) ? customBee.id : orb?.creature?.entityId;
     if (!orb?.creature || orb.creature.kind !== beeKind(bee) || identity !== bee.id || orb.attunement?.activeEntityId
       || orbIds.has(orb.orbId) || storedSpecimens.has(orb.creature.entityId)) throw Error("Unresolved or duplicate attached apiary orb custody.");
+    assertCreatureOriginsAgree(bee, orb.creature.custom);
     orbIds.add(orb.orbId); storedSpecimens.add(orb.creature.entityId);
   };
   const registerBee = (bee: ApiaryBee, side: boolean, hiveKey: string | null) => {
@@ -128,6 +138,7 @@ function selection(frame: AsteroidAttachmentFrame, sources: AsteroidApiarySource
     identify(creature);
     if (!creature.apiaryBee) continue;
     const bee = creature.apiaryBee; validateBee(bee, bee.role);
+    assertCreatureOriginsAgree(creature, bee);
     if (creature.kind !== beeKind(bee)) throw Error("Free bee differs from its saved species.");
     const side = asteroidCreatureFootprintSide(frame, creature, "orbit"); registerBee(bee, side, null);
     dependencies.push({ kind: "apiary-bee", id: bee.id, attached: side });
@@ -145,6 +156,8 @@ function selection(frame: AsteroidAttachmentFrame, sources: AsteroidApiarySource
     for (const key of ["role", "geneticSeed", "alive", "angry", "tamed", "ownerId"] as const)
       if (bee[key] !== owner.bee[key]) throw Error("Apiary visual ownership differs from its canonical hive.");
     if (canonicalJson(bee.storedOrb ?? null) !== canonicalJson(owner.bee.storedOrb ?? null)) throw Error("Apiary visual has different stored custody.");
+    assertCreatureOriginsAgree(bee, owner.bee);
+    assertCreatureOriginsAgree(creature, owner.bee);
     visualBeeIds.add(bee.id);
     if (asteroidCreatureFootprintSide(frame, creature, "orbit") !== owner.side) throw Error("Apiary visual crosses its hive attachment boundary.");
     if (owner.side) visualCreatureIds.push(creature.id);
@@ -168,5 +181,12 @@ export function captureAsteroidApiaries(frame: AsteroidAttachmentFrame, sources:
   if (canonicalJson(projectAsteroidApiaries(frame, sources)) !== canonicalJson(baseline)) throw Error("Stale apiary attachment projection.");
   assertExactKeys(after, ["creatures", "sleepingCreatures", "visuals"], "Apiary after-image sources");
   const apiaries = captureAsteroidBlocks(frame, sources.apiaries, baseline.apiaries, edited, codec);
-  selection(frame, { ...cloneUniverseJson(after), apiaries }); return apiaries;
+  const afterSources = { ...cloneUniverseJson(after), apiaries };
+  selection(frame, afterSources);
+  const beforeBees = canonicalBees(sources);
+  for (const [id, bee] of canonicalBees(afterSources)) {
+    const original = beforeBees.get(id);
+    if (original) assertCreatureOriginsAgree(original, bee);
+  }
+  return apiaries;
 }

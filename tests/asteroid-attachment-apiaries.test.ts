@@ -6,7 +6,7 @@ import { projectAsteroidApiaries, captureAsteroidApiaries, type AsteroidApiarySo
 import { APIARY_FORAGING_SCAN, createApiary, createEmptyApiaryBlock, type ApiaryBee } from "../app/game/apiary";
 import { captureIntoOrb, captureOrbInventorySlot, createEmptyCaptureOrb, encodeCaptureOrb } from "../app/game/capture-orbs";
 import { asteroidEntityRelationshipPartition } from "../app/game/asteroid-attachment-relationships";
-import { homeLocation, locationAddress, universeId } from "../app/game/location-address";
+import { homeLocation, locationAddress, locationId, universeId } from "../app/game/location-address";
 import { canonicalJson } from "../app/game/universe-json";
 import { Item } from "../app/game/data";
 import { humanBodyBounds } from "../app/game/player-body";
@@ -69,6 +69,41 @@ test("apiary projection binds housed, free, sleeping and omitted visual bees wit
     { kind: "apiary-bee", id: "free-worker", attached: false }]);
   assert.deepEqual(projected.apiaries["0,32,0"], source.apiaries[key()]); assert.deepEqual(source, before);
   Object.assign(projected.apiaries["0,32,0"], { nectar: 0 }); assert.equal(source.apiaries[key()].nectar, 17.125);
+});
+
+test("apiary body, hive and exact orb provenance must agree and survives cold projection", () => {
+  const origin = locationId(homeLocation(orbit.universeId)), source = fixture();
+  const hive = source.apiaries[key()], queen = { ...hive.queen!, specimenOriginLocationId: origin };
+  const captured = orb(queen, "queen-stable-specimen");
+  Object.assign(captured.creature!.custom, { specimenOriginLocationId: origin });
+  Object.assign(hive, { queen, queenOrb: captureOrbInventorySlot(captured) });
+  Object.assign(source.visuals[0].creature, { specimenOriginLocationId: origin, apiaryBee: queen });
+  const baseline = projectAsteroidApiaries(frame, source);
+  assert.deepEqual(JSON.parse(JSON.stringify(baseline.apiaries["0,32,0"].queen)), queen);
+  const changed = structuredClone(source);
+  Object.assign(changed.visuals[0].creature, { specimenOriginLocationId: locationId(orbit) });
+  rejects(changed, /provenance disagree/);
+  const lost = structuredClone(source); Reflect.deleteProperty(lost.visuals[0].creature, "specimenOriginLocationId");
+  rejects(lost, /provenance disagree/);
+  const malformed = structuredClone(source); Object.assign(malformed.apiaries[key()].queen!, { specimenOriginLocationId: undefined });
+  rejects(malformed, /undefined|origin|location|JSON/i);
+});
+
+test("frame capture cannot change, remove or invent an existing canonical bee's origin", () => {
+  const hive = createApiary("origin-queen", [], 42), origin = locationId(homeLocation(orbit.universeId));
+  for (const known of [false, true]) {
+    const source: AsteroidApiarySources = { apiaries: { [key()]: { ...hive,
+      queen: { ...hive.queen, ...(known ? { specimenOriginLocationId: origin } : {}) } } },
+      creatures: [], sleepingCreatures: [], visuals: [] };
+    const baseline = projectAsteroidApiaries(frame, source), changed = structuredClone(baseline.apiaries);
+    Object.assign(changed["0,32,0"].queen!, { specimenOriginLocationId: locationId(orbit) });
+    assert.throws(() => captureAsteroidApiaries(frame, source, baseline, changed, after(source)), /provenance disagree/);
+    if (known) {
+      const lost = structuredClone(baseline.apiaries); Reflect.deleteProperty(lost["0,32,0"].queen!, "specimenOriginLocationId");
+      assert.throws(() => captureAsteroidApiaries(frame, source, baseline, lost, after(source)), /provenance disagree/);
+    }
+    assert.deepEqual(captureAsteroidApiaries(frame, source, baseline, baseline.apiaries, after(source)), source.apiaries);
+  }
 });
 
 test("free queen protection/home flags never invent a hive; actual canonical free custody closes its dependency", () => {

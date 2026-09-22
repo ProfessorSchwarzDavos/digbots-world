@@ -265,6 +265,29 @@ the eventual transaction must revalidate source, revision and lease at commit.
 This observes inactive partitions; it does not yet establish the global semantic
 creature/resource-custody join, shared physical capacity provenance or consent.
 
+Creatures now have additive `specimenOriginLocationId` and
+`encounterOriginLocationId` provenance. These are canonical birth/encounter
+locations, not current holders. Only explicit new-creature producers establish
+them; default spawning, legacy restoration and ambiguous reconstruction retain
+unknown/absent provenance. Existing specimen and encounter IDs are unchanged.
+Natural births, offspring, hatchlings and forge/habitat births use their actual
+creation location. Apiary worker growth and direct queen-cell hatching likewise
+stamp only the new resident, never its transported parent or existing colony.
+
+Capture metadata, release, transformations, body saves, cold restoration and
+apiary storage/display/release preserve known origins. An explicit nested bee
+origin must agree with its captured creature. Deployed orb/body links and frame
+capture refuse changed or missing known provenance; same-bee apiary capture
+also refuses adding an invented origin to a legacy resident. Guest replicas
+reconstruct when the host identity/origins change, so reused numeric IDs do not
+carry old provenance into a later body. These presentation fields grant no
+guest transfer authority.
+
+This does not yet qualify the custody index globally. Equal bare Prime,
+legendary and specimen IDs may occur legitimately in different locations;
+legacy ambiguity remains an unsupported-provenance gate, not corruption to
+repair or a reason to infer origin from a seed, holder or current coordinates.
+
 This remains a prerequisite, not a complete admission gate. Exhaustive authored
 sites/environment integration, inactive location owners, transition consent and
 atomic finite-resource transfer still require their integration checks.

@@ -1,4 +1,5 @@
 import type { DragonState } from "./dragons";
+import { validCreatureOrigins, type CreatureOrigins } from "./creature-origins";
 import { parsePressurePresentation, type PressurePresentation } from "./pressure-presentation";
 import { machineKindForBlock, parseWorkshopAction, type WorkshopAction } from "./wayworks-integration";
 import { validCustodyItem } from "./wayworks-custody";
@@ -177,7 +178,7 @@ export type BlockAction = {
   reason?: string;
 };
 
-export type MobSnapshotEntry = {
+export type MobSnapshotEntry = CreatureOrigins & {
   id: number;
   kind: string;
   x: number;
@@ -1047,6 +1048,7 @@ function validateMob(value: unknown): value is MobSnapshotEntry {
       && isFiniteNumber(value.pacification.settledSeconds, 0, 10)
       && (value.pacification.settledRoute === null || value.pacification.settledRoute === "outmaneuver" || value.pacification.settledRoute === "offering")))
     && (value.specimenId === undefined || isShortString(value.specimenId, 160))
+    && validCreatureOrigins(value)
     && (value.primeAnchorId === undefined || value.primeAnchorId === null
       || (typeof value.primeAnchorId === "string" && isShortString(value.primeAnchorId, 160) && value.primeAnchorId.startsWith(`prime:${value.kind}:`)))
     && (value.appearanceRevision === undefined || isShortString(value.appearanceRevision, 256))

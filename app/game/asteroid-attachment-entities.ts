@@ -2,6 +2,7 @@ import type { SavedCreature, WorldSave } from "./engine";
 import type { SailboatSave } from "./boats";
 import type { SavedLeadAnchor } from "./farming";
 import { cloneUniverseJson } from "./universe-json";
+import { readCreatureOrigins } from "./creature-origins";
 import { rebaseAsteroidPosition, type AsteroidAttachmentFrame, type AsteroidAttachmentView } from "./asteroid-attachment-frame";
 
 export type AsteroidAttachedEntities = Readonly<{
@@ -13,6 +14,7 @@ export type AsteroidAttachedEntities = Readonly<{
  */
 const CREATURE_FIELDS = {
   id: true, habitatExposureSeconds: true, morrowExposure: true, morrowRoost: true, celestialVelocity: true,
+  specimenOriginLocationId: true, encounterOriginLocationId: true,
   specimenId: true, geneticSeed: true, kind: true, name: true, x: true, y: true, z: true, yaw: true, health: true, age: true,
   naturalSpawned: true, everLed: true, naturalPool: true, outOfRangeSeconds: true, persistentPoiResident: true,
   poiMarkerId: true, legendaryEncounterId: true, legendarySiteId: true, primeAnchorId: true, groundedSummonLineageId: true,
@@ -34,7 +36,7 @@ function supported(value: object, fields: object) {
 /** Shared additive-field guard. Does not normalize or authorize saved metadata. */
 export function assertKnownAsteroidEntityFields(input: AsteroidAttachedEntities): void {
   supported(input, ENTITY_COLLECTIONS);
-  for (const creature of [...input.creatures, ...input.sleepingCreatures]) supported(creature, CREATURE_FIELDS);
+  for (const creature of [...input.creatures, ...input.sleepingCreatures]) { supported(creature, CREATURE_FIELDS); readCreatureOrigins(creature); }
   for (const boat of input.boats) supported(boat, BOAT_FIELDS);
   for (const drop of input.drops) supported(drop, DROP_FIELDS);
   for (const lead of input.leads) supported(lead, LEAD_FIELDS);
@@ -48,6 +50,7 @@ export function assertKnownAsteroidEntityFields(input: AsteroidAttachedEntities)
 export function rebaseAsteroidEntities(frame: AsteroidAttachmentFrame, input: AsteroidAttachedEntities,
   from: AsteroidAttachmentView, movingActorIds: readonly string[], localActorId = "local"): AsteroidAttachedEntities {
   supported(input, ENTITY_COLLECTIONS);
+  for (const creature of [...input.creatures, ...input.sleepingCreatures]) readCreatureOrigins(creature);
   const output = cloneUniverseJson(input), ids = new Set<number>(), specimens = new Set<string>(), boats = new Set<string>();
   const moving = new Set(movingActorIds), seated = new Set<string>();
   const point = (p: { x: number; y: number; z: number }) => rebaseAsteroidPosition(frame, p, from);

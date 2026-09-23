@@ -149,7 +149,7 @@ import {
   nearestUpperCaveNode,
   undergroundBiomeAt as sampleUndergroundBiome,
 } from "./underground";
-import { LightChannel, MAX_LIGHT_LEVEL, VoxelLightEngine, lightChannel, perceivedBlockLight, type VoxelLightInitializationTask } from "./lighting";
+import { LightChannel, MAX_LIGHT_LEVEL, VoxelLightEngine, gameplayLightFromPacked, lightChannel, type VoxelLightInitializationTask } from "./lighting";
 import {
   BLOCK_FACING_NORTH,
   blockFacingRight,
@@ -2930,6 +2930,7 @@ export function createBlockAtlas() {
 }
 
 export class ChunkWorld {
+  #lightingMutationDepth = 0;
   #generationBaseline: { source: string; terrain: CelestialTerrain | null; epoch: number } | null = null;
   #chunkGenerationSources = new WeakMap<Chunk, string>();
   #generationContamination: string[] = [];
@@ -4249,9 +4250,13 @@ export class ChunkWorld {
         rebuild.add(chunkKey(centerX + dx, centerZ + dz));
       }
     }
+    const loaded: Chunk[] = [];
     for (const key of rebuild) {
       const chunk = this.chunks.get(key);
       if (!chunk) continue;
+      // Boundary tasks also mark their chunk initialized on completion. An old
+      // task must not make a newly invalidated field skip its full rebuild.
+      this.cancelLightReconciliation(key);
       if (this.activeLightInitialization?.key === key) {
         this.activeLightInitialization = null;
         // takeQueuedLightInitialization already consumed the queue entry while
@@ -4260,9 +4265,16 @@ export class ChunkWorld {
         this.lightInitializationQueued.delete(key);
       }
       this.lightInitializationTasks.delete(key);
-      chunk.lightInitialized = false;
-      this.queueLightInitialization(key);
+      loaded.push(chunk);
     }
+    // Clear the entire affected halo before any task can read a neighbor.
+    // Sequentially resetting each chunk lets the first rebuild import old RGB
+    // from an as-yet-unreset neighbor and feed that ghost light back later.
+    for (const chunk of loaded) {
+      chunk.light.fill(0);
+      chunk.lightInitialized = false;
+    }
+    for (const chunk of loaded) this.queueLightInitialization(chunk.key);
   }
 
   private takeQueuedLightInitialization(preferredKey?: string) {
@@ -4325,16 +4337,18 @@ export class ChunkWorld {
         this.lightInitializationTasks.delete(key);
         continue;
       }
-      const task = this.lightInitializationTasks.get(key) ?? this.lightEngine.beginChunkInitialization(chunk);
+      const retained = this.lightInitializationTasks.get(key);
+      const task = retained?.chunk === chunk ? retained : this.lightEngine.beginChunkInitialization(chunk);
       this.lightInitializationTasks.set(key, task);
       this.activeLightInitialization = { key, task };
     }
     const active = this.activeLightInitialization;
     const chunk = this.chunks.get(active.key);
-    if (!chunk || !chunk.group.visible) {
+    if (!chunk || !chunk.group.visible || active.task.chunk !== chunk) {
       this.lightInitializationQueued.delete(active.key);
       this.lightInitializationTasks.delete(active.key);
       this.activeLightInitialization = null;
+      if (chunk && !chunk.lightInitialized) this.queueLightInitialization(active.key);
       return true;
     }
     if (this.lightEngine.stepChunkInitialization(active.task, 1_024)) {
@@ -4348,7 +4362,17 @@ export class ChunkWorld {
     return true;
   }
 
+  private cancelLightReconciliation(key: string) {
+    this.lightReconciliationQueued.delete(key);
+    if (this.activeLightReconciliation?.key === key) this.activeLightReconciliation = null;
+    // A membership bit alone cannot cancel old records: reloading the same key
+    // would restore that bit and revive a task holding the unloaded Chunk.
+    this.lightReconciliationQueue = this.lightReconciliationQueue.filter((entry) => entry.key !== key);
+  }
+
   private queueLightReconciliation(chunk: Chunk) {
+    if (this.chunks.get(chunk.key) !== chunk || !chunk.lightInitialized
+      || this.lightInitializationQueued.has(chunk.key)) return;
     if (this.lightReconciliationQueued.has(chunk.key) || this.activeLightReconciliation?.key === chunk.key) return;
     this.lightReconciliationQueued.add(chunk.key);
     const queued = { key: chunk.key, task: this.lightEngine.beginChunkBoundaryReconciliation(chunk) };
@@ -4374,13 +4398,15 @@ export class ChunkWorld {
         ? this.lightReconciliationQueue.splice(preferredIndex, 1)[0]
         : preferredKey ? undefined : this.lightReconciliationQueue.shift();
       if (!next) return false;
-      if (!this.lightReconciliationQueued.has(next.key) || !this.chunks.has(next.key)) continue;
+      if (!this.lightReconciliationQueued.has(next.key)
+        || this.chunks.get(next.key) !== next.task.chunk) continue;
       this.activeLightReconciliation = next;
     }
     const active = this.activeLightReconciliation;
-    if (!this.chunks.has(active.key)) {
-      this.lightReconciliationQueued.delete(active.key);
-      this.activeLightReconciliation = null;
+    const current = this.chunks.get(active.key);
+    if (current !== active.task.chunk || !current?.lightInitialized) {
+      this.cancelLightReconciliation(active.key);
+      if (current?.lightInitialized) this.queueLightReconciliation(current);
       return true;
     }
     if (this.lightEngine.stepChunkInitialization(active.task, 2_048)) {
@@ -5453,8 +5479,10 @@ export class ChunkWorld {
     const existing = this.chunks.get(key);
     if (existing) {
       if (!existing.lightInitialized) {
+        this.cancelLightReconciliation(key);
         if (this.activeLightInitialization?.key === key) this.activeLightInitialization = null;
         this.lightInitializationQueued.delete(key);
+        this.lightInitializationEnqueuedAt.delete(key);
         this.lightInitializationTasks.delete(key);
         this.lightEngine.initializeChunk(existing);
       }
@@ -7679,6 +7707,13 @@ export class ChunkWorld {
   }
 
   setBlock(x: number, y: number, z: number, type: BlockId, record = true, immediate = false) {
+    this.#lightingMutationDepth += 1;
+    try { return this.setBlockWithLighting(x, y, z, type, record, immediate); }
+    catch (error) { this.deferLightRebuildAround([{ x, z }]); throw error; }
+    finally { this.#lightingMutationDepth -= 1; }
+  }
+
+  private setBlockWithLighting(x: number, y: number, z: number, type: BlockId, record: boolean, immediate: boolean) {
     if (y < MIN_Y || y > MAX_Y) return false;
     const sx = splitCoordinate(x);
     const sz = splitCoordinate(z);
@@ -7693,7 +7728,6 @@ export class ChunkWorld {
     this.markPlayerEditMutation();
     if (!isDirectionallyPlacedBlock(resolvedType)) this.blockFacings.delete(`${x},${y},${z}`);
     this.writeChunkBlock(chunk, index, resolvedType);
-    for (const observe of this.blockEditObservers) observe({ x, y, z });
     this.lightEngine.updateBlock({ x, y, z, previous: previousType, next: resolvedType });
     if (previousType === BlockId.Lava || resolvedType === BlockId.Lava) this.refreshLavaLightCell(x, y, z);
     if (record) {
@@ -7705,6 +7739,9 @@ export class ChunkWorld {
     this.refreshEditedBlock(sx.chunk, sz.chunk, sx.local, y, sz.local, immediate, affectedLayers);
     if (immediate) this.flushLightSections();
     if (immediate) this.markPlayerEditLocalMeshVisible();
+    // Notify after the full edit. An observer may reentrantly replace this cell;
+    // its own edit must be the last block AND light update for that cell.
+    for (const observe of this.blockEditObservers) observe({ x, y, z });
     return true;
   }
 
@@ -7733,6 +7770,18 @@ export class ChunkWorld {
     immediate = false,
     deferLighting = false,
   ) {
+    this.#lightingMutationDepth += 1;
+    try { return this.setBlocksBatchWithLighting(changes, record, immediate, deferLighting); }
+    catch (error) { this.deferLightRebuildAround(changes); throw error; }
+    finally { this.#lightingMutationDepth -= 1; }
+  }
+
+  private setBlocksBatchWithLighting(
+    changes: Array<{ x: number; y: number; z: number; type: BlockId }>,
+    record: boolean,
+    immediate: boolean,
+    deferLighting: boolean,
+  ) {
     const affected = new Set<string>();
     const directlyAffected = new Set<string>();
     const affectedLayersByEntry = new Map<string, Set<WorldRenderLayer>>();
@@ -7744,6 +7793,7 @@ export class ChunkWorld {
     };
     const affectedLavaCells = new Map<string, { x: number; y: number; z: number }>();
     const lightChanges: Array<{ x: number; y: number; z: number; previous: BlockId; next: BlockId }> = [];
+    const observedPoints: Array<{ x: number; y: number; z: number }> = [];
     const batchRelight = changes.length > 12;
     let mutated = false;
     for (const change of changes) {
@@ -7761,7 +7811,7 @@ export class ChunkWorld {
       this.markPlayerEditMutation();
       if (!isDirectionallyPlacedBlock(resolvedType)) this.blockFacings.delete(`${change.x},${change.y},${change.z}`);
       this.writeChunkBlock(chunk, index, resolvedType);
-      for (const observe of this.blockEditObservers) observe({ x: change.x, y: change.y, z: change.z });
+      observedPoints.push({ x: change.x, y: change.y, z: change.z });
       const lightChange = { x: change.x, y: change.y, z: change.z, previous: previousType, next: resolvedType };
       if (batchRelight) lightChanges.push(lightChange);
       else this.lightEngine.updateBlock(lightChange);
@@ -7812,6 +7862,9 @@ export class ChunkWorld {
     }
     if (immediate && !deferLighting) this.flushLightSections();
     if (immediate) this.markPlayerEditLocalMeshVisible();
+    // Report the final batch state only after its light invalidation and edit
+    // ledger are complete; nested edits then cannot be overwritten by this batch.
+    for (const point of observedPoints) for (const observe of this.blockEditObservers) observe(point);
   }
 
   refreshEditedBlock(
@@ -7948,10 +8001,65 @@ export class ChunkWorld {
   /** Authoritative gameplay brightness. Block light remains effective at night and underground. */
   gameplayLightAt(x: number, y: number, z: number, daylight = 1) {
     const packed = this.lightEngine.getPacked(Math.floor(x), Math.floor(y), Math.floor(z));
-    return Math.max(
-      perceivedBlockLight(packed),
-      lightChannel(packed, LightChannel.Sky) * clamp(daylight, 0, 1),
-    );
+    return gameplayLightFromPacked(packed, daylight);
+  }
+
+  private gameplayLightCoverage(x: number, y: number, z: number) {
+    if (![x, y, z].every(Number.isSafeInteger) || y < MIN_Y || y > MAX_Y
+      || this.#lightingMutationDepth || this.lightInitializationQueued.size || this.lightInitializationTasks.size
+      || this.activeLightInitialization || this.lightReconciliationQueued.size || this.activeLightReconciliation) return undefined;
+    const chunks: Chunk[] = [];
+    // Four-bit propagated light attenuates at least once per horizontal cell.
+    // Whole contributing columns include roofs outside any attachment bounds.
+    for (let cx = Math.floor((x - MAX_LIGHT_LEVEL) / CHUNK_SIZE); cx <= Math.floor((x + MAX_LIGHT_LEVEL) / CHUNK_SIZE); cx += 1)
+      for (let cz = Math.floor((z - MAX_LIGHT_LEVEL) / CHUNK_SIZE); cz <= Math.floor((z + MAX_LIGHT_LEVEL) / CHUNK_SIZE); cz += 1) {
+        const chunk = this.chunks.get(chunkKey(cx, cz));
+        if (!chunk?.lightInitialized) return undefined;
+        chunks.push(chunk);
+      }
+    return chunks;
+  }
+
+  /** Simulation reader: incomplete light is unknown, not authoritative darkness.
+   * Never generates terrain, advances work, or depends on presentation queues. */
+  readyGameplayLightAt(x: number, y: number, z: number, daylight = 1): number | undefined {
+    x = Math.floor(x); y = Math.floor(y); z = Math.floor(z);
+    if (!Number.isFinite(daylight) || !this.gameplayLightCoverage(x, y, z)) return undefined;
+    return gameplayLightFromPacked(this.lightEngine.getPacked(x, y, z), daylight);
+  }
+
+  /** Exact declared-read observation over this owner, not a second simulation or
+   * a transfer lease. Callers must revalidate before every later use/commit.
+   * Undeclared coordinates and stale/unready owners remain unknown. */
+  captureGameplayLight(points: readonly Readonly<{ x: number; y: number; z: number }>[]) {
+    const generationSource = this.snapshotGenerationProducer();
+    if (!generationSource) return undefined;
+    const chunks = new Map<string, Chunk>();
+    const readings = new Map<string, Readonly<{ x: number; y: number; z: number; packed: number }>>();
+    for (const point of points) {
+      const coverage = this.gameplayLightCoverage(point.x, point.y, point.z);
+      if (!coverage) return undefined;
+      for (const chunk of coverage) chunks.set(chunk.key, chunk);
+      const { x, y, z } = point;
+      readings.set(`${x},${y},${z}`, Object.freeze({ x, y, z, packed: this.lightEngine.getPacked(x, y, z) }));
+    }
+    const epoch = this.locationLoadEpoch;
+    const scopeSource = encodeAttachmentSource(this.locationScope);
+    const source = freezeUniverseJson({ epoch, scopeSource, generationSource,
+      coverage: [...chunks.keys()].sort(), readings: [...readings].sort(([a], [b]) => a.localeCompare(b)).map(([, value]) => value) });
+    const isCurrent = () => {
+      if (this.locationLoadEpoch !== epoch || this.snapshotGenerationProducer() !== generationSource
+        || JSON.stringify(encodeAttachmentSource(this.locationScope)) !== JSON.stringify(scopeSource)) return false;
+      for (const [key, chunk] of chunks) if (this.chunks.get(key) !== chunk) return false;
+      for (const { x, y, z, packed } of readings.values())
+        if (!this.gameplayLightCoverage(x, y, z) || this.lightEngine.getPacked(x, y, z) !== packed) return false;
+      return true;
+    };
+    return Object.freeze({ source, isCurrent,
+      gameplayLightAt: (point: Readonly<{ x: number; y: number; z: number }>, daylight: number): number | undefined => {
+        const reading = readings.get(`${point.x},${point.y},${point.z}`);
+        return reading && Number.isFinite(daylight) && isCurrent() ? gameplayLightFromPacked(reading.packed, daylight) : undefined;
+      } });
   }
 
   lightingProbeAt(x: number, y: number, z: number) {
@@ -8994,9 +9102,8 @@ export class ChunkWorld {
     void this.chunkPersistentCache.set(cached);
     this.lightInitializationQueued.delete(key);
     this.lightInitializationEnqueuedAt.delete(key);
-    this.lightReconciliationQueued.delete(key);
+    this.cancelLightReconciliation(key);
     this.lightSectionsPendingByChunk.delete(key);
-    if (this.activeLightReconciliation?.key === key) this.activeLightReconciliation = null;
     this.generationEnqueuedAt.delete(key);
     this.lightInitializationTasks.delete(key);
     if (this.activeLightInitialization?.key === key) this.activeLightInitialization = null;

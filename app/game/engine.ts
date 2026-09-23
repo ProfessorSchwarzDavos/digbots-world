@@ -16601,8 +16601,8 @@ export class VoxelEngine {
         }
         const next = nextPlantStage(current);
         if (next === null) { this.saplings.delete(key); continue; }
-        const localGrowthLight = this.world.gameplayLightAt(x, y + 1, z, this.daylightAmount()) / 15;
-        if (!canGrowPlant(current, hydratedSoil, localGrowthLight)) {
+        const localGrowthLight = this.world.readyGameplayLightAt(x, y + 1, z, this.daylightAmount());
+        if (localGrowthLight === undefined || !canGrowPlant(current, hydratedSoil, localGrowthLight / 15)) {
           this.saplings.set(key, now + 25_000);
           continue;
         }
@@ -29212,7 +29212,8 @@ export class VoxelEngine {
           y = aquaticY;
           aquatic = true;
         } else {
-          const spawnLight = this.world.gameplayLightAt(x, y + 1, z, this.daylightAmount());
+          const spawnLight = this.world.readyGameplayLightAt(x, y + 1, z, this.daylightAmount());
+          if (spawnLight === undefined) { this.noteEcologyRejection("light-unready"); continue; }
           if (this.spawnProtection > 0 || spawnLight > 7) { this.noteEcologyRejection("light"); continue; }
           if (y <= SEA_LEVEL || this.hostileSpawnSuppressedBySettlement(x, z) || this.isInsideHearthward(x, z)) {
             this.noteEcologyRejection("safe-area");

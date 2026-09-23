@@ -109,6 +109,11 @@ export function perceivedBlockLight(packed: number) {
   );
 }
 
+/** Shared gameplay interpretation of the one canonical packed light field. */
+export function gameplayLightFromPacked(packed: number, daylight: number) {
+  return Math.max(perceivedBlockLight(packed), lightChannel(packed, LightChannel.Sky) * Math.min(1, Math.max(0, daylight)));
+}
+
 export function emittedLightForDefinition(definition: BlockDefinition | undefined) {
   const level = clampLevel(definition?.lightEmission ?? 0);
   if (level <= 0) return 0;

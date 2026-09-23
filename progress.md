@@ -2990,5 +2990,16 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   no duplicate partial range rules. Actual and pure cases prove legal nectar
   4 (and ordinary 0) still passes while 5 refuses. Focused 38/38 and expanded
   118/118 including Wildkeeper's probe pass; TypeScript and changed-file lint
-  exit 0. Exact committed source/build/official check and director disposition
-  are still pending. Full E2/entry remain closed.
+  exit 0. Exact committed source f31b443 passed the expanded 118/118 suite.
+  Exact-source production build r18-e2-bee-nectar-build-r57 exited 0 (ID
+  FGYDygRbOwuBKNgRuWmix; established circular-chunk warnings). Official
+  synthetic station browser r18-e2-bee-nectar-official-r57 exited 0; I
+  inspected shot-0.png, and state reports playing, health 10, sealed
+  breathing. This is a short synthetic regression, not native-save or E2
+  entry/return proof. Preview stopped, port 4338 and scoped WSL processes
+  absent, generated tsconfig edit restored, tracked/index clean except
+  unrelated evidence/. Wildkeeper independently accepted this bounded
+  bee/orb prerequisite in CF6_R18_ORB_BEE_CORRECTION_ACCEPTANCE.md after
+  its own stable-source 118/118 repeat and source-byte review. The review
+  qualified that progress.md alone was dirty; runtime/test source still
+  matched f31b443. Full E2/entry remain closed, CF7 gated.

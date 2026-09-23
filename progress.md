@@ -3050,3 +3050,20 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   clean except unrelated `evidence/`. Summon/player contract origins, positive
   sites, atomic drop lineage and normal-path consumers remain open. Entry
   CLOSED; CF7 gated; no push/deploy/provider/real-save mutation.
+
+- Sep23 bounded grounded-summon origin source `36e9be8`/build60: the scoped
+  join now validates canonical player-owned summon contracts and deterministic
+  lineages, binds one grounded body to one player contract without assigning
+  the contract a physical side, and refuses saved grounding erasure, duplicate
+  books/bodies, remote lineage copies or conflicting entity IDs. All four
+  authored summon kinds and the actual-engine source path are covered.
+  Focused46PASS, expanded precommit and exact-commit137PASS, TypeScript/lint
+  exit0. Exact-source production build60 PASS (ID
+  `R_uLc99B1OQZVTfWOcTki`, established circular-chunk warnings); official
+  synthetic station smoke PASS, screenshot personally reviewed, state
+  playing/health10/sealed breathing. Preview stopped, port4338/scoped jobs
+  absent, generated tsconfig restored; tracked/index clean except unrelated
+  `evidence/`. This does not prove normal summon gameplay, native save,
+  positive sites, atomic drop lineage, full E2 or entry/return. Director's
+  no-new-large/helpers budget gate applies; no new helper or larger feature
+  launched. Entry CLOSED; CF7 gated; no external mutation.

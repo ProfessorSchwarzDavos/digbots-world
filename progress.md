@@ -2910,8 +2910,13 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   reject. Calling without points explicitly makes no light coverage claim.
 - Final focused E2 run r18-e2-focused-r2 passes 50/50; TypeScript
   r18-e2-static-r6 and changed-file lint-r3 exit 0. Relevant mount, guild and
-  companion gameplay tests pass 21/21. Production/official checks for this
-  latest delta remain.
+  companion gameplay tests pass 21/21. The scoped source checkpoint is local
+  commit d24007e. Exact-commit production build r18-e2-build-r53 passed with
+  the established circular-chunk warning; official client
+  r18-e2-official-r53-r2 passed and its gameplay screenshot was personally
+  reviewed. The first official attempt lacked the required explicit synthetic
+  storage variable and is retained as a harness failure. Preview stopped,
+  port 4338 is free, and generated tsconfig formatting was exactly restored.
 - This is a partial read-only E2 checkpoint, not admission. Complete dependency
   origins and positive authored-site/normal-path coverage remain, followed by
   E3 authenticated atomic entry AND return, E4 journey, P1-P3, full CF6 and

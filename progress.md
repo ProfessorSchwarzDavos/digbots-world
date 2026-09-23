@@ -3033,3 +3033,20 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   Guild-companion/player history, other
   non-apiary origins, positive sites, drop lineage and normal entry/return
   remain open; entry CLOSED, CF7 gated.
+
+- Sep23 source-qualified guild-companion checkpoint `9704ee3`: the actual
+  scoped source now resolves each current companion against a unique canonical
+  player guild book, not body position or mutable hired actor. Current live
+  recruitment may advance beyond its saved preimage, but a saved recruit
+  cannot disappear; duplicate books, invalid books and remote duplicate
+  bodies refuse. A distinct actual-global road-event remote overcount negative
+  is also retained. Focused 26/26, expanded 131/131, TypeScript and changed-file
+  lint exit 0. Exact-commit build `r59-guild-build` passes (ID
+  `pQg82yndlLjLAEjivE2K3`, established circular-chunk warnings); official
+  synthetic station `r59-guild-official` passes, screenshot personally
+  inspected, playing/health10/sealed breathing. This is not a native save,
+  guild recruitment journey, full E2 or entry/return proof. Preview stopped,
+  port4338 and scoped jobs absent, generated tsconfig restored; tracked/index
+  clean except unrelated `evidence/`. Summon/player contract origins, positive
+  sites, atomic drop lineage and normal-path consumers remain open. Entry
+  CLOSED; CF7 gated; no push/deploy/provider/real-save mutation.

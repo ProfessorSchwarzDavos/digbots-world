@@ -2981,3 +2981,14 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   does not exercise an actual E2 entry/return or completed native save.
   Preview stopped, port 4338 and scoped WSL processes absent, Next's
   generated tsconfig edit restored; unrelated evidence/ preserved.
+- Independent Wildkeeper review held b6126b0 provisional: its retained
+  director-r18-orb-bee-boundary-r1 probe found saved same-ID bee nectar 5
+  accepted while live nectar 2 was valid. Actual scoped-engine reproduction
+  r18-e2-bee-nectar-runtime-red-r1 also failed the expected rejection, so
+  the bad persisted value reached the E2 projection. The saved/live identity
+  guard now calls the same strict bee validator as canonical apiary selection;
+  no duplicate partial range rules. Actual and pure cases prove legal nectar
+  4 (and ordinary 0) still passes while 5 refuses. Focused 38/38 and expanded
+  118/118 including Wildkeeper's probe pass; TypeScript and changed-file lint
+  exit 0. Exact committed source/build/official check and director disposition
+  are still pending. Full E2/entry remain closed.

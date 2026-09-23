@@ -46,13 +46,15 @@ function counter(value: unknown, max = Number.MAX_SAFE_INTEGER): value is number
 function textId(value: unknown, max: number): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= max;
 }
-function validateBee(bee: ApiaryBee, role: ApiaryBee["role"]): void {
+/** Shared strict shape/range check for live and persisted current bees. */
+export function assertAsteroidApiaryBee(bee: ApiaryBee, role?: ApiaryBee["role"]): void {
   record(bee);
   const optional = ["storedOrb", "specimenOriginLocationId", "encounterOriginLocationId"];
   const keys = Object.keys(beeFields).filter(key => !optional.includes(key) || Object.hasOwn(bee, key));
   assertExactKeys(bee, keys, "Attached bee");
   readCreatureOrigins(bee);
-  if (!textId(bee.id, 80) || !["queen", "worker"].includes(bee.role) || bee.role !== role || [bee.alive, bee.home, bee.outbound, bee.angry, bee.tamed].some(value => typeof value !== "boolean")
+  if (!textId(bee.id, 80) || !["queen", "worker"].includes(bee.role) || (role !== undefined && bee.role !== role)
+    || [bee.alive, bee.home, bee.outbound, bee.angry, bee.tamed].some(value => typeof value !== "boolean")
     || !bounded(bee.carryingNectar, 4) || !counter(bee.lastReturnDay) || bee.disconnectedDay !== null && !counter(bee.disconnectedDay)
     || !counter(bee.geneticSeed, 0xffffffff) || bee.ownerId !== null && (typeof bee.ownerId !== "string" || bee.ownerId.length > 160))
     throw Error("Invalid attached bee identity or state.");
@@ -126,14 +128,14 @@ function selection(frame: AsteroidAttachmentFrame, sources: AsteroidApiarySource
     if (hive.queen === null) {
       if (hive.queenOrb !== null || hive.queenDisplayEnabled) throw Error("Dormant apiary retains a queen owner.");
     } else {
-      validateBee(hive.queen, "queen"); registerBee(hive.queen, side, key);
+      assertAsteroidApiaryBee(hive.queen, "queen"); registerBee(hive.queen, side, key);
       if (hive.queenOrb !== null) {
         if (!validCustodyItem(hive.queenOrb)) throw Error("Invalid attached queen inventory custody.");
         const stored = readApiaryOrb(() => readStoredCreatureCustody(hive.queenOrb));
         registerOrb(stored ? { orbId: stored.containerId, creature: stored.creature, attunement: stored.attunement } : null, hive.queen, true);
       }
     }
-    for (const worker of hive.workers) { validateBee(worker, "worker"); registerBee(worker, side, key); }
+    for (const worker of hive.workers) { assertAsteroidApiaryBee(worker, "worker"); registerBee(worker, side, key); }
     hiveSides.set(key, side);
   }
   const creatureIds = new Set<number>(), specimens = new CreatureSpecimenIdentitySet(), dependencies: AsteroidEntityDependency[] = [];
@@ -146,7 +148,7 @@ function selection(frame: AsteroidAttachmentFrame, sources: AsteroidApiarySource
   for (const creature of [...sources.creatures, ...sources.sleepingCreatures]) {
     identify(creature);
     if (!creature.apiaryBee) continue;
-    const bee = creature.apiaryBee; validateBee(bee, bee.role);
+    const bee = creature.apiaryBee; assertAsteroidApiaryBee(bee, bee.role);
     assertCreatureOriginsAgree(creature, bee);
     if (creature.kind !== beeKind(bee)) throw Error("Free bee differs from its saved species.");
     const side = asteroidCreatureFootprintSide(frame, creature, "orbit"); registerBee(bee, side, null);
@@ -158,7 +160,7 @@ function selection(frame: AsteroidAttachmentFrame, sources: AsteroidApiarySource
     assertExactKeys(visual, ["hiveKey", "creature"], "Apiary visual"); identify(visual.creature);
     const creature = visual.creature, bee = creature.apiaryBee;
     if (!bee) throw Error("Apiary visual lacks its resident identity.");
-    validateBee(bee, bee.role); const identity = creatureSpecimenIdentityKey(bee.id, bee), owner = bees.get(identity);
+    assertAsteroidApiaryBee(bee, bee.role); const identity = creatureSpecimenIdentityKey(bee.id, bee), owner = bees.get(identity);
     if (!owner || owner.hiveKey !== visual.hiveKey || !hiveSides.has(visual.hiveKey) || visualBeeIds.has(identity)
       || creature.kind !== beeKind(owner.bee) || !owner.bee.alive) throw Error("Unresolved or duplicate apiary visual owner.");
     // Flight/nectar animation differs legitimately. Identity/ownership changes

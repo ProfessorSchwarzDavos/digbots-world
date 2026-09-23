@@ -75,6 +75,11 @@ test("saved current bee care may drift while bee identity and keeper remain fixe
     outbound: false, carryingNectar: 0, lastReturnDay: 3, angry: true } };
   assert.doesNotThrow(() => assertNoPersistedOnlyCurrentEntityAnchors({ creatures: [saved] }, current),
     "ordinary bee flight/nectar/anger drift is not an owner change");
+  assert.doesNotThrow(() => assertNoPersistedOnlyCurrentEntityAnchors({ creatures: [{ ...saved,
+    apiaryBee: { ...saved.apiaryBee, carryingNectar: 4 } }] }, current),
+    "the canonical nectar upper bound remains legal care drift");
+  assert.throws(() => assertNoPersistedOnlyCurrentEntityAnchors({ creatures: [{ ...saved,
+    apiaryBee: { ...saved.apiaryBee, carryingNectar: 5 } }] }, current), /Invalid attached bee/i);
   assert.throws(() => assertNoPersistedOnlyCurrentEntityAnchors({ creatures: [{ ...saved,
     apiaryBee: { ...saved.apiaryBee, ownerId: "outside" } }] }, current), /persisted.*creature.*relationship/i);
   assert.throws(() => assertNoPersistedOnlyCurrentEntityAnchors({ creatures: [{ ...saved,

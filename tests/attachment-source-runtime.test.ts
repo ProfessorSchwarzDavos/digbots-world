@@ -201,6 +201,15 @@ test("actual full scoped source observes remote history before physical selectio
   await assert.doesNotReject(engine.snapshotScopedAttachmentUniverseSource(asteroid.id),
     "normal saved bee care drift must not hide unchanged origin and owner");
   Object.assign(repository.snapshot.locations[0].fields, { sleepingCreatures: [{ ...beeBody,
+    apiaryBee: { ...bee, carryingNectar: 4 } }] });
+  await assert.doesNotReject(engine.snapshotScopedAttachmentUniverseSource(asteroid.id),
+    "the canonical nectar maximum is still valid unsaved care drift");
+  Object.assign(repository.snapshot.locations[0].fields, { sleepingCreatures: [{ ...beeBody,
+    apiaryBee: { ...bee, carryingNectar: 5 } }] });
+  await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id),
+    /Invalid.*bee|Unresolved.*bee/i,
+    "an invalid persisted nectar amount cannot hide behind a valid same-ID live bee");
+  Object.assign(repository.snapshot.locations[0].fields, { sleepingCreatures: [{ ...beeBody,
     apiaryBee: { ...bee, ownerId: "outside" } }] });
   await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /persisted.*creature.*relationship/i);
   engine.sleepingCreatures = []; delete (repository.snapshot.locations[0].fields as Record<string, unknown>).sleepingCreatures;

@@ -5,28 +5,15 @@ import { asteroidEntityRelationshipPartition, type AsteroidRelationshipContext }
 import { asteroidAttachmentVolumeSide, asteroidCreatureFootprintSide } from "./asteroid-attachment-creature-footprint";
 import { asteroidSailboatFootprintSide } from "./asteroid-attachment-vehicle-footprint";
 import { asteroidAttachedDropIndices, captureAsteroidDrops, projectAsteroidDrops } from "./asteroid-attachment-drops";
-import { assertExactKeys, canonicalJson, isUniverseRecord } from "./universe-json";
+import { canonicalJson } from "./universe-json";
 import { mergeSelectedAttachmentRecords } from "./attachment-array-merge";
 import { readCreatureOrigins } from "./creature-origins";
+import { assertAsteroidApiaryBee } from "./asteroid-attachment-apiaries";
 import type { SavedCreature } from "./engine";
 
-const beeRequiredFields = ["id", "role", "alive", "home", "outbound", "carryingNectar", "lastReturnDay",
-  "disconnectedDay", "geneticSeed", "angry", "tamed", "ownerId"] as const;
-const beeOptionalFields = ["storedOrb", "specimenOriginLocationId", "encounterOriginLocationId"] as const;
 function beeRelationshipIdentity(bee: SavedCreature["apiaryBee"]) {
   if (bee == null) return null;
-  if (!isUniverseRecord(bee)) throw Error("Invalid persisted current bee relationship.");
-  assertExactKeys(bee, [...beeRequiredFields, ...beeOptionalFields.filter(key => Object.hasOwn(bee, key))],
-    "Persisted current bee relationship");
-  if (typeof bee.id !== "string" || !bee.id || !["queen", "worker"].includes(bee.role)
-    || !Number.isSafeInteger(bee.geneticSeed) || bee.geneticSeed < 0
-    || bee.geneticSeed > 0xffffffff || typeof bee.tamed !== "boolean"
-    || bee.ownerId !== null && (typeof bee.ownerId !== "string" || !bee.ownerId)
-    || [bee.alive, bee.home, bee.outbound, bee.angry].some(value => typeof value !== "boolean")
-    || !Number.isFinite(bee.carryingNectar) || bee.carryingNectar < 0
-    || !Number.isSafeInteger(bee.lastReturnDay) || bee.lastReturnDay < 0
-    || bee.disconnectedDay !== null && (!Number.isSafeInteger(bee.disconnectedDay) || bee.disconnectedDay < 0))
-    throw Error("Invalid persisted current bee relationship.");
+  assertAsteroidApiaryBee(bee);
   // Hive/flight care changes between saves. Identity, provenance and any
   // stored orb remain canonical-owner claims and cannot be hidden by ID match.
   return { id: bee.id, role: bee.role, geneticSeed: bee.geneticSeed,

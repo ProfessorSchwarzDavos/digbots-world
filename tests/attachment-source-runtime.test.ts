@@ -20,6 +20,7 @@ import { prepareWaygridCapacity } from "../app/game/waygrid-capacity";
 import { emptyAuthoredSiteFixture } from "./empty-authored-site-fixtures";
 import { MOB_DEFS } from "../app/game/mobs";
 import { createGuildBook, recordGuildServiceFlag } from "../app/game/guilds";
+import { createSummonContractState, groundSummon, manifestSummon, observeSummonRole } from "../app/game/summon-contracts";
 
 const additionalMaps = ["saplings", "veinRegrowth", "roadEvents", "golemForges", "alchemyStands", "distilleries", "sugarworks",
   "archiveShelves", "tomeDisplays", "settlements", "merchants", "liquidCells", "ecologySectors", "multiplayerPlayerProgressions",
@@ -57,6 +58,7 @@ function fixture() {
     acquiredLootUniqueIds: new Set(), activatedStructureMarkers: new Set(), mode: "survival", health: 10, hunger: 10,
     selected: 0, xp: 0, level: 1, day: 1, worldTime: .2, weather: "clear", weatherState: { kind: "clear" },
     saveExtensions: {}, worldOptions: { dayLengthMinutes: 20 }, bestiary: {}, lifeSupportState: {},
+    summonContractState: createSummonContractState("local"),
   }) as VoxelEngine;
   return { engine, asteroid, pressure, edits };
 }
@@ -270,6 +272,30 @@ test("actual full scoped source observes remote history before physical selectio
   delete (repository.snapshot.locations[1].fields as Record<string, unknown>).creatures;
   delete (repository.snapshot.players[0].fields as Record<string, unknown>).guildBook;
   engine.guildBook = createGuildBook(); engine.sleepingCreatures = [];
+  let summon = manifestSummon(createSummonContractState("local"), "asterjaw", 0).state;
+  for (let i = 0; i < 3; i++) summon = observeSummonRole(summon, "asterjaw", "destination-reached", i + 1);
+  const summonLineage = summon.records.asterjaw!.lineageId, summonEntity = "grounded:local:asterjaw:37";
+  const grounded = groundSummon(summon, "asterjaw", summonLineage, summonEntity, 3, false);
+  assert.equal(grounded.ok, true);
+  const summonBody = { ...sleeper, kind: "asterjaw" as const, groundedSummonLineageId: summonLineage,
+    groundedSummonEntityId: summonEntity, persistentPoiResident: true };
+  engine.summonContractState = grounded.state; engine.sleepingCreatures = [summonBody];
+  Object.assign(repository.snapshot.players[0].fields, { summonContracts: createSummonContractState("local") });
+  await assert.doesNotReject(engine.snapshotScopedAttachmentUniverseSource(asteroid.id),
+    "new live grounding may advance beyond the saved current player contract");
+  Object.assign(repository.snapshot.players[0].fields, { summonContracts: grounded.state });
+  engine.summonContractState = createSummonContractState("local");
+  await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id),
+    /Saved summon grounding provenance|Unresolved source-qualified summon history/i,
+    "saved grounding cannot disappear behind the live player state");
+  engine.summonContractState = grounded.state;
+  Object.assign(repository.snapshot.locations[1].fields, { creatures: [{ ...summonBody, id: 40, specimenId: "remote-summon-copy" }] });
+  await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id),
+    /Duplicate grounded summon lineage/i,
+    "a remote physical copy cannot reuse one grounded player lineage");
+  delete (repository.snapshot.locations[1].fields as Record<string, unknown>).creatures;
+  delete (repository.snapshot.players[0].fields as Record<string, unknown>).summonContracts;
+  engine.summonContractState = createSummonContractState("local"); engine.sleepingCreatures = [];
   const keeperId = engine.localPlayerId(), currentOrigin = engine.world.locationScope.locationId;
   const heldOrb = captureIntoOrb(createEmptyCaptureOrb("current-deployed"), {
     schema: 1, entityId: "current-deployed-specimen", kind: "peelop", health: 5, maxHealth: 7,

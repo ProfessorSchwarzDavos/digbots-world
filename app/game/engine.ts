@@ -578,6 +578,7 @@ import { reconcileUniverseCreatureCustody } from "./universe-creature-custody";
 import { canonicalJson, cloneUniverseJson, freezeUniverseJson } from "./universe-json";
 import { encodeAttachmentSource, snapshotAttachmentSaveSources, type AttachmentSaveSources } from "./attachment-source-preimage";
 import { selectUniverseGuildResidentHistory, selectUniverseRoadResidentHistory } from "./universe-resident-history";
+import { selectUniverseSummonHistory } from "./universe-summon-history";
 import { selectAsteroidProductionStations } from "./asteroid-attachment-production";
 import { selectAsteroidBookFurniture } from "./asteroid-attachment-book-furniture";
 import { selectAsteroidArchitecture } from "./asteroid-attachment-architecture";
@@ -22395,6 +22396,7 @@ export class VoxelEngine {
       throw Error("Attachment road-event history has a non-string key.");
     return freezeUniverseJson({ source, pressureSource, production, bookFurniture, architecture,
       residentHistorySource: structuredClone({ roadEvents: Object.fromEntries(this.roadEvents), guildBook: this.guildBook }),
+      summonHistorySource: structuredClone(this.summonContractState),
       waygridSource: structuredClone({ asteroidFields: this.asteroidFields, generatorVersion: GENERATOR_VERSION,
         generatorProfile: this.world.generationOptions.profile, seed: this.world.seedText }),
       authoredSiteSource: structuredClone({ settlements: [...this.settlements], merchants: [...this.merchants],
@@ -22512,11 +22514,16 @@ export class VoxelEngine {
       locationId: observed.stamp.locationId, playerId: observed.manifest.currentPlayerId,
       guildBook: runtime.residentHistorySource.guildBook,
     }, [...entities.creatures, ...entities.sleepingCreatures]);
+    const summonHistory = selectUniverseSummonHistory(repository.snapshot, {
+      locationId: observed.stamp.locationId, playerId: observed.manifest.currentPlayerId,
+      summonContracts: runtime.summonHistorySource,
+    }, [...entities.creatures, ...entities.sleepingCreatures]);
     const relationships: AsteroidRelationshipContext = { localActorId: observed.hostPlayerId,
       actors: observed.context.actors.map(actor => ({ id: actor.id, position: actor.position, bounds: actor.bounds,
         mountedCreatureId: actor.mountedCreatureId,
         followingCreatureIds: runtime.relationshipFollowers.find(([id]) => id === actor.id)?.[1] ?? [] })),
       dependencies: [...physical.current.apiaryDependencies, ...roadHistory.dependencies, ...guildHistory.dependencies,
+        ...summonHistory.dependencies,
         ...selectAsteroidDeployedOrbDependencies(observed.frame, physical)] };
     const entityProjection = projectAsteroidEntityCollection(observed.frame, entities, relationships);
     const waygrid = selectUniverseWaygridOwnership(observed.frame, repository.snapshot, {
@@ -22527,7 +22534,7 @@ export class VoxelEngine {
       locationId: observed.stamp.locationId, repositoryRevision: observed.manifest.revision,
       locationRevision: observed.stamp.revision, source: runtime.authoredSiteSource,
     });
-    return freezeUniverseJson({ runtime, repository: structuredClone(repository), physical, roadHistory, guildHistory,
+    return freezeUniverseJson({ runtime, repository: structuredClone(repository), physical, roadHistory, guildHistory, summonHistory,
       entityProjection, waygrid, authoredSites,
       ...(environment ? { environment } : {}) });
   }

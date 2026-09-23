@@ -21,8 +21,8 @@ export type AsteroidEntityDependency = Readonly<{
 } | {
   kind: "apiary-bee"; id: string; attached: boolean; specimenOriginLocationId?: LocationId;
 } | {
-  /** Shared canonical history, not a structure that must move with its NPC. */
-  kind: HistoricalResidentKind; id: string; attached: null;
+  /** Shared canonical history, not a structure that must move with its body. */
+  kind: HistoricalResidentKind | "summon"; id: string; attached: null;
 }>;
 export type AsteroidRelationshipActor = Readonly<{
   id: string; position: CelestialPoint; bounds: CelestialBounds;
@@ -212,16 +212,18 @@ export function asteroidEntityRelationshipPartition(frame: AsteroidAttachmentFra
     const key = idKey(dependency.kind, dependency.kind === "apiary-bee"
       ? creatureSpecimenIdentityKey(dependency.id, dependency) : dependency.id);
     const historical = dependency.kind === "road-event" || dependency.kind === "guild-companion";
-    if ((historical ? dependency.attached !== null : !dependencyKinds.has(dependency.kind as AsteroidEntityDependencyKind)
-      || typeof dependency.attached !== "boolean") || dependencies.has(key)) throw Error("Invalid or duplicate attachment dependency.");
+    const sharedSummon = dependency.kind === "summon" && dependency.attached === null;
+    if ((!sharedSummon && (historical ? dependency.attached !== null : !dependencyKinds.has(dependency.kind as AsteroidEntityDependencyKind)
+      || typeof dependency.attached !== "boolean")) || dependencies.has(key)) throw Error("Invalid or duplicate attachment dependency.");
     dependencies.set(key, dependency);
   }
   for (const creature of creatures.values()) {
     const side = sides.get(creature.id)!;
     const requireDependency = (kind: AsteroidEntityDependencyKind, id: string, originSource?: unknown) => {
       identifier(id); const key = idKey(kind, kind === "apiary-bee" ? creatureSpecimenIdentityKey(id, originSource) : id), dependency = dependencies.get(key);
-      if (!dependency || dependency.attached === null) throw Error(`Unresolved attachment ${kind} dependency.`);
-      usedDependencies.add(key); sameSide(side, dependency.attached, `${kind} dependency`);
+      if (!dependency || dependency.attached === null && kind !== "summon") throw Error(`Unresolved attachment ${kind} dependency.`);
+      usedDependencies.add(key);
+      if (dependency.attached !== null) sameSide(side, dependency.attached, `${kind} dependency`);
     };
     if (creature.poiMarkerId !== undefined) requireDependency("poi", creature.poiMarkerId);
     // This is also a retention/protection flag for hatched pets, apiary releases

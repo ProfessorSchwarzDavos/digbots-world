@@ -133,6 +133,15 @@ for (const { name, patch, dependency } of dependencies) test(`${name} requires e
   rejectsUnchanged(input, { ...context(), dependencies: [{ ...dependency, attached: false }] }, /boundary/);
   assert.deepEqual(select(input, { ...context(), dependencies: [dependency] }).creatureIds, [1]);
 });
+test("a grounded summon contract proves lineage without assigning a physical side", () => {
+  const input = { ...fixture(), creatures: [{ ...creature(), groundedSummonLineageId: "lineage",
+    groundedSummonEntityId: "entity" }] };
+  const dependency: AsteroidEntityDependency = { kind: "summon", id: asteroidEntityCompoundId("lineage", "entity"), attached: null };
+  assert.deepEqual(select(input, { ...context(), dependencies: [dependency] }).creatureIds, [1]);
+  rejectsUnchanged(input, { ...context(), actors: [{ ...actor(), followingCreatureIds: [2] }, actor("outside", 80)],
+    dependencies: [dependency] }, /Active follower/);
+  rejectsUnchanged(input, { ...context(), dependencies: [{ ...dependency, id: "different" }] }, /Unresolved/);
+});
 test("resident identity requires its exact settlement and resident composite", () => {
   const input = { ...fixture(), creatures: [{ ...creature(), settlementId: "village", residentId: "resident" }] };
   const deps: AsteroidEntityDependency[] = [{ kind: "settlement", id: "village", attached: true },

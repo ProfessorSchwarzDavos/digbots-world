@@ -19,7 +19,7 @@ import { createPrimeEncounterState, planPrimeEncounter, transferPrimeEncounterCu
 import { prepareWaygridCapacity } from "../app/game/waygrid-capacity";
 import { emptyAuthoredSiteFixture } from "./empty-authored-site-fixtures";
 import { MOB_DEFS } from "../app/game/mobs";
-import { createGuildBook } from "../app/game/guilds";
+import { createGuildBook, recordGuildServiceFlag } from "../app/game/guilds";
 
 const additionalMaps = ["saplings", "veinRegrowth", "roadEvents", "golemForges", "alchemyStands", "distilleries", "sugarworks",
   "archiveShelves", "tomeDisplays", "settlements", "merchants", "liquidCells", "ecologySectors", "multiplayerPlayerProgressions",
@@ -221,6 +221,13 @@ test("actual full scoped source observes remote history before physical selectio
   Object.assign(repository.snapshot.locations[0].fields, { roadEvents: { [roadAnchor]: roadEvent } });
   await assert.doesNotReject(engine.snapshotScopedAttachmentUniverseSource(asteroid.id),
     "one actual current road body may bind its uniquely identified location history");
+  const remoteRoadBodies = [38, 39].map(id => ({ id, kind: "thimbledeer" as const, x: 0, y: 32, z: 0,
+    yaw: 0, health: 5, age: 20, residentId: `road-event:${roadAnchor}` }));
+  Object.assign(repository.snapshot.locations[1].fields, { creatures: remoteRoadBodies });
+  await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id),
+    /Road-event resident differs from its authored spawn history/i,
+    "one current body plus two remote copies cannot exceed the two authored crossing deer");
+  delete (repository.snapshot.locations[1].fields as Record<string, unknown>).creatures;
   Object.assign(repository.snapshot.locations[0].fields, { roadEvents: { [roadAnchor]: { ...roadEvent, kind: "ambush" } } });
   await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id),
     /Saved current road-event provenance/i, "a saved same-anchor authored kind cannot hide behind live history");
@@ -237,6 +244,32 @@ test("actual full scoped source observes remote history before physical selectio
   engine.roadEvents.clear();
   delete (repository.snapshot.locations[1].fields as Record<string, unknown>).roadEvents;
   engine.sleepingCreatures = [];
+  const companion = { ...sleeper, kind: "burrowbell" as const, residentId: "guild-companion:pella-reedshoe",
+    persistentPoiResident: true };
+  const recruitBook = recordGuildServiceFlag(createGuildBook(), "waykeeper", "recruit:pella-reedshoe");
+  engine.sleepingCreatures = [companion]; engine.guildBook = recruitBook;
+  Object.assign(repository.snapshot.players[0].fields, { guildBook: createGuildBook() });
+  await assert.doesNotReject(engine.snapshotScopedAttachmentUniverseSource(asteroid.id),
+    "an unsaved current recruit is sourced from the live current player book");
+  Object.assign(repository.snapshot.players[0].fields, { guildBook: recruitBook });
+  engine.guildBook = createGuildBook();
+  await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id),
+    /Saved guild-companion recruit provenance/i,
+    "a persisted player recruit cannot disappear behind the live book");
+  engine.guildBook = recruitBook;
+  repository.snapshot.players.push({ playerId: "guest", locationId: home, fields: { inventory: [] } });
+  Object.assign(repository.snapshot.players[1].fields, { guildBook: recruitBook });
+  await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id),
+    /Ambiguous guild-companion history/i,
+    "two player books cannot claim one companion by position or hired actor");
+  repository.snapshot.players.pop();
+  Object.assign(repository.snapshot.locations[1].fields, { creatures: [{ ...companion, id: 39, specimenId: "remote-companion-copy" }] });
+  await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id),
+    /Unresolved canonical guild-companion resident/i,
+    "one live companion plus a remote copy exceeds its authored multiplicity");
+  delete (repository.snapshot.locations[1].fields as Record<string, unknown>).creatures;
+  delete (repository.snapshot.players[0].fields as Record<string, unknown>).guildBook;
+  engine.guildBook = createGuildBook(); engine.sleepingCreatures = [];
   const keeperId = engine.localPlayerId(), currentOrigin = engine.world.locationScope.locationId;
   const heldOrb = captureIntoOrb(createEmptyCaptureOrb("current-deployed"), {
     schema: 1, entityId: "current-deployed-specimen", kind: "peelop", health: 5, maxHealth: 7,

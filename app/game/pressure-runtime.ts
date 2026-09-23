@@ -535,6 +535,9 @@ export class PressureRuntime {
   }
   environmentAt(point: AirPoint): BodyEnvironment {
     const outside = this.host.environment(), zone = this.zoneAt(point); if (!zone) return outside;
+    return this.environmentForZone(zone, outside);
+  }
+  private environmentForZone(zone: AirZoneState, outside: BodyEnvironment): BodyEnvironment {
     const total = totalAirGas(zone), diagnostics = airZoneDiagnostics(zone);
     return { ...outside, pressureKPa: zone.pressureMilliKPa / 1000, oxygenFraction: total ? zone.oxygenMilliMoles / total : 0,
       inertFraction: total ? zone.inertMilliMoles / total : 0, co2Fraction: total ? zone.co2MilliMoles / total : 0,
@@ -543,14 +546,16 @@ export class PressureRuntime {
   }
   /** Source-inspection query over the actual pressure owner. Unlike ordinary
    * exteriorAt(), this does not warm the roof cache or mutate the comparison
-   * preimage. An absent zone below a known roof is unknown, not ambient air. */
-  attachmentEnvironmentAt(point: AirPoint): Readonly<{ kind: "room" | "exterior"; environment: BodyEnvironment } | { kind: "unknown" }> {
+   * preimage. The caller supplies a separately captured canonical ambient;
+   * host.environment() may use the mutable gameplay bodyContext cache. An
+   * absent zone below a known roof is unknown, not ambient air. */
+  attachmentEnvironmentAt(point: AirPoint, ambient: BodyEnvironment): Readonly<{ kind: "room" | "exterior"; environment: BodyEnvironment } | { kind: "unknown" }> {
     const zone = this.zoneAt(point);
     if (zone) return ["sealed", "depressurized", "leaking"].includes(zone.status)
-      ? { kind: "room", environment: this.environmentAt(point) } : { kind: "unknown" };
+      ? { kind: "room", environment: this.environmentForZone(zone, ambient) } : { kind: "unknown" };
     const flags = this.flagsAt(point, false);
     return flags !== undefined && (flags & 129) === 129
-      ? { kind: "exterior", environment: this.host.environment() } : { kind: "unknown" };
+      ? { kind: "exterior", environment: ambient } : { kind: "unknown" };
   }
   diagnosticsFor(key: string) {
     const point = this.roomPoint(key), zone = this.zoneAt(point), device = this.devices.get(key), topology = (zone ? this.topology.topologies.get(zone.zoneId) : undefined) ?? this.topology.diagnostics.get(airCellKey(point));

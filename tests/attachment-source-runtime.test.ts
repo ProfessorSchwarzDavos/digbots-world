@@ -172,6 +172,13 @@ test("actual full scoped source observes remote history before physical selectio
   Object.assign(repository.snapshot.locations[0].fields, { leads: [{ mobId: 999, maximumLength: 7 }] });
   await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /persisted-only.*lead/i);
   delete (repository.snapshot.locations[0].fields as Record<string, unknown>).leads;
+  const insideBoat = { id: boatId, x: asteroid.center.x, y: asteroid.center.y, z: asteroid.center.z,
+    yaw: 0, velocity: 0, passengers: [], inventory: Array.from({ length: 18 }, () => null), ownerId: localActorId };
+  engine.boats.set(boatId, { save: insideBoat, group: new THREE.Group() });
+  Object.assign(repository.snapshot.locations[0].fields, { boats: [[boatId, { ...insideBoat, passengers: [localActorId] }]] });
+  await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /persisted.*boat.*passenger/i,
+    "a matching boat ID cannot suppress a saved passenger link");
+  engine.boats.clear(); delete (repository.snapshot.locations[0].fields as Record<string, unknown>).boats;
   for (const fault of ["inventory", "pressure", "environment", "catalog", "catalogUndefined", "architecture", "effects", "facade", "waygrid", "settlement", "merchant"] as const) {
     const priorInventory = engine.inventory, priorHealth = engine.health, priorCatalog = storage.currentCatalog;
     const oldInstallation = pressure.nextInstallation;

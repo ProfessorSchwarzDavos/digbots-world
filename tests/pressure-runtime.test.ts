@@ -73,6 +73,22 @@ function fixture(saved?: PressureSave, savedMachines?: Map<string, MachineState>
 const resources = (zone: AirZoneState) => ({ oxygenMilliMoles: zone.oxygenMilliMoles, inertMilliMoles: zone.inertMilliMoles,
   co2MilliMoles: zone.co2MilliMoles, thermalEnergyMilliJ: zone.thermalEnergyMilliJ });
 
+test("attachment room inspection uses captured ambient without calling mutable host environment", () => {
+  const f = fixture();
+  try {
+    f.settle();
+    const zone = f.runtime.zoneAt(room);
+    assert(zone);
+    const before = JSON.stringify(f.runtime.snapshotAttachmentSource());
+    f.host.environment = () => { throw Error("Gameplay ambient callback must not run during attachment inspection."); };
+    const reading = f.runtime.attachmentEnvironmentAt(room, vacuum);
+    assert.equal(reading.kind, "room");
+    if (reading.kind === "room") assert.equal(reading.environment.pressureKPa, zone.pressureMilliKPa / 1000);
+    assert.deepEqual(f.runtime.attachmentEnvironmentAt({ x: 30, y: 2, z: 4 }, vacuum), { kind: "unknown" });
+    assert.equal(JSON.stringify(f.runtime.snapshotAttachmentSource()), before);
+  } finally { f.runtime.dispose(); }
+});
+
 test("actual discovery and cold reconstruction distinguish airtight hull from open station framework", () => {
   for (const type of [BlockId.StationHull, BlockId.StationBulkhead, BlockId.StationTruss, BlockId.OrbitalDock,
     BlockId.StationRadiator, BlockId.StationObservatory, BlockId.StationHabitation, BlockId.StationGreenhouse]) {

@@ -58,6 +58,7 @@ function generateLightCoverage(world: ChunkWorld, point: Readonly<{ x: number; y
 test("scoped attachment environment binds live light, fluid and pressure sources across repository await", async () => {
   const f = emptyAuthoredSiteFixture("r18-environment-live-light");
   const { world } = f, asteroidId = f.live.frame.asteroidId;
+  const body = f.repository.snapshot.catalog.bodies.find(value => value.id === "blockwild")!;
   const localPoint = { x: 20, y: 32, z: 20 };
   const orbitPoint = { x: localPoint.x + f.live.frame.offset.x, y: localPoint.y + f.live.frame.offset.y,
     z: localPoint.z + f.live.frame.offset.z };
@@ -70,13 +71,14 @@ test("scoped attachment environment binds live light, fluid and pressure sources
     const lightValue = capturedLight.gameplayLightAt(orbitPoint, 1);
     assert.notEqual(lightValue, undefined);
     const pressure = engine.pressureRuntime!;
+    const ambient = bodyEnvironment(body, "orbit");
     const pressureBefore = JSON.stringify(pressure.snapshotAttachmentSource());
-    assert.deepEqual(pressure.attachmentEnvironmentAt({ x: orbitPoint.x + 1000, y: orbitPoint.y, z: orbitPoint.z }),
+    assert.deepEqual(pressure.attachmentEnvironmentAt({ x: orbitPoint.x + 1000, y: orbitPoint.y, z: orbitPoint.z }, ambient),
       { kind: "unknown" }, "unloaded topology is not known ambient pressure");
     const skyTop = world.skyTopAt(orbitPoint.x, orbitPoint.z);
     assert.notEqual(skyTop, undefined);
     const exteriorPoint = { ...orbitPoint, y: skyTop! + 2 };
-    assert.equal(pressure.attachmentEnvironmentAt(exteriorPoint).kind, "exterior");
+    assert.equal(pressure.attachmentEnvironmentAt(exteriorPoint, ambient).kind, "exterior");
     assert.equal(JSON.stringify(pressure.snapshotAttachmentSource()), pressureBefore,
       "read-only pressure inspection must not warm the captured roof cache");
     const chunkX = Math.floor(orbitPoint.x / CHUNK_SIZE), chunkZ = Math.floor(orbitPoint.z / CHUNK_SIZE);
@@ -118,7 +120,7 @@ test("scoped attachment environment binds live light, fluid and pressure sources
     assert.equal(joined.environment.samples[0].trackedLiquid, null);
     assert.equal(typeof joined.environment.samples[0].skyTopAt, "number");
     assert.deepEqual(joined.environment.pressure.readings, [{ point: localPoint,
-      value: pressure.attachmentEnvironmentAt(orbitPoint) }]);
+      value: pressure.attachmentEnvironmentAt(orbitPoint, ambient) }]);
     assert.deepEqual(joined.environment.pressure.source, pressure.snapshotAttachmentSource());
 
     world.setBlock(orbitPoint.x, orbitPoint.y, orbitPoint.z, BlockId.Water);
@@ -136,5 +138,48 @@ test("scoped attachment environment binds live light, fluid and pressure sources
     } });
     await assert.rejects(engine.snapshotScopedAttachmentUniverseSource(asteroidId), /changed during repository observation/,
       "the real pressure authority must also invalidate the async source");
+  } finally { world.dispose(); }
+});
+
+test("production bodyContext pressure callback is not an attachment ambient authority", async () => {
+  const f = emptyAuthoredSiteFixture("r18-pressure-ambient-cache");
+  const { world } = f, engine = engineFixture(world, f);
+  const catalog = f.repository.snapshot.catalog, body = catalog.bodies.find(value => value.id === "blockwild")!;
+  const canonicalAmbient = bodyEnvironment(body, "orbit");
+  const bodyContext = (VoxelEngine.prototype as unknown as { bodyContext(this: VoxelEngine): {
+    environment: typeof canonicalAmbient } }).bodyContext;
+  const pressure = engine.pressureRuntime!;
+  pressure.host.environment = () => bodyContext.call(engine).environment;
+  try {
+    const point = { x: f.live.frame.offset.x + 20, y: 100, z: f.live.frame.offset.z + 20 };
+    generateLightCoverage(world, point);
+    const top = world.skyTopAt(point.x, point.z);
+    assert.notEqual(top, undefined);
+    const exterior = { ...point, y: top! + 2 };
+    const before = engine as unknown as { celestialContextCache?: unknown; celestialSample?: unknown };
+    const cacheBefore = before.celestialContextCache, sampleBefore = before.celestialSample;
+    assert.deepEqual(pressure.attachmentEnvironmentAt(exterior, canonicalAmbient),
+      { kind: "exterior", environment: canonicalAmbient });
+    assert.equal(before.celestialContextCache === cacheBefore, true,
+      "attachment inspection must not warm production bodyContext");
+    assert.equal(before.celestialSample, sampleBefore, "attachment inspection must not clear the sky sample");
+    const stale = bodyContext.call(engine);
+    Object.assign(stale, { environment: { ...canonicalAmbient, pressureKPa: -999 } });
+    assert.deepEqual(pressure.attachmentEnvironmentAt(exterior, canonicalAmbient),
+      { kind: "exterior", environment: canonicalAmbient }, "matching catalog identity cannot authorize stale cached ambient");
+    const local = { x: exterior.x - f.live.frame.offset.x, y: exterior.y - f.live.frame.offset.y,
+      z: exterior.z - f.live.frame.offset.z };
+    const joined = await engine.snapshotScopedAttachmentUniverseSource(f.live.frame.asteroidId, [local]);
+    assert.deepEqual(joined.environment?.pressure.readings, [{ point: local,
+      value: { kind: "exterior", environment: canonicalAmbient } }]);
+    assert.equal(before.celestialContextCache, stale, "scoped inspection must leave stale gameplay cache untouched");
+    assert.deepEqual(pressure.attachmentEnvironmentAt({ ...exterior, x: exterior.x + 1000 }, canonicalAmbient),
+      { kind: "unknown" });
+    Object.assign(engine.worldStorage!, { snapshotAttachmentSource: async () => {
+      pressure.boundary.admitted.oxygenMilliMoles++;
+      return f.repository;
+    } });
+    await assert.rejects(engine.snapshotScopedAttachmentUniverseSource(f.live.frame.asteroidId, [local]),
+      /changed during repository observation/, "production-wired pressure source changes must invalidate the async read");
   } finally { world.dispose(); }
 });

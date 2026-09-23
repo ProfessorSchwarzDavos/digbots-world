@@ -2921,3 +2921,14 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   origins and positive authored-site/normal-path coverage remain, followed by
   E3 authenticated atomic entry AND return, E4 journey, P1-P3, full CF6 and
   CFV. Entry CLOSED and CF7 gated.
+- Independent director review found that the first attachment pressure query
+  still called production `bodyContext` for ambient air. A real-callback test
+  reproduced cold-cache mutation and stale same-catalog ambient; the
+  attachment-only query now receives canonical catalog ambient explicitly,
+  while ordinary pressure simulation keeps its existing callback. Real room,
+  exterior, unknown and async pressure-change checks pass. Same-ID saved boat
+  passenger and lead endpoint mismatches now refuse after a retained red test.
+  Expanded pressure/relationship suite r18-e2-pressure-correction-focused-r1
+  passes 85/85; static-r1 and changed-file lint-r1 exit 0. The earlier E2
+  checkpoint remains provisional pending a fresh exact-source build, official
+  smoke and independent review of this correction.

@@ -27,18 +27,30 @@ export function assertNoPersistedOnlyCurrentEntityAnchors(fields: Readonly<Recor
     if (!Number.isSafeInteger(id) || !creatureIds.has(id as number))
       throw Error("Unresolved persisted-only current creature relationship.");
   }
-  const boatIds = new Set(active.boats.map(value => value.id));
+  const boatsById = new Map(active.boats.map(value => [value.id, value]));
+  const savedBoatIds = new Set<string>();
   for (const value of rows("boats")) {
     if (!Array.isArray(value) || value.length !== 2 || typeof value[0] !== "string"
       || !value[1] || typeof value[1] !== "object" || Array.isArray(value[1])
-      || (value[1] as { id?: unknown }).id !== value[0] || !boatIds.has(value[0]))
+      || (value[1] as { id?: unknown }).id !== value[0] || !boatsById.has(value[0]) || savedBoatIds.has(value[0]))
       throw Error("Unresolved persisted-only current boat relationship.");
+    savedBoatIds.add(value[0]);
+    const savedPassengers = (value[1] as { passengers?: unknown }).passengers;
+    if (!Array.isArray(savedPassengers) || canonicalJson(savedPassengers) !== canonicalJson(boatsById.get(value[0])!.passengers))
+      throw Error("Unresolved persisted current boat passenger relationship.");
   }
-  const leadIds = new Set(active.leads.map(value => value.mobId));
+  const leadsById = new Map(active.leads.map(value => [value.mobId, value]));
+  const savedLeadIds = new Set<number>();
   for (const value of rows("leads")) {
     const id = value && typeof value === "object" && !Array.isArray(value) ? (value as { mobId?: unknown }).mobId : undefined;
-    if (!Number.isSafeInteger(id) || !leadIds.has(id as number))
+    if (!Number.isSafeInteger(id) || !leadsById.has(id as number) || savedLeadIds.has(id as number))
       throw Error("Unresolved persisted-only current lead relationship.");
+    savedLeadIds.add(id as number);
+    const saved = value as { ownerId?: unknown; fence?: unknown; maximumLength?: unknown };
+    const live = leadsById.get(id as number)!;
+    if (canonicalJson({ ownerId: saved.ownerId, fence: saved.fence, maximumLength: saved.maximumLength })
+      !== canonicalJson({ ownerId: live.ownerId, fence: live.fence, maximumLength: live.maximumLength }))
+      throw Error("Unresolved persisted current lead anchor relationship.");
   }
 }
 

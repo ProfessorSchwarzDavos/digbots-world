@@ -22459,6 +22459,7 @@ export class VoxelEngine {
         return orbit;
       });
       if (!pressureOwner) throw Error("Attachment source lacks pressure authority.");
+      const ambient = this.attachmentBodyEnvironment();
       const witness = ChunkWorld.prototype.captureGameplayLight.call(worldOwner, orbitPoints);
       if (!witness) throw Error("Attachment gameplay light is not ready.");
       lightCurrent = witness.isCurrent;
@@ -22477,7 +22478,7 @@ export class VoxelEngine {
           effectiveLiquid: queries.effectiveLiquidAt(point) ?? null };
       });
       const pressureReadings = points.map((point, index) => ({ point,
-        value: pressureOwner.attachmentEnvironmentAt(orbitPoints[index]) }));
+        value: pressureOwner.attachmentEnvironmentAt(orbitPoints[index], ambient) }));
       environment = { sourceBaseline: queries.sourceBaseline, samples, light: { source: witness.source, readings },
         pressure: { source: runtime.pressureSource, readings: pressureReadings } };
     }

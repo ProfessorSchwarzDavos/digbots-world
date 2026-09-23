@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createAsteroidRegistry } from "../app/game/asteroid-custody";
 import { createAsteroidAttachmentFrame, asteroidAttachmentPhysicalBounds } from "../app/game/asteroid-attachment-frame";
-import { projectAsteroidEntityCollection, captureAsteroidEntityCollection } from "../app/game/asteroid-attachment-entity-selection";
+import { projectAsteroidEntityCollection, captureAsteroidEntityCollection,
+  assertNoPersistedOnlyCurrentEntityAnchors } from "../app/game/asteroid-attachment-entity-selection";
 import type { AsteroidAttachedEntities } from "../app/game/asteroid-attachment-entities";
 import type { AsteroidRelationshipContext } from "../app/game/asteroid-attachment-relationships";
 import { homeLocation, locationAddress, universeId } from "../app/game/location-address";
@@ -36,6 +37,19 @@ function fixture(): AsteroidAttachedEntities {
     leads: [{ mobId: 50, fence: { x: frame.offset.x + 80, y: 1, z: frame.offset.z }, maximumLength: 7 },
       { mobId: 1, maximumLength: 7 }] };
 }
+
+test("saved current boat passengers and lead endpoints cannot hide behind matching live IDs", () => {
+  const active = fixture(), boat = active.boats[1], lead = active.leads[1];
+  assert.doesNotThrow(() => assertNoPersistedOnlyCurrentEntityAnchors({
+    boats: [[boat.id, structuredClone(boat)]], leads: [structuredClone(lead)],
+  }, active));
+  assert.throws(() => assertNoPersistedOnlyCurrentEntityAnchors({
+    boats: [[boat.id, { ...boat, passengers: ["outside"] }]],
+  }, active), /persisted.*boat.*passenger/i);
+  assert.throws(() => assertNoPersistedOnlyCurrentEntityAnchors({
+    leads: [{ ...lead, ownerId: "outside" }],
+  }, active), /persisted.*lead.*anchor/i);
+});
 
 test("complete entity projection selects exact whole records and resolves undefined keeper through explicit local actor", () => {
   const input = fixture(), ctx = context(), before = structuredClone({ input, ctx });

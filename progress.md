@@ -2929,6 +2929,10 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   exterior, unknown and async pressure-change checks pass. Same-ID saved boat
   passenger and lead endpoint mismatches now refuse after a retained red test.
   Expanded pressure/relationship suite r18-e2-pressure-correction-focused-r1
-  passes 85/85; static-r1 and changed-file lint-r1 exit 0. The earlier E2
-  checkpoint remains provisional pending a fresh exact-source build, official
-  smoke and independent review of this correction.
+  passes 85/85; exact-commit repeat also passes 85/85, static-r1 and
+  changed-file lint-r1 exit 0. Local correction commit 20611c1 passed
+  exact-source production build r18-e2-pressure-build-r54 and official
+  synthetic station smoke r18-e2-pressure-official-r54. I inspected the
+  gameplay screenshot; health 10 and sealed breathing are present. Preview
+  stopped and generated tsconfig edit was restored. The correction remains
+  provisional pending independent director review; this is not full E2.

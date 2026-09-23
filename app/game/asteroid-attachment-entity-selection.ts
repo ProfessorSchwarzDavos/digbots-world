@@ -8,6 +8,40 @@ import { asteroidAttachedDropIndices, captureAsteroidDrops, projectAsteroidDrops
 import { canonicalJson } from "./universe-json";
 import { mergeSelectedAttachmentRecords } from "./attachment-array-merge";
 
+/** Global custody deliberately substitutes the active location's live arrays.
+ * Before using that projection, inspect these raw persisted relationship
+ * anchors as well: an extra saved body, boat or lead cannot disappear merely
+ * because its in-memory counterpart was absent at this revision. This is a
+ * refusal check, not reconciliation or authority to copy persisted records. */
+export function assertNoPersistedOnlyCurrentEntityAnchors(fields: Readonly<Record<string, unknown>>,
+  active: AsteroidAttachedEntities): void {
+  const rows = (name: string): readonly unknown[] => {
+    const value = fields[name];
+    if (value === undefined) return [];
+    if (!Array.isArray(value)) throw Error(`Invalid persisted current ${name} source.`);
+    return value;
+  };
+  const creatureIds = new Set([...active.creatures, ...active.sleepingCreatures].map(value => value.id));
+  for (const value of [...rows("creatures"), ...rows("sleepingCreatures")]) {
+    const id = value && typeof value === "object" && !Array.isArray(value) ? (value as { id?: unknown }).id : undefined;
+    if (!Number.isSafeInteger(id) || !creatureIds.has(id as number))
+      throw Error("Unresolved persisted-only current creature relationship.");
+  }
+  const boatIds = new Set(active.boats.map(value => value.id));
+  for (const value of rows("boats")) {
+    if (!Array.isArray(value) || value.length !== 2 || typeof value[0] !== "string"
+      || !value[1] || typeof value[1] !== "object" || Array.isArray(value[1])
+      || (value[1] as { id?: unknown }).id !== value[0] || !boatIds.has(value[0]))
+      throw Error("Unresolved persisted-only current boat relationship.");
+  }
+  const leadIds = new Set(active.leads.map(value => value.mobId));
+  for (const value of rows("leads")) {
+    const id = value && typeof value === "object" && !Array.isArray(value) ? (value as { mobId?: unknown }).mobId : undefined;
+    if (!Number.isSafeInteger(id) || !leadIds.has(id as number))
+      throw Error("Unresolved persisted-only current lead relationship.");
+  }
+}
+
 export type AsteroidEntityProjection = Readonly<{
   entities: AsteroidAttachedEntities;
   actorIds: readonly string[];

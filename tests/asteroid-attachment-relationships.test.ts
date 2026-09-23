@@ -67,6 +67,12 @@ test("configured follower links cannot cross either direction and missing owners
   assert.deepEqual(select({ ...fixture(), creatures: [{ ...creature(), petState: { ...createPeelopState(4), tamed: true,
     ownerId: "host", command: "follow" } }] }).creatureIds, [1]);
 });
+test("generic tamed follow command binds its owner but hold remains local", () => {
+  rejectsUnchanged({ ...fixture(), creatures: [{ ...creature(), creatureTamed: true,
+    creatureOwnerId: "outside", followCommand: "follow" }] }, context(), /follower/);
+  assert.deepEqual(select({ ...fixture(), creatures: [{ ...creature(), creatureTamed: true,
+    creatureOwnerId: "outside", followCommand: "hold" }] }).creatureIds, [1]);
+});
 test("host-derived special followers require one resolved same-side actor", () => {
   rejectsUnchanged(fixture(), { ...context(), actors: [{ ...actor(), followingCreatureIds: [2] }, actor("outside", 80)] }, /Active follower/);
   rejectsUnchanged(fixture(), { ...context(), actors: [{ ...actor(), followingCreatureIds: [99] }] }, /Unresolved/);

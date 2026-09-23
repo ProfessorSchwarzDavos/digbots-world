@@ -108,15 +108,15 @@ export class PressureRuntime {
     const seal = stationSealMask(type);
     return seal === undefined ? BLOCKS[type]?.solid ?? false : seal === 63;
   }
-  private flagsAt(point: AirPoint): number | undefined {
+  private flagsAt(point: AirPoint, cacheRoof = true): number | undefined {
     const type = this.host.blockAt(point); if (type === undefined) return undefined;
     if (this.solid(point)) return 0;
-    const column = `${point.x},${point.z}`; let top = this.roof.get(column);
+    const column = `${point.x},${point.z}`; let top = cacheRoof ? this.roof.get(column) : undefined;
     if (top === undefined) {
       const opaque = this.host.skyTopAt(point.x, point.z); if (opaque === undefined) return undefined;
       top = opaque;
       for (let y = this.host.maxY; y > opaque; y--) if (this.solid({ x: point.x, y, z: point.z })) { top = y; break; }
-      this.roof.set(column, top);
+      if (cacheRoof) this.roof.set(column, top);
     }
     return 1 | ((stationSealMask(type) ?? 0) << 1) | (point.y > top ? 128 : 0);
   }
@@ -540,6 +540,17 @@ export class PressureRuntime {
       inertFraction: total ? zone.inertMilliMoles / total : 0, co2Fraction: total ? zone.co2MilliMoles / total : 0,
       breathable: diagnostics.breathable, requiresPressureSuit: zone.status !== "sealed" || zone.pressureMilliKPa < 35000 || zone.pressureMilliKPa > 160000,
       temperatureC: [zone.temperatureMilliC / 1000, zone.temperatureMilliC / 1000], corrosive: false };
+  }
+  /** Source-inspection query over the actual pressure owner. Unlike ordinary
+   * exteriorAt(), this does not warm the roof cache or mutate the comparison
+   * preimage. An absent zone below a known roof is unknown, not ambient air. */
+  attachmentEnvironmentAt(point: AirPoint): Readonly<{ kind: "room" | "exterior"; environment: BodyEnvironment } | { kind: "unknown" }> {
+    const zone = this.zoneAt(point);
+    if (zone) return ["sealed", "depressurized", "leaking"].includes(zone.status)
+      ? { kind: "room", environment: this.environmentAt(point) } : { kind: "unknown" };
+    const flags = this.flagsAt(point, false);
+    return flags !== undefined && (flags & 129) === 129
+      ? { kind: "exterior", environment: this.host.environment() } : { kind: "unknown" };
   }
   diagnosticsFor(key: string) {
     const point = this.roomPoint(key), zone = this.zoneAt(point), device = this.devices.get(key), topology = (zone ? this.topology.topologies.get(zone.zoneId) : undefined) ?? this.topology.diagnostics.get(airCellKey(point));

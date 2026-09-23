@@ -79,6 +79,13 @@ export function assertAsteroidLeadSegmentOutside(frame: AsteroidAttachmentFrame,
 function configuredFollowerOwners(creature: SavedCreature): string[] {
   const owners: (string | null | undefined)[] = [];
   if (creature.dragonState?.tamed && creature.dragonState.command === "follow") owners.push(creature.dragonState.ownerId);
+  if (creature.followCommand !== "hold") {
+    // Aquatic/airborne bonded followers and generic tamed AI do not pass
+    // through the ground-formation branch below. They still cannot cross a
+    // whole-entity attachment boundary away from their configured keeper.
+    if (creature.leviathanGrowth?.tamed) owners.push(creature.leviathanGrowth.ownerId);
+    if (creature.creatureTamed) owners.push(creature.creatureOwnerId);
+  }
   const movement = MOB_DEFS[creature.kind].movement;
   if (movement !== "flying" && movement !== "aquatic") {
     if (creature.petState?.tamed && creature.petState.command === "follow") owners.push(creature.petState.ownerId);

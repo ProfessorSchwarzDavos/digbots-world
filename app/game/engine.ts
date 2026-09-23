@@ -562,9 +562,13 @@ import { PLAYER_HEIGHT, PLAYER_RADIUS, playerBodyHeight } from "./player-body";
 import { snapshotHostAttachmentActorBodies } from "./attachment-actor-bodies";
 import type { AsteroidApiarySources } from "./asteroid-attachment-apiaries";
 import { createAsteroidAttachmentWorld, type AsteroidAttachmentWorldSource } from "./asteroid-attachment-world";
+import { createAsteroidEnvironmentQueries } from "./asteroid-environment-queries";
 import { HEALER_ACTIVE_FUEL } from "./custody-block-body";
 import { createAsteroidAttachmentFrame } from "./asteroid-attachment-frame";
 import { selectAsteroidCreatureCustody, selectUniverseAsteroidCreatureCustody, type AsteroidCustodyPhysicalContext } from "./asteroid-attachment-custody";
+import { assertNoPersistedOnlyCurrentEntityAnchors, projectAsteroidEntityCollection } from "./asteroid-attachment-entity-selection";
+import type { AsteroidAttachedEntities } from "./asteroid-attachment-entities";
+import type { AsteroidRelationshipContext } from "./asteroid-attachment-relationships";
 import type { WorldCreatureCustodySource } from "./creature-custody-sources";
 import { collectWorldCreatureCustodyHolders } from "./creature-custody-holders";
 import { assertCreatureOriginsAgree, newCreatureOrigins, readCreatureMetadataOrigins, readCreatureOrigins, type CreatureOrigins } from "./creature-origins";
@@ -831,7 +835,7 @@ import { createSpaceflightModel, updateSpaceflightModel } from "./spaceflight-mo
 import { stationSceneStructureKind, stationStructureKind } from "./station-kit";
 import { measureStation } from "./station-telemetry";
 import { projectCelestialChart, type CelestialChartProjection } from "./celestial-chart";
-import { celestialTerrainSeed, createCelestialTerrain, normalizeCelestialGenerationState, morrowRegionAt } from "./celestial-terrain";
+import { celestialTerrainSeed, createCelestialTerrain, normalizeCelestialGenerationState, morrowRegionAt, type CelestialPoint } from "./celestial-terrain";
 import type { VehicleLocationCommit } from "./universe-storage";
 import {
   TYPESCRIPT_AGENT_ID_KEY,
@@ -22401,18 +22405,86 @@ export class VoxelEngine {
    * exhaustive field/effect/liquid/pressure guards but does not filter owners. */
   snapshotAttachmentSourceObservation(asteroidId: string) {
     const physical = this.snapshotAttachmentPhysicalObservation(asteroidId);
-    return freezeUniverseJson({ physical, physicalSource: encodeAttachmentSource(physical), ...this.snapshotAttachmentSourceForPhysical(physical) });
+    return freezeUniverseJson({ physical, physicalSource: encodeAttachmentSource(physical),
+      relationshipLeads: this.snapshotAttachmentRelationshipLeads(),
+      relationshipFollowers: this.snapshotAttachmentActiveFollowers(physical.context.actors),
+      ...this.snapshotAttachmentSourceForPhysical(physical) });
+  }
+
+  /** A strict, non-normalizing view of every live lead. Ordinary save encoding
+   * may intentionally drop stale IDs or round fence cells; a proposed whole
+   * attachment must refuse those instead of silently losing a relationship. */
+  private snapshotAttachmentRelationshipLeads(): readonly SavedLeadAnchor[] {
+    const liveIds = new Set(this.mobs.map(mob => mob.id));
+    return [...this.leadAnchors].map(([mobId, lead]) => {
+      if (!liveIds.has(mobId) || !Number.isSafeInteger(mobId) || mobId < 0 || lead.mobId !== String(mobId)
+        || !Number.isFinite(lead.maximumLength) || lead.maximumLength <= 0
+        || Object.keys(lead).some(key => !["mobId", "ownerId", "fence", "maximumLength"].includes(key))
+        || lead.ownerId !== undefined && lead.ownerId !== null && (typeof lead.ownerId !== "string" || !lead.ownerId.trim()))
+        throw Error("Unresolved attachment lead source.");
+      if (lead.fence && ![lead.fence.x, lead.fence.y, lead.fence.z].every(Number.isSafeInteger))
+        throw Error("Unresolved attachment lead fence.");
+      return { mobId, maximumLength: lead.maximumLength,
+        ...(lead.ownerId !== undefined ? { ownerId: lead.ownerId } : {}),
+        ...(lead.fence ? { fence: { ...lead.fence } } : {}) };
+    });
   }
 
   /** Full raw source, verified repository, global encounter association, then
    * whole physical selection. No local-only reconciliation precedes the global
    * join. Read-only: complete site/authority/atomic transfer gates still apply. */
-  async snapshotScopedAttachmentUniverseSource(asteroidId: string) {
-    const storage = this.worldStorage;
+  async snapshotScopedAttachmentUniverseSource(asteroidId: string, lightPoints: readonly CelestialPoint[] = []) {
+    const storage = this.worldStorage, worldOwner = this.world, pressureOwner = this.pressureRuntime;
     if (!storage) throw Error("Scoped attachment source lacks universe storage.");
     const runtime = this.snapshotAttachmentSourceObservation(asteroidId);
+    // A caller that needs gameplay light must declare its exact read set. The
+    // concrete World witness retains chunk *identities* as well as values; a
+    // serialized chunk key cannot detect a same-key replacement during await.
+    // No points means no light claim, not an all-world or darkness claim.
+    let environment: Readonly<{ sourceBaseline: string; samples: readonly Readonly<{
+      point: CelestialPoint; block: BlockId; skyTopAt: number;
+      trackedLiquid: LiquidCell | null; effectiveLiquid: LiquidCell | null }>[];
+      light: Readonly<{ source: unknown;
+      readings: readonly Readonly<{ point: CelestialPoint; value: number }>[] }>;
+      pressure: Readonly<{ source: unknown; readings: readonly Readonly<{ point: CelestialPoint;
+        value: ReturnType<PressureRuntime["attachmentEnvironmentAt"]> }>[] }> }> | undefined;
+    let lightCurrent: (() => boolean) | undefined;
+    if (lightPoints.length) {
+      const frame = runtime.physical.frame;
+      const points = lightPoints.map(point => ({ x: point.x, y: point.y, z: point.z }));
+      const orbitPoints = points.map(point => {
+        const orbit = { x: point.x + frame.offset.x, y: point.y + frame.offset.y, z: point.z + frame.offset.z };
+        if (![point.x, point.y, point.z, orbit.x, orbit.y, orbit.z].every(Number.isSafeInteger))
+          throw Error("Invalid attachment gameplay light coordinate.");
+        return orbit;
+      });
+      if (!pressureOwner) throw Error("Attachment source lacks pressure authority.");
+      const witness = ChunkWorld.prototype.captureGameplayLight.call(worldOwner, orbitPoints);
+      if (!witness) throw Error("Attachment gameplay light is not ready.");
+      lightCurrent = witness.isCurrent;
+      const queries = createAsteroidEnvironmentQueries(frame,
+        createAsteroidAttachmentWorld(runtime.physical.context.world), [...this.liquidCells], witness);
+      const readings = points.map(point => {
+        const value = queries.gameplayLightAt(point, 1);
+        if (value === undefined) throw Error("Attachment gameplay light is not ready.");
+        return { point, value };
+      });
+      const samples = points.map(point => {
+        const block = queries.blockAt(point);
+        if (block === undefined) throw Error("Attachment environment block is unknown.");
+        return { point, block, skyTopAt: queries.skyTopAt(point.x, point.z),
+          trackedLiquid: queries.trackedLiquidAt(point) ?? null,
+          effectiveLiquid: queries.effectiveLiquidAt(point) ?? null };
+      });
+      const pressureReadings = points.map((point, index) => ({ point,
+        value: pressureOwner.attachmentEnvironmentAt(orbitPoints[index]) }));
+      environment = { sourceBaseline: queries.sourceBaseline, samples, light: { source: witness.source, readings },
+        pressure: { source: runtime.pressureSource, readings: pressureReadings } };
+    }
     const repository = await storage.snapshotAttachmentSource();
-    if (this.worldStorage !== storage || JSON.stringify(runtime) !== JSON.stringify(this.snapshotAttachmentSourceObservation(asteroidId)))
+    if (this.worldStorage !== storage || this.world !== worldOwner || this.pressureRuntime !== pressureOwner
+      || (lightCurrent && !lightCurrent())
+      || JSON.stringify(runtime) !== JSON.stringify(this.snapshotAttachmentSourceObservation(asteroidId)))
       throw Error("Scoped attachment source changed during repository observation.");
     const observed = runtime.physical;
     const physical = selectUniverseAsteroidCreatureCustody(observed.frame, repository.snapshot, {
@@ -22420,6 +22492,18 @@ export class VoxelEngine {
       playerId: observed.manifest.currentPlayerId, locationId: observed.stamp.locationId, actorId: observed.hostPlayerId,
       actors: observed.context.actors, source: observed.source, encounterSources: observed.encounterSources,
     }, observed.context);
+    const entities: AsteroidAttachedEntities = { creatures: observed.source.creatures ?? [],
+      sleepingCreatures: observed.source.sleepingCreatures ?? [], boats: observed.source.boats ?? [],
+      drops: observed.source.drops ?? [], leads: runtime.relationshipLeads };
+    const persistedCurrent = repository.snapshot.locations.find(location => location.descriptor.id === observed.stamp.locationId);
+    if (!persistedCurrent) throw Error("Attachment source lacks its persisted current location.");
+    assertNoPersistedOnlyCurrentEntityAnchors(persistedCurrent.fields, entities);
+    const relationships: AsteroidRelationshipContext = { localActorId: observed.hostPlayerId,
+      actors: observed.context.actors.map(actor => ({ id: actor.id, position: actor.position, bounds: actor.bounds,
+        mountedCreatureId: actor.mountedCreatureId,
+        followingCreatureIds: runtime.relationshipFollowers.find(([id]) => id === actor.id)?.[1] ?? [] })),
+      dependencies: physical.current.apiaryDependencies };
+    const entityProjection = projectAsteroidEntityCollection(observed.frame, entities, relationships);
     const waygrid = selectUniverseWaygridOwnership(observed.frame, repository.snapshot, {
       ...runtime.waygridSource, repositoryRevision: observed.manifest.revision, locationRevision: observed.stamp.revision,
       world: observed.context.world, vault: observed.source.digitalItemVault!, archive: observed.source.digitalCreatureArchive!,
@@ -22428,7 +22512,8 @@ export class VoxelEngine {
       locationId: observed.stamp.locationId, repositoryRevision: observed.manifest.revision,
       locationRevision: observed.stamp.revision, source: runtime.authoredSiteSource,
     });
-    return freezeUniverseJson({ runtime, repository: structuredClone(repository), physical, waygrid, authoredSites });
+    return freezeUniverseJson({ runtime, repository: structuredClone(repository), physical, entityProjection, waygrid, authoredSites,
+      ...(environment ? { environment } : {}) });
   }
 
   assertAttachmentSourceUnchanged(source: ReturnType<VoxelEngine["snapshotAttachmentSource"]>) {
@@ -22523,6 +22608,40 @@ export class VoxelEngine {
       activeWorkAgents: [...new Set([...this.agentRuntimeTasks.keys(), ...this.agentBuildJobs.keys(),
         ...[...this.agentBuildPreviews.values()].map(preview => preview.agentId)])],
     });
+  }
+
+  private formationFollowerOwner(mob: MobEntity) {
+    return mob.petState?.ownerId ?? mob.shadeState?.ownerId ?? mob.reedstriderBond?.ownerId
+      ?? mob.courserBond?.ownerId ?? mob.hiredByPlayerId ?? null;
+  }
+
+  /** Exactly the ground-formation predicate used by the live simulation. The
+   * attachment snapshot below retains active links from this host rule, not
+   * caller-supplied or inferred historical owner IDs. */
+  private activeFormationFollowerOwner(mob: MobEntity, leaderIds: ReadonlySet<string>): string | null {
+    if (mob.id === this.mountedCreatureId || this.leadAnchors.has(mob.id)
+      || mob.definition.movement === "flying" || mob.definition.movement === "aquatic") return null;
+    const owner = this.formationFollowerOwner(mob);
+    if (!owner || !leaderIds.has(owner)) return null;
+    return (mob.petState?.tamed && mob.petState.command === "follow")
+      || (mob.shadeState?.tamed && mob.followCommand !== "hold")
+      || (mob.reedstriderBond?.tamed && mob.followCommand !== "hold")
+      || (mob.courserBond?.tamed && mob.followCommand !== "hold")
+      || (mob.hiredByPlayerId === owner && mob.followCommand !== "hold" && (!mob.settlementId || !mob.residentId
+        || Boolean(this.guildNpcForMob(mob))
+        || Boolean(this.settlements.get(mob.settlementId)?.residents.find(resident => resident.id === mob.residentId)?.orders.follow)))
+      ? owner : null;
+  }
+
+  private snapshotAttachmentActiveFollowers(actors: readonly { id: string }[]) {
+    const ids = new Set(actors.map(actor => actor.id));
+    const links = new Map([...ids].map(id => [id, [] as number[]]));
+    for (const mob of this.mobs) {
+      const owner = this.activeFormationFollowerOwner(mob, ids);
+      if (owner) links.get(owner)!.push(mob.id);
+    }
+    return [...links].sort(([left], [right]) => left.localeCompare(right))
+      .map(([id, creatureIds]) => [id, creatureIds.sort((left, right) => left - right)] as const);
   }
 
   /** Exact host navigation preimage, without serialize()'s page capture. A
@@ -31471,26 +31590,11 @@ export class VoxelEngine {
         : remote.target.yaw + Math.PI / 2,
     });
     const simulationInterests = this.simulationInterestPoints();
-    const followerOwner = (mob: MobEntity) => mob.petState?.ownerId ?? mob.shadeState?.ownerId
-      ?? mob.reedstriderBond?.ownerId ?? mob.courserBond?.ownerId ?? mob.hiredByPlayerId ?? null;
-    const followers = this.mobs.filter((mob) => {
-      if (mob.id === this.mountedCreatureId || this.leadAnchors.has(mob.id)
-        || mob.definition.movement === "flying" || mob.definition.movement === "aquatic") return false;
-      const bondedOwner = followerOwner(mob);
-      if (!bondedOwner || !leaders.has(bondedOwner)) return false;
-      return Boolean(
-        (mob.petState?.tamed && mob.petState.command === "follow")
-        || (mob.shadeState?.tamed && mob.followCommand !== "hold")
-        || (mob.reedstriderBond?.tamed && mob.followCommand !== "hold")
-        || (mob.courserBond?.tamed && mob.followCommand !== "hold")
-        || (mob.hiredByPlayerId === bondedOwner && mob.followCommand !== "hold" && (!mob.settlementId || !mob.residentId
-          || Boolean(this.guildNpcForMob(mob))
-          || Boolean(this.settlements.get(mob.settlementId)?.residents.find((resident) => resident.id === mob.residentId)?.orders.follow))),
-      );
-    });
+    const leaderIds = new Set(leaders.keys());
+    const followers = this.mobs.filter(mob => this.activeFormationFollowerOwner(mob, leaderIds) !== null);
     const plannedFollowerSlots: FollowerFormationTarget[] = [];
     for (const [playerId, leader] of leaders) {
-      const owned = followers.filter((mob) => followerOwner(mob) === playerId);
+      const owned = followers.filter(mob => this.formationFollowerOwner(mob) === playerId);
       const slots = planFollowerFormation(
         { x: leader.x, z: leader.z, heading: leader.heading },
         owned.map((mob) => ({
@@ -31517,7 +31621,7 @@ export class VoxelEngine {
         if (mob.dragonState) mob.hostile = false;
         else { this.removeMob(index); continue; }
       }
-      const mobLeader = leaders.get(followerOwner(mob) ?? "") ?? null;
+      const mobLeader = leaders.get(this.formationFollowerOwner(mob) ?? "") ?? null;
       const escortNpc = this.guildNpcForMob(mob);
       if (escortNpc && mobLeader && mob.hiredByPlayerId && mob.followCommand !== "hold") {
         const originX = Number.isFinite(mob.group.userData.guildEscortOriginX) ? Number(mob.group.userData.guildEscortOriginX) : mob.group.position.x;

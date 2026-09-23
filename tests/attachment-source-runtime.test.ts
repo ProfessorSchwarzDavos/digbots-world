@@ -18,6 +18,7 @@ import { captureIntoOrb, captureOrbInventorySlot, createEmptyCaptureOrb } from "
 import { createPrimeEncounterState, planPrimeEncounter, transferPrimeEncounterCustody } from "../app/game/creature-rarity";
 import { prepareWaygridCapacity } from "../app/game/waygrid-capacity";
 import { emptyAuthoredSiteFixture } from "./empty-authored-site-fixtures";
+import { MOB_DEFS } from "../app/game/mobs";
 
 const additionalMaps = ["saplings", "veinRegrowth", "roadEvents", "golemForges", "alchemyStands", "distilleries", "sugarworks",
   "archiveShelves", "tomeDisplays", "settlements", "merchants", "liquidCells", "ecologySectors", "multiplayerPlayerProgressions",
@@ -58,6 +59,21 @@ function fixture() {
   }) as VoxelEngine;
   return { engine, asteroid, pressure, edits };
 }
+
+test("attachment follower snapshot uses the live formation predicate", () => {
+  const { engine } = fixture(), actorId = engine.localPlayerId();
+  const mob = { id: 7, definition: MOB_DEFS.peelop,
+    petState: { tamed: true, ownerId: actorId, command: "follow" } };
+  engine.mobs = [mob as never];
+  const snapshot = () => (engine as unknown as { snapshotAttachmentActiveFollowers(actors: readonly { id: string }[]):
+    readonly (readonly [string, readonly number[]])[] }).snapshotAttachmentActiveFollowers([{ id: actorId }]);
+  assert.deepEqual(snapshot(), [[actorId, [7]]]);
+  mob.petState.command = "stay";
+  assert.deepEqual(snapshot(), [[actorId, []]]);
+  mob.petState.command = "follow";
+  engine.leadAnchors.set(7, { mobId: "7", maximumLength: 7 });
+  assert.deepEqual(snapshot(), [[actorId, []]]);
+});
 
 test("actual engine empty-site join uses branded World and refuses same-revision changes across repository await", async () => {
   for (const fault of ["none", "seed", "queued-generation", "live-merchant", "persisted-merchant", "facade"] as const) {
@@ -140,6 +156,22 @@ test("actual full scoped source observes remote history before physical selectio
   assert(Object.isFrozen(result.runtime)); assert.equal(engine.primeEncounters.size, 0);
   assert.equal(result.waygrid.bindings.length, 0); assert.equal(result.waygrid.ownership.starters.length, 2);
   assert.equal(result.authoredSites.locations.length, 2); assert.deepEqual(result.authoredSites.unresolvedLocations, []);
+  const localActorId = engine.snapshotAttachmentActorBodies()[0].id, boatId = "outside-passenger-boat";
+  engine.mountedBoatId = boatId;
+  engine.boats.set(boatId, { save: { id: boatId, x: asteroid.center.x + 100, y: asteroid.center.y, z: asteroid.center.z,
+    yaw: 0, velocity: 0, passengers: [localActorId], inventory: Array.from({ length: 18 }, () => null), ownerId: localActorId },
+    group: new THREE.Group() });
+  await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /Boat passenger.*boundary/);
+  engine.mountedBoatId = null; engine.boats.clear();
+  Object.assign(repository.snapshot.locations[0].fields, { boats: [[boatId, {
+    id: boatId, x: asteroid.center.x + 100, y: asteroid.center.y, z: asteroid.center.z,
+    yaw: 0, velocity: 0, passengers: [localActorId], inventory: Array.from({ length: 18 }, () => null), ownerId: localActorId,
+  }]] });
+  await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /persisted-only.*boat|unresolved.*boat/i);
+  delete (repository.snapshot.locations[0].fields as Record<string, unknown>).boats;
+  Object.assign(repository.snapshot.locations[0].fields, { leads: [{ mobId: 999, maximumLength: 7 }] });
+  await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /persisted-only.*lead/i);
+  delete (repository.snapshot.locations[0].fields as Record<string, unknown>).leads;
   for (const fault of ["inventory", "pressure", "environment", "catalog", "catalogUndefined", "architecture", "effects", "facade", "waygrid", "settlement", "merchant"] as const) {
     const priorInventory = engine.inventory, priorHealth = engine.health, priorCatalog = storage.currentCatalog;
     const oldInstallation = pressure.nextInstallation;

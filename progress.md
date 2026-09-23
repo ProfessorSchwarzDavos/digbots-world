@@ -2887,6 +2887,32 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   pipe/cable arms, and hide only when the face is explicitly disconnected.
 - Focused connected-geometry-r18 suite passes 14/14, including actual
   `VoxelEngine.renderWayworks` changes across edits and chunk boundaries.
-  TypeScript static-r174 and scoped lint-r141 pass. Fresh production build and
-  manual on-screen inspection are still required before calling the visual
-  change complete.
+  TypeScript static-r174 and scoped lint-r141 pass. Production build52 and
+  official Windows/pipe gameplay inspections passed with personally reviewed
+  screenshots; Wildkeeper accepted this bounded prerequisite at ff6475f in
+  CF6_R18_LIGHT_VISUAL_ACCEPTANCE.md. This is not full E2 or CF6 acceptance.
+
+## CF6 E2 scoped runtime integration - 2026-09-23
+
+- The scoped read-only source now joins live whole-entity relationships after
+  global custody. An in-frame actor seated in an out-of-frame boat first
+  reproduced as an actual-method red failure, then rejects. Strict raw leads
+  cannot be normalized away; persisted-only current-location creature, boat,
+  and lead anchors refuse. Generic and leviathan follow ownership now binds
+  cross-boundary refusal; the host snapshots ground-formation active follower
+  links with the same predicate used by normal simulation.
+- Declared local-frame environment points use the complete canonical orbit
+  block/sky reader and copied flowing-liquid metadata, plus the real World
+  light witness and live pressure owner. Same-key chunk replacement with equal
+  brightness/source bytes first reproduced red, then rejects across repository
+  await. Unknown/unready light refuses; pressure room/exterior/unknown reads do
+  not warm its source cache. Actual liquid and pressure mutations during await
+  reject. Calling without points explicitly makes no light coverage claim.
+- Final focused E2 run r18-e2-focused-r2 passes 50/50; TypeScript
+  r18-e2-static-r6 and changed-file lint-r3 exit 0. Relevant mount, guild and
+  companion gameplay tests pass 21/21. Production/official checks for this
+  latest delta remain.
+- This is a partial read-only E2 checkpoint, not admission. Complete dependency
+  origins and positive authored-site/normal-path coverage remain, followed by
+  E3 authenticated atomic entry AND return, E4 journey, P1-P3, full CF6 and
+  CFV. Entry CLOSED and CF7 gated.

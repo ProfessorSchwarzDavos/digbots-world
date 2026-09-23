@@ -38,6 +38,17 @@ test("ceiling sheets and isolated skylights lie flat; both wall axes remain upri
   }
 });
 
+test("a small ceiling sheet stays flat above a wall pane, but an open wall bend stays upright", () => {
+  const f = fixture();
+  for (const x of [0, 1]) for (const z of [0, 1]) f.blocks.set(key(x, 0, z), W);
+  f.blocks.set(key(0, -1, 0), W);
+  for (const x of [0, 1]) for (const z of [0, 1]) {
+    assert.equal(windowLayout(x, 0, z, 0, f.read).flat, true, `ceiling corner ${x},${z}`);
+  }
+  f.blocks.delete(key(1, 0, 1));
+  assert.equal(f.layout().flat, false, "the diagonal is required to distinguish a wall L from a ceiling sheet");
+});
+
 test("wall corners/tees join half panes deterministically and isolated facing is stable", () => {
   const f = fixture(); f.blocks.set("0,1,0", H); f.blocks.set("0,-1,0", H);
   f.blocks.set("-1,0,0", W); f.blocks.set("0,0,-1", W);
@@ -87,6 +98,21 @@ test("off-center machine adapters meet exact authored sockets and disappear on d
   updatePressureModel(model, { connected: { left: false } }); assert.equal(arm.visible, false);
   updatePressureModel(model, { connected: { left: true }, connectionTargets: {} }); assert.equal(arm.visible, false);
   updatePressureModel(model, { connected: { left: true }, connectionTargets: { left: [99, 0, 0] } }); assert.equal(arm.visible, false);
+});
+
+test("off-center pipe adapters retain a joined face across unrelated partial updates", () => {
+  const model = createPressureModel("liquid-pipe");
+  updatePressureModel(model, { connected: { left: true }, connectionTargets: { left: [-.552, .18, .025] } });
+  const left = model.getObjectByName("socket-adapter-left")!;
+  assert.equal(left.visible, true);
+  updatePressureModel(model, { connected: { right: true } });
+  assert.equal(model.getObjectByName("connected-left")!.visible, true);
+  assert.equal(left.visible, true, "the left adapter retains the arm's connection state");
+  updatePressureModel(model, { connected: { left: undefined } });
+  assert.equal(left.visible, true, "undefined omits a face rather than disconnecting it");
+  updatePressureModel(model, { connected: { left: false } });
+  assert.equal(left.visible, false);
+  assert.equal(model.getObjectByName("connected-left")!.visible, false);
 });
 
 for (const kind of ["liquid-pipe", "gasline", "heat-conduit", "grid-cable"] as const) {

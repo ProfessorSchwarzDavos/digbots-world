@@ -2856,3 +2856,37 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   SaveQuit136/title137/storage138/close139; owned preview/browser drained and
   ports4338/4339 absent. No rebuild needed; previous official-r10 remains exact.
   See CF6/MORROW-ECOLOGY-CHECKPOINT.md. Full CF6/CFV incomplete and CF7 gated.
+
+## CF6 revision18 lighting checkpoint - 2026-09-23
+
+- E1 empty-authored-site prerequisite remains separately accepted at 723342f;
+  entry is CLOSED. Revision18 resumed E2 after the recorded pause, without
+  expanding release, provider, or real-save authority.
+- Reproduced two actual-world failures: deferred multichunk torch removal left
+  ghost RGB across the halo, and an observer's reentrant Torch-to-Air edit left
+  emission in Air. The original 0/2 red receipt is retained. The repair clears
+  affected loaded light fields before rebuild and notifies edit observers only
+  after outer block, light, ledger, and mesh state settle. Added batch reentrancy
+  coverage. Same-coordinate chunk reload and readiness/source witness checks are
+  covered by the lifecycle suite. Local commit: 5244e8b.
+- Focused cross-boundary/batch regressions pass 3/3, broader world-light and
+  environment checks pass 141/141, TypeScript static-r173 and scoped lint-r140
+  exit 0. Read-only review found no concrete blocker in this light repair.
+  Production build and official visual pass remain open for this checkpoint.
+- E2 is not accepted in full: actual environment/fluid/pressure binding across
+  repository awaits and relationship closure remain open; E3 atomic entry AND
+  return, E4 normal journey, positive sites P1-P3, full CF6 and later gates
+  remain mandatory. Window/pipe connected visuals are a separate ongoing user
+  addition, not a substitute for those gates.
+
+## Connected window and pipe presentation - 2026-09-23
+
+- A completed 2x2 ceiling sheet now renders flat at its corners even when a
+  vertical wall window touches below; an open wall L remains upright. Off-center
+  pipe adapters retain connected faces through partial updates, matching the
+  pipe/cable arms, and hide only when the face is explicitly disconnected.
+- Focused connected-geometry-r18 suite passes 14/14, including actual
+  `VoxelEngine.renderWayworks` changes across edits and chunk boundaries.
+  TypeScript static-r174 and scoped lint-r141 pass. Fresh production build and
+  manual on-screen inspection are still required before calling the visual
+  change complete.

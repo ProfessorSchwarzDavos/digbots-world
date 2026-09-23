@@ -61,9 +61,16 @@ export function windowLayout(x: number, y: number, z: number, facing: number, bl
     const sz = support(blockAt(a, b, c - 1)) + support(blockAt(a, b, c + 1));
     const sy = support(blockAt(a, b - 1, c)) + support(blockAt(a, b + 1, c));
     const crossSupport = Math.min(sx, sz);
+    // A completed glass square is a sheet even at its outer corner, where
+    // cardinal support alone loses to the wall pane immediately below it.
+    // An open L has no diagonal pane, so floor-supported wall bends stay upright.
+    const sheetCorner = sy <= 2 && [-1, 1].some(dx => [-1, 1].some(dz =>
+      blockAt(a + dx, b, c) === BlockId.ReinforcedWindow
+      && blockAt(a, b, c + dz) === BlockId.ReinforcedWindow
+      && blockAt(a + dx, b, c + dz) === BlockId.ReinforcedWindow));
     // A one-block-high L on a floor is a wall corner, not a skylight. A roof
     // with stronger support along both horizontal axes may still cap a wall.
-    return sx + sz >= 3 && crossSupport > sy && (sy === 0 || crossSupport >= 3);
+    return sheetCorner || sx + sz >= 3 && crossSupport > sy && (sy === 0 || crossSupport >= 3);
   };
   const armsAt = (a: number, b: number, c: number) => {
     const arms = { front: false, back: false, left: false, right: false };

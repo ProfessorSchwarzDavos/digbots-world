@@ -9,7 +9,7 @@ export type TransportConnectorState = Readonly<{
   connectionTargets?: TransportTargets;
 }>;
 const directions = { front: [0, 0, -1], back: [0, 0, 1], left: [-1, 0, 0], right: [1, 0, 0], top: [0, 1, 0], bottom: [0, -1, 0] } as const;
-type Rig = { signature: string; targets: TransportTargets; connected: TransportConnectorState["connected"];
+type Rig = { signature: string; targets: TransportTargets; connected: Partial<Record<PowerTopologyFace, boolean>>;
   arms: Record<PowerTopologyFace, { group: THREE.Group; segments: THREE.Mesh[] }> };
 const rigs = new WeakMap<THREE.Group, Rig>();
 export const TRANSPORT_CONNECTOR_MAX_REACH = 1;
@@ -45,7 +45,11 @@ export function createTransportConnectors(root: THREE.Group, material: THREE.Mat
 export function updateTransportConnectors(root: THREE.Group, state: TransportConnectorState) {
   const rig = rigs.get(root); if (!rig || state.connectionTargets === undefined && state.connected === undefined) return;
   if (state.connectionTargets !== undefined) rig.targets = state.connectionTargets;
-  if (state.connected !== undefined) rig.connected = state.connected;
+  // Model arms retain omitted faces on partial updates. Their adapters must
+  // retain the same mask, or an unrelated face edit tears an existing joint.
+  if (state.connected !== undefined) for (const face of Object.keys(directions) as PowerTopologyFace[]) {
+    if (state.connected[face] !== undefined) rig.connected[face] = state.connected[face];
+  }
   const signature = JSON.stringify([rig.connected, rig.targets]); if (rig.signature === signature) return;
   rig.signature = signature;
   for (const face of Object.keys(directions) as PowerTopologyFace[]) {

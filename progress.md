@@ -3022,7 +3022,14 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   playing, health 10, sealed breathing. This is not a native save, road
   resident journey or entry/return proof. Preview stopped, port4338 and
   scoped WSL preview/browser processes absent, Next's tsconfig edit
-  restored; unrelated evidence/ preserved. Independent review is pending.
+  restored; unrelated evidence/ preserved. Wildkeeper independently
+  accepted this bounded origin prerequisite in
+  CF6_R18_ROAD_HISTORY_ACCEPTANCE.md after a stable-source 127/127 repeat
+  and byte review. It qualified that global remote-body aggregation was
+  inspected and resolver multiplicity tested, but no distinct actual-global
+  remote-overcount negative was added yet; include that in integrated E2
+  coverage. Evidence text was committed separately as f50981a after source
+  f53e577. Neither review nor smoke grants full E2 or entry.
   Guild-companion/player history, other
   non-apiary origins, positive sites, drop lineage and normal entry/return
   remain open; entry CLOSED, CF7 gated.

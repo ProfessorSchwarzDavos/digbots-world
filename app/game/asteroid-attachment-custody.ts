@@ -23,6 +23,7 @@ import { buildExhibitTopology, type ExhibitResident } from "./butterfly-exhibit"
 import { aquariumBodyBounds, exhibitBodyBounds } from "./habitat-body";
 import type { AttachmentActorBody } from "./attachment-actor-bodies";
 import { canonicalJson, cloneUniverseJson, freezeUniverseJson } from "./universe-json";
+import type { AsteroidEntityDependency } from "./asteroid-attachment-relationships";
 
 export type AsteroidCustodySide = "attached" | "orbit" | "shared-universe" | "inactive-player" | "other-location";
 export type AsteroidCustodyPhysicalContext = Readonly<{
@@ -226,4 +227,22 @@ export function selectUniverseAsteroidCreatureCustody(frame: AsteroidAttachmentF
     return { ...value, side };
   });
   return freezeUniverseJson(structuredClone({ source, custody, current, stored, residents, freeBodies }));
+}
+
+/** A deployed body's orb side comes from the globally reconciled stored owner,
+ * not the body's own attunedOrbId or the current player's inventory alone.
+ * Inactive and shared owners never become current physical dependencies. */
+export function selectAsteroidDeployedOrbDependencies(frame: AsteroidAttachmentFrame,
+  physical: ReturnType<typeof selectUniverseAsteroidCreatureCustody>): readonly AsteroidEntityDependency[] {
+  const seen = new Set<string>(), dependencies: AsteroidEntityDependency[] = [];
+  for (const row of physical.stored) {
+    if (row.body?.locationId !== frame.orbitId) continue;
+    if (row.custody.format !== "capture-orb" || !row.physical
+      || row.side !== row.physical.side || row.side !== "attached" && row.side !== "orbit"
+      || row.body.creature.attunedOrbId !== row.custody.containerId || seen.has(row.custody.containerId))
+      throw Error("Unresolved current deployed orb dependency.");
+    seen.add(row.custody.containerId);
+    dependencies.push({ kind: "orb", id: row.custody.containerId, attached: row.side === "attached" });
+  }
+  return freezeUniverseJson(dependencies);
 }

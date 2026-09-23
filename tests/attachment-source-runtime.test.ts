@@ -189,6 +189,36 @@ test("actual full scoped source observes remote history before physical selectio
   await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /persisted.*creature.*relationship/i,
     "a matching creature ID cannot suppress a saved social group");
   engine.sleepingCreatures = []; delete (repository.snapshot.locations[0].fields as Record<string, unknown>).sleepingCreatures;
+  const bee = { id: "free-worker", role: "worker" as const, alive: true, home: false, outbound: true,
+    carryingNectar: 2, lastReturnDay: 4, disconnectedDay: null, geneticSeed: 71,
+    angry: false, tamed: true, ownerId: "host", storedOrb: null,
+    specimenOriginLocationId: engine.world.locationScope.locationId };
+  const beeBody = { ...sleeper, kind: "honeybee" as const, apiaryBee: bee };
+  engine.sleepingCreatures = [beeBody];
+  Object.assign(repository.snapshot.locations[0].fields, { sleepingCreatures: [{ ...beeBody,
+    apiaryBee: { ...bee, home: true, outbound: false, carryingNectar: 0,
+      lastReturnDay: 3, angry: true } }] });
+  await assert.doesNotReject(engine.snapshotScopedAttachmentUniverseSource(asteroid.id),
+    "normal saved bee care drift must not hide unchanged origin and owner");
+  Object.assign(repository.snapshot.locations[0].fields, { sleepingCreatures: [{ ...beeBody,
+    apiaryBee: { ...bee, ownerId: "outside" } }] });
+  await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /persisted.*creature.*relationship/i);
+  engine.sleepingCreatures = []; delete (repository.snapshot.locations[0].fields as Record<string, unknown>).sleepingCreatures;
+  const keeperId = engine.localPlayerId(), currentOrigin = engine.world.locationScope.locationId;
+  const heldOrb = captureIntoOrb(createEmptyCaptureOrb("current-deployed"), {
+    schema: 1, entityId: "current-deployed-specimen", kind: "peelop", health: 5, maxHealth: 7,
+    ageTicks: 20, baby: false, temperament: "Gentle", hostile: false, tamed: true,
+    ownerId: keeperId, name: null, geneticSeed: 321, command: null,
+    custom: { specimenOriginLocationId: currentOrigin },
+  }, 42)!;
+  const deployedOrb = { ...heldOrb, attunement: { ownerId: keeperId, attunedAt: 50,
+    activeEntityId: "37", recalledAt: 0, recallCount: 0, fainted: false } };
+  engine.inventory = [captureOrbInventorySlot(value), captureOrbInventorySlot(deployedOrb)];
+  engine.sleepingCreatures = [{ ...sleeper, specimenId: "current-deployed-specimen",
+    geneticSeed: 321, attunedOrbId: "current-deployed", creatureOwnerId: keeperId }];
+  await assert.doesNotReject(engine.snapshotScopedAttachmentUniverseSource(asteroid.id),
+    "a deployed orb and its same-side body have a reconciled canonical holder");
+  engine.inventory = [captureOrbInventorySlot(value)]; engine.sleepingCreatures = [];
   Object.assign(repository.snapshot.locations[0].fields, { drops: [{ item: Item.RawIron, count: 1,
     x: asteroid.center.x, y: asteroid.center.y, z: asteroid.center.z, age: 0 }] });
   await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /persisted.*drop.*lineage/i,

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { selectAsteroidCreatureCustody, selectUniverseAsteroidCreatureCustody, type AsteroidCustodyPhysicalContext } from "../app/game/asteroid-attachment-custody";
+import { selectAsteroidCreatureCustody, selectAsteroidDeployedOrbDependencies, selectUniverseAsteroidCreatureCustody,
+  type AsteroidCustodyPhysicalContext } from "../app/game/asteroid-attachment-custody";
 import { createAsteroidRegistry } from "../app/game/asteroid-custody";
 import { createAsteroidAttachmentFrame } from "../app/game/asteroid-attachment-frame";
 import { createCelestialTerrain } from "../app/game/celestial-terrain";
@@ -83,6 +84,20 @@ test("carried inactive encounter keeps global history and physically follows the
   assert.equal(result.custody.encounters.primeOwners[0].owner?.encounterOriginLocationId, null);
   assert.equal(result.stored.find(row => row.custody.containerId === "offline")?.side, "inactive-player");
   assert.equal(canonicalJson(input), before); assert(!Object.isFrozen(input.snapshot)); assert(Object.isFrozen(result.stored));
+});
+
+test("deployed orb dependency uses reconciled current physical holder, not historical specimen origin", () => {
+  const input = fixture(), deployed: CaptureOrb = { ...orb("deployed", "pet", home),
+    attunement: { ownerId: "local", attunedAt: 50, activeEntityId: "9", recalledAt: 0,
+      recallCount: 0, fainted: false } };
+  input.live = { ...input.live, source: { ...input.live.source,
+    inventory: [captureOrbInventorySlot(deployed)],
+    creatures: [{ ...body(9, "pet", home), attunedOrbId: "deployed" }] } };
+  const before = canonicalJson(input), result = inspect(input);
+  assert.deepEqual(selectAsteroidDeployedOrbDependencies(frame, result),
+    [{ kind: "orb", id: "deployed", attached: true }]);
+  assert.equal(result.stored.find(row => row.custody.containerId === "offline")?.side, "inactive-player");
+  assert.equal(canonicalJson(input), before);
 });
 
 test("known-distinct specimens remain independent in current storage and whole current bodies", () => {

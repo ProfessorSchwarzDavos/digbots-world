@@ -2958,3 +2958,20 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   stopped, port 4338 and scoped WSL processes absent, generated tsconfig
   restored. Complete dependency origins, positive sites and normal-path
   consumer coverage remain open; full E2/entry are unaccepted.
+- Wildkeeper independently accepted the 6ab6ba8 persisted-current checkpoint
+  as a bounded read-only prerequisite (87/87 stable-source repeat) but
+  qualified normal-path behavior: a whole nested bee record and drop age/pose
+  comparison could refuse legitimate unsaved drift. Next E2 slice reproduced
+  the bee refusal in r18-e2-bee-drift-red-r2; mutable bee flight, nectar and
+  anger now may differ while bee role, seed, owner, stored-orb custody and
+  explicit origins remain bound. Pure and actual scoped-engine tests pass.
+  A second actual-engine red r18-e2-deployed-orb-red-r2 showed that a valid
+  deployed orb/body pair lacked a relationship dependency; the context now
+  derives that dependency from globally reconciled current physical custody,
+  excluding offline/shared owners. Focused actual-engine, scoped-custody and
+  expanded r18-e2-orb-bee-expanded-r1 (117/117) pass; static and changed-file
+  lint exit 0. Drop age drift still refuses because drop identity/atomic
+  lineage is unresolved; the new test records that explicit limitation.
+  Positive authored sites, other non-apiary origins, normal-path coverage and
+  full E2/entry acceptance remain open. This slice has not yet had an
+  exact-commit build or official gameplay check.

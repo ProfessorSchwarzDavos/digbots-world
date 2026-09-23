@@ -565,7 +565,8 @@ import { createAsteroidAttachmentWorld, type AsteroidAttachmentWorldSource } fro
 import { createAsteroidEnvironmentQueries } from "./asteroid-environment-queries";
 import { HEALER_ACTIVE_FUEL } from "./custody-block-body";
 import { createAsteroidAttachmentFrame } from "./asteroid-attachment-frame";
-import { selectAsteroidCreatureCustody, selectUniverseAsteroidCreatureCustody, type AsteroidCustodyPhysicalContext } from "./asteroid-attachment-custody";
+import { selectAsteroidCreatureCustody, selectAsteroidDeployedOrbDependencies, selectUniverseAsteroidCreatureCustody,
+  type AsteroidCustodyPhysicalContext } from "./asteroid-attachment-custody";
 import { assertNoPersistedOnlyCurrentEntityAnchors, projectAsteroidEntityCollection } from "./asteroid-attachment-entity-selection";
 import type { AsteroidAttachedEntities } from "./asteroid-attachment-entities";
 import type { AsteroidRelationshipContext } from "./asteroid-attachment-relationships";
@@ -22503,7 +22504,8 @@ export class VoxelEngine {
       actors: observed.context.actors.map(actor => ({ id: actor.id, position: actor.position, bounds: actor.bounds,
         mountedCreatureId: actor.mountedCreatureId,
         followingCreatureIds: runtime.relationshipFollowers.find(([id]) => id === actor.id)?.[1] ?? [] })),
-      dependencies: physical.current.apiaryDependencies };
+      dependencies: [...physical.current.apiaryDependencies,
+        ...selectAsteroidDeployedOrbDependencies(observed.frame, physical)] };
     const entityProjection = projectAsteroidEntityCollection(observed.frame, entities, relationships);
     const waygrid = selectUniverseWaygridOwnership(observed.frame, repository.snapshot, {
       ...runtime.waygridSource, repositoryRevision: observed.manifest.revision, locationRevision: observed.stamp.revision,

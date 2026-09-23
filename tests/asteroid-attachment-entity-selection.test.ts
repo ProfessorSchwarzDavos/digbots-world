@@ -64,6 +64,23 @@ test("saved current creature identity and relationship claims cannot hide behind
     /persisted.*creature.*relationship/i);
 });
 
+test("saved current bee care may drift while bee identity and keeper remain fixed", () => {
+  const active = fixture(), bee = { id: "worker-one", role: "worker" as const, alive: true,
+    home: false, outbound: true, carryingNectar: 2, lastReturnDay: 4,
+    disconnectedDay: null, geneticSeed: 71, angry: false, tamed: true,
+    ownerId: "host", storedOrb: null };
+  const current = { ...active, creatures: active.creatures.map((body, index) => index === 1
+    ? { ...body, kind: "honeybee" as const, apiaryBee: bee } : body) };
+  const saved = { ...current.creatures[1], apiaryBee: { ...bee, home: true,
+    outbound: false, carryingNectar: 0, lastReturnDay: 3, angry: true } };
+  assert.doesNotThrow(() => assertNoPersistedOnlyCurrentEntityAnchors({ creatures: [saved] }, current),
+    "ordinary bee flight/nectar/anger drift is not an owner change");
+  assert.throws(() => assertNoPersistedOnlyCurrentEntityAnchors({ creatures: [{ ...saved,
+    apiaryBee: { ...saved.apiaryBee, ownerId: "outside" } }] }, current), /persisted.*creature.*relationship/i);
+  assert.throws(() => assertNoPersistedOnlyCurrentEntityAnchors({ creatures: [{ ...saved,
+    apiaryBee: { ...saved.apiaryBee, geneticSeed: 72 } }] }, current), /persisted.*creature.*relationship/i);
+});
+
 test("saved current drops cannot disappear through an unproved live-array lineage", () => {
   const active = fixture(), saved = structuredClone(active.drops);
   assert.doesNotThrow(() => assertNoPersistedOnlyCurrentEntityAnchors({ drops: saved }, active));
@@ -71,6 +88,9 @@ test("saved current drops cannot disappear through an unproved live-array lineag
     /persisted.*drop.*lineage/i);
   assert.throws(() => assertNoPersistedOnlyCurrentEntityAnchors({ drops: saved.map((drop, index) => index
     ? drop : { ...drop, count: drop.count + 1 }) }, active), /persisted.*drop.*lineage/i);
+  assert.throws(() => assertNoPersistedOnlyCurrentEntityAnchors({ drops: saved.map((drop, index) => index
+    ? drop : { ...drop, age: drop.age + 1 }) }, active), /persisted.*drop.*lineage/i,
+    "ordinary drop aging remains fail-closed until an atomic source can identify each drop");
 });
 
 test("complete entity projection selects exact whole records and resolves undefined keeper through explicit local actor", () => {

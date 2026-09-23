@@ -3014,8 +3014,15 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   test now accepts current and unique remote history, refuses duplicate
   anchors or divergent saved history, and prevents non-string map keys from
   being normalized into anchors. Focused runtime/history 22/22, TypeScript
-  and changed-file lint exit 0; expanded precommit suite passes 127/127.
-  Exact-source build/browser and
-  independent review are pending. Guild-companion/player history, other
+  and changed-file lint exit 0; expanded precommit and exact-commit suites
+  each pass 127/127. Source f53e577 passed exact-source production build
+  r18-e2-road-history-build-r58 (ID 124cd1qre0HYncaJCJytL; established
+  circular-chunk warnings) and official synthetic station browser
+  r18-e2-road-history-official-r58. I inspected shot-0.png; state reports
+  playing, health 10, sealed breathing. This is not a native save, road
+  resident journey or entry/return proof. Preview stopped, port4338 and
+  scoped WSL preview/browser processes absent, Next's tsconfig edit
+  restored; unrelated evidence/ preserved. Independent review is pending.
+  Guild-companion/player history, other
   non-apiary origins, positive sites, drop lineage and normal entry/return
   remain open; entry CLOSED, CF7 gated.

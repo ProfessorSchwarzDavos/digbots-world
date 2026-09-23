@@ -2948,5 +2948,13 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   red-r2 and r18-e2-drop-lineage-red-r1 retained; the first creature red-r1
   failed only from a missing test import. Pure and actual scoped-engine checks
   pass; expanded r18-e2-persisted-closure-focused-r1 passes 87/87,
-  TypeScript static-r1 and changed-file lint-r1 exit 0. New exact commit,
-  build/official verification and complete dependency origins remain.
+  TypeScript static-r1 and changed-file lint-r1 exit 0. Source checkpoint
+  6ab6ba899f6df70a7dba951420887b8c99102b3e passes exact-commit 87/87,
+  production build r18-e2-persisted-closure-build-r55 (ID
+  X5omgjxuTJ61VhlJ-fsWw) and official synthetic station smoke
+  r18-e2-persisted-closure-official-r55. I inspected the gameplay screenshot:
+  station/window band/HUD rendered, state playing, health 10, sealed
+  breathing. This is not a save, transfer-lineage, or entry test. Preview
+  stopped, port 4338 and scoped WSL processes absent, generated tsconfig
+  restored. Complete dependency origins, positive sites and normal-path
+  consumer coverage remain open; full E2/entry are unaccepted.

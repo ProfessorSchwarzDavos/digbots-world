@@ -2973,5 +2973,11 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   lint exit 0. Drop age drift still refuses because drop identity/atomic
   lineage is unresolved; the new test records that explicit limitation.
   Positive authored sites, other non-apiary origins, normal-path coverage and
-  full E2/entry acceptance remain open. This slice has not yet had an
-  exact-commit build or official gameplay check.
+  full E2/entry acceptance remain open. Source commit b6126b0 passes
+  exact-commit 117/117, production build r18-e2-orb-bee-build-r56
+  (ID ljms7sNYofb-ku-6zOPTF) and official synthetic station smoke
+  r18-e2-orb-bee-official-r56. I inspected the image: station/window band,
+  HUD and wrench render, state playing, health 10, sealed breathing. This
+  does not exercise an actual E2 entry/return or completed native save.
+  Preview stopped, port 4338 and scoped WSL processes absent, Next's
+  generated tsconfig edit restored; unrelated evidence/ preserved.

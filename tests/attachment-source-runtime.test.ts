@@ -179,6 +179,21 @@ test("actual full scoped source observes remote history before physical selectio
   await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /persisted.*boat.*passenger/i,
     "a matching boat ID cannot suppress a saved passenger link");
   engine.boats.clear(); delete (repository.snapshot.locations[0].fields as Record<string, unknown>).boats;
+  const sleeper = { id: 37, specimenId: "same-id-sleeper", specimenOriginLocationId: engine.world.locationScope.locationId,
+    kind: "peelop" as const, x: asteroid.center.x, y: asteroid.center.y, z: asteroid.center.z,
+    yaw: 0, health: 5, age: 20 };
+  engine.sleepingCreatures = [sleeper];
+  await assert.doesNotReject(engine.snapshotScopedAttachmentUniverseSource(asteroid.id),
+    "one current sleeping body with explicit origin remains a valid live source");
+  Object.assign(repository.snapshot.locations[0].fields, { sleepingCreatures: [{ ...sleeper, socialGroupId: "saved-group" }] });
+  await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /persisted.*creature.*relationship/i,
+    "a matching creature ID cannot suppress a saved social group");
+  engine.sleepingCreatures = []; delete (repository.snapshot.locations[0].fields as Record<string, unknown>).sleepingCreatures;
+  Object.assign(repository.snapshot.locations[0].fields, { drops: [{ item: Item.RawIron, count: 1,
+    x: asteroid.center.x, y: asteroid.center.y, z: asteroid.center.z, age: 0 }] });
+  await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /persisted.*drop.*lineage/i,
+    "an old saved drop cannot disappear merely because the live current array is empty");
+  delete (repository.snapshot.locations[0].fields as Record<string, unknown>).drops;
   for (const fault of ["inventory", "pressure", "environment", "catalog", "catalogUndefined", "architecture", "effects", "facade", "waygrid", "settlement", "merchant"] as const) {
     const priorInventory = engine.inventory, priorHealth = engine.health, priorCatalog = storage.currentCatalog;
     const oldInstallation = pressure.nextInstallation;

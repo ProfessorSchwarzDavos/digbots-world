@@ -7,12 +7,39 @@ import { asteroidSailboatFootprintSide } from "./asteroid-attachment-vehicle-foo
 import { asteroidAttachedDropIndices, captureAsteroidDrops, projectAsteroidDrops } from "./asteroid-attachment-drops";
 import { canonicalJson } from "./universe-json";
 import { mergeSelectedAttachmentRecords } from "./attachment-array-merge";
+import { readCreatureOrigins } from "./creature-origins";
+import type { SavedCreature } from "./engine";
+
+/** Only identity and partition-relevant claims belong in this comparison.
+ * Ordinary current pose, health, age and care can legitimately outpace a save;
+ * a saved social, authored, owner or provenance link cannot be hidden by the
+ * active-array override just because its numeric body ID still exists. */
+function creatureRelationshipIdentity(creature: SavedCreature): string {
+  const owned = (state: { tamed?: boolean; ownerId?: string | null } | null | undefined) => state
+    ? { tamed: state.tamed === true, ownerId: state.ownerId ?? null } : null;
+  return canonicalJson({ kind: creature.kind, specimenId: creature.specimenId,
+    origins: readCreatureOrigins(creature), socialGroupId: creature.socialGroupId,
+    poiMarkerId: creature.poiMarkerId, legendaryEncounterId: creature.legendaryEncounterId,
+    legendarySiteId: creature.legendarySiteId, primeAnchorId: creature.primeAnchorId,
+    groundedSummonLineageId: creature.groundedSummonLineageId,
+    groundedSummonEntityId: creature.groundedSummonEntityId,
+    settlementId: creature.settlementId ?? null, residentId: creature.residentId ?? null,
+    apiaryBee: creature.apiaryBee ?? null, attunedOrbId: creature.attunedOrbId ?? null,
+    dragon: creature.dragonState ? { ...owned(creature.dragonState), command: creature.dragonState.command ?? null,
+      home: creature.dragonState.home ?? null, onShoulder: creature.dragonState.onShoulder === true } : null,
+    pet: creature.petState ? { ...owned(creature.petState), command: creature.petState.command ?? null } : null,
+    shade: owned(creature.shadeState), reedstrider: owned(creature.reedstriderBond),
+    courser: owned(creature.courserBond), leviathan: owned(creature.leviathanGrowth),
+    hiredByPlayerId: creature.hiredByPlayerId ?? null,
+    followCommand: creature.followCommand === "hold" ? "hold" : "follow",
+    creatureTamed: creature.creatureTamed === true, creatureOwnerId: creature.creatureOwnerId ?? null });
+}
 
 /** Global custody deliberately substitutes the active location's live arrays.
- * Before using that projection, inspect these raw persisted relationship
- * anchors as well: an extra saved body, boat or lead cannot disappear merely
- * because its in-memory counterpart was absent at this revision. This is a
- * refusal check, not reconciliation or authority to copy persisted records. */
+ * Inspect raw persisted identities and relationship claims before using that
+ * projection: a saved body, boat, lead or drop cannot disappear merely because
+ * its live counterpart is absent or changed. This is a refusal check, not
+ * reconciliation or authority to copy persisted records. */
 export function assertNoPersistedOnlyCurrentEntityAnchors(fields: Readonly<Record<string, unknown>>,
   active: AsteroidAttachedEntities): void {
   const rows = (name: string): readonly unknown[] => {
@@ -21,11 +48,15 @@ export function assertNoPersistedOnlyCurrentEntityAnchors(fields: Readonly<Recor
     if (!Array.isArray(value)) throw Error(`Invalid persisted current ${name} source.`);
     return value;
   };
-  const creatureIds = new Set([...active.creatures, ...active.sleepingCreatures].map(value => value.id));
+  const creaturesById = new Map([...active.creatures, ...active.sleepingCreatures].map(value => [value.id, value]));
+  const savedCreatureIds = new Set<number>();
   for (const value of [...rows("creatures"), ...rows("sleepingCreatures")]) {
     const id = value && typeof value === "object" && !Array.isArray(value) ? (value as { id?: unknown }).id : undefined;
-    if (!Number.isSafeInteger(id) || !creatureIds.has(id as number))
+    if (!Number.isSafeInteger(id) || !creaturesById.has(id as number) || savedCreatureIds.has(id as number))
       throw Error("Unresolved persisted-only current creature relationship.");
+    savedCreatureIds.add(id as number);
+    if (creatureRelationshipIdentity(value as SavedCreature) !== creatureRelationshipIdentity(creaturesById.get(id as number)!))
+      throw Error("Unresolved persisted current creature relationship or provenance.");
   }
   const boatsById = new Map(active.boats.map(value => [value.id, value]));
   const savedBoatIds = new Set<string>();
@@ -52,6 +83,13 @@ export function assertNoPersistedOnlyCurrentEntityAnchors(fields: Readonly<Recor
       !== canonicalJson({ ownerId: live.ownerId, fence: live.fence, maximumLength: live.maximumLength }))
       throw Error("Unresolved persisted current lead anchor relationship.");
   }
+  // Saved drops have no durable per-drop identity. Even an apparently matching
+  // multiset could silently substitute an identical new drop for an old one.
+  // Require exact current array correspondence until an atomic capture supplies
+  // explicit host-owned lineage; never infer it from item/position similarity.
+  const persistedDrops = rows("drops");
+  if (persistedDrops.length && canonicalJson(persistedDrops) !== canonicalJson(active.drops))
+    throw Error("Unresolved persisted current drop lineage.");
 }
 
 export type AsteroidEntityProjection = Readonly<{

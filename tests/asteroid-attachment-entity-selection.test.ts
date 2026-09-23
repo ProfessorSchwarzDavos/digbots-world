@@ -6,7 +6,7 @@ import { projectAsteroidEntityCollection, captureAsteroidEntityCollection,
   assertNoPersistedOnlyCurrentEntityAnchors } from "../app/game/asteroid-attachment-entity-selection";
 import type { AsteroidAttachedEntities } from "../app/game/asteroid-attachment-entities";
 import type { AsteroidRelationshipContext } from "../app/game/asteroid-attachment-relationships";
-import { homeLocation, locationAddress, universeId } from "../app/game/location-address";
+import { homeLocation, locationAddress, locationId, universeId } from "../app/game/location-address";
 import { humanBodyBounds } from "../app/game/player-body";
 import { canonicalJson } from "../app/game/universe-json";
 import { Item } from "../app/game/data";
@@ -49,6 +49,28 @@ test("saved current boat passengers and lead endpoints cannot hide behind matchi
   assert.throws(() => assertNoPersistedOnlyCurrentEntityAnchors({
     leads: [{ ...lead, ownerId: "outside" }],
   }, active), /persisted.*lead.*anchor/i);
+});
+
+test("saved current creature identity and relationship claims cannot hide behind matching live IDs", () => {
+  const active = fixture(), body = active.creatures[1];
+  assert.doesNotThrow(() => assertNoPersistedOnlyCurrentEntityAnchors({
+    creatures: [{ ...body, x: body.x + 1, health: body.health - 1 }],
+  }, active), "ordinary unsaved pose and health can differ without hiding a relationship");
+  for (const saved of [
+    { ...body, socialGroupId: "outside-group" },
+    { ...body, specimenOriginLocationId: locationId(orbit) },
+    { ...body, creatureTamed: true, creatureOwnerId: "outside", followCommand: "follow" },
+  ]) assert.throws(() => assertNoPersistedOnlyCurrentEntityAnchors({ creatures: [saved] }, active),
+    /persisted.*creature.*relationship/i);
+});
+
+test("saved current drops cannot disappear through an unproved live-array lineage", () => {
+  const active = fixture(), saved = structuredClone(active.drops);
+  assert.doesNotThrow(() => assertNoPersistedOnlyCurrentEntityAnchors({ drops: saved }, active));
+  assert.throws(() => assertNoPersistedOnlyCurrentEntityAnchors({ drops: [...saved, { ...saved[0], x: saved[0].x + 80 }] }, active),
+    /persisted.*drop.*lineage/i);
+  assert.throws(() => assertNoPersistedOnlyCurrentEntityAnchors({ drops: saved.map((drop, index) => index
+    ? drop : { ...drop, count: drop.count + 1 }) }, active), /persisted.*drop.*lineage/i);
 });
 
 test("complete entity projection selects exact whole records and resolves undefined keeper through explicit local actor", () => {

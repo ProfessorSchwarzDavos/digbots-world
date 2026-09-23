@@ -2934,5 +2934,19 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   exact-source production build r18-e2-pressure-build-r54 and official
   synthetic station smoke r18-e2-pressure-official-r54. I inspected the
   gameplay screenshot; health 10 and sealed breathing are present. Preview
-  stopped and generated tsconfig edit was restored. The correction remains
-  provisional pending independent director review; this is not full E2.
+  stopped and generated tsconfig edit was restored. Wildkeeper independently
+  accepted this bounded prerequisite in CF6_R18_PRESSURE_CORRECTION_ACCEPTANCE.md
+  at 20611c1/build54, after a stable 85/85 check and source/evidence readback.
+  This is not full E2 or an entry grant.
+- Next E2 persisted-current boundary: a saved sleeping creature with the same
+  numeric ID but different social/provenance/owner claim first reproduced red;
+  the guard now compares only identity and partition-relevant claims, allowing
+  unsaved pose/health drift. Saved drops lack durable per-drop IDs, so a
+  nonempty persisted drop array must exactly match the live array or refuse;
+  an empty saved array may coexist with new live drops. This is structural
+  refusal, not proof of transfer lineage. Red receipts r18-e2-creature-content-
+  red-r2 and r18-e2-drop-lineage-red-r1 retained; the first creature red-r1
+  failed only from a missing test import. Pure and actual scoped-engine checks
+  pass; expanded r18-e2-persisted-closure-focused-r1 passes 87/87,
+  TypeScript static-r1 and changed-file lint-r1 exit 0. New exact commit,
+  build/official verification and complete dependency origins remain.

@@ -3003,3 +3003,19 @@ Current request: Refresh the pushed `design-1` branch, publish an incremental v1
   its own stable-source 118/118 repeat and source-byte review. The review
   qualified that progress.md alone was dirty; runtime/test source still
   matched f31b443. Full E2/entry remain closed, CF7 gated.
+- Next E2 road-event source slice: actual scoped-engine red
+  r18-e2-road-history-runtime-red-r1 reproduced the missing dependency for
+  a current crossing deer with valid location history. A new read-only
+  universe road-history selector hydrates each repository location owner,
+  validates complete event ledgers, accepts only a unique location-qualified
+  anchor, and checks saved/current authored kind and trigger day. It counts
+  related remote bodies against the authored spawn multiplicity and never
+  assigns a physical side from the historical event. The actual scoped
+  test now accepts current and unique remote history, refuses duplicate
+  anchors or divergent saved history, and prevents non-string map keys from
+  being normalized into anchors. Focused runtime/history 22/22, TypeScript
+  and changed-file lint exit 0; expanded precommit suite passes 127/127.
+  Exact-source build/browser and
+  independent review are pending. Guild-companion/player history, other
+  non-apiary origins, positive sites, drop lineage and normal entry/return
+  remain open; entry CLOSED, CF7 gated.

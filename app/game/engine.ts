@@ -577,6 +577,7 @@ import { planCreatureEncounterRecall, reconcileCreatureEncounterCustody } from "
 import { reconcileUniverseCreatureCustody } from "./universe-creature-custody";
 import { canonicalJson, cloneUniverseJson, freezeUniverseJson } from "./universe-json";
 import { encodeAttachmentSource, snapshotAttachmentSaveSources, type AttachmentSaveSources } from "./attachment-source-preimage";
+import { selectUniverseRoadResidentHistory } from "./universe-resident-history";
 import { selectAsteroidProductionStations } from "./asteroid-attachment-production";
 import { selectAsteroidBookFurniture } from "./asteroid-attachment-book-furniture";
 import { selectAsteroidArchitecture } from "./asteroid-attachment-architecture";
@@ -22390,7 +22391,10 @@ export class VoxelEngine {
     });
     // Keep already-encoded authority records outside the field encoder: encoding
     // them again would multiply nesting depth for large, valid pressure rooms.
+    if ([...this.roadEvents.keys()].some(key => typeof key !== "string"))
+      throw Error("Attachment road-event history has a non-string key.");
     return freezeUniverseJson({ source, pressureSource, production, bookFurniture, architecture,
+      residentHistorySource: structuredClone({ roadEvents: Object.fromEntries(this.roadEvents), guildBook: this.guildBook }),
       waygridSource: structuredClone({ asteroidFields: this.asteroidFields, generatorVersion: GENERATOR_VERSION,
         generatorProfile: this.world.generationOptions.profile, seed: this.world.seedText }),
       authoredSiteSource: structuredClone({ settlements: [...this.settlements], merchants: [...this.merchants],
@@ -22500,11 +22504,15 @@ export class VoxelEngine {
     const persistedCurrent = repository.snapshot.locations.find(location => location.descriptor.id === observed.stamp.locationId);
     if (!persistedCurrent) throw Error("Attachment source lacks its persisted current location.");
     assertNoPersistedOnlyCurrentEntityAnchors(persistedCurrent.fields, entities);
+    const roadHistory = selectUniverseRoadResidentHistory(repository.snapshot, {
+      locationId: observed.stamp.locationId, playerId: observed.manifest.currentPlayerId,
+      sources: runtime.residentHistorySource,
+    }, [...entities.creatures, ...entities.sleepingCreatures]);
     const relationships: AsteroidRelationshipContext = { localActorId: observed.hostPlayerId,
       actors: observed.context.actors.map(actor => ({ id: actor.id, position: actor.position, bounds: actor.bounds,
         mountedCreatureId: actor.mountedCreatureId,
         followingCreatureIds: runtime.relationshipFollowers.find(([id]) => id === actor.id)?.[1] ?? [] })),
-      dependencies: [...physical.current.apiaryDependencies,
+      dependencies: [...physical.current.apiaryDependencies, ...roadHistory.dependencies,
         ...selectAsteroidDeployedOrbDependencies(observed.frame, physical)] };
     const entityProjection = projectAsteroidEntityCollection(observed.frame, entities, relationships);
     const waygrid = selectUniverseWaygridOwnership(observed.frame, repository.snapshot, {
@@ -22515,7 +22523,8 @@ export class VoxelEngine {
       locationId: observed.stamp.locationId, repositoryRevision: observed.manifest.revision,
       locationRevision: observed.stamp.revision, source: runtime.authoredSiteSource,
     });
-    return freezeUniverseJson({ runtime, repository: structuredClone(repository), physical, entityProjection, waygrid, authoredSites,
+    return freezeUniverseJson({ runtime, repository: structuredClone(repository), physical, roadHistory,
+      entityProjection, waygrid, authoredSites,
       ...(environment ? { environment } : {}) });
   }
 

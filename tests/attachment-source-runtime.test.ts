@@ -19,6 +19,7 @@ import { createPrimeEncounterState, planPrimeEncounter, transferPrimeEncounterCu
 import { prepareWaygridCapacity } from "../app/game/waygrid-capacity";
 import { emptyAuthoredSiteFixture } from "./empty-authored-site-fixtures";
 import { MOB_DEFS } from "../app/game/mobs";
+import { createGuildBook } from "../app/game/guilds";
 
 const additionalMaps = ["saplings", "veinRegrowth", "roadEvents", "golemForges", "alchemyStands", "distilleries", "sugarworks",
   "archiveShelves", "tomeDisplays", "settlements", "merchants", "liquidCells", "ecologySectors", "multiplayerPlayerProgressions",
@@ -213,6 +214,29 @@ test("actual full scoped source observes remote history before physical selectio
     apiaryBee: { ...bee, ownerId: "outside" } }] });
   await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /persisted.*creature.*relationship/i);
   engine.sleepingCreatures = []; delete (repository.snapshot.locations[0].fields as Record<string, unknown>).sleepingCreatures;
+  const roadAnchor = "unique-current-road", roadEvent = { schema: 1 as const, anchorId: roadAnchor,
+    kind: "creature-crossing" as const, status: "triggered" as const, triggeredDay: 4, revision: 1 };
+  const roadBody = { ...sleeper, kind: "thimbledeer" as const, residentId: `road-event:${roadAnchor}` };
+  engine.sleepingCreatures = [roadBody]; engine.roadEvents.set(roadAnchor, roadEvent); engine.guildBook = createGuildBook();
+  Object.assign(repository.snapshot.locations[0].fields, { roadEvents: { [roadAnchor]: roadEvent } });
+  await assert.doesNotReject(engine.snapshotScopedAttachmentUniverseSource(asteroid.id),
+    "one actual current road body may bind its uniquely identified location history");
+  Object.assign(repository.snapshot.locations[0].fields, { roadEvents: { [roadAnchor]: { ...roadEvent, kind: "ambush" } } });
+  await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id),
+    /Saved current road-event provenance/i, "a saved same-anchor authored kind cannot hide behind live history");
+  Object.assign(repository.snapshot.locations[0].fields, { roadEvents: { [roadAnchor]: roadEvent } });
+  Object.assign(repository.snapshot.locations[1].fields, { roadEvents: { [roadAnchor]: roadEvent } });
+  await assert.rejects(() => engine.snapshotScopedAttachmentUniverseSource(asteroid.id), /Ambiguous.*road-event/i,
+    "the same anchor in a second location cannot become an inferred history origin");
+  engine.roadEvents.clear(); delete (repository.snapshot.locations[0].fields as Record<string, unknown>).roadEvents;
+  await assert.doesNotReject(engine.snapshotScopedAttachmentUniverseSource(asteroid.id),
+    "a unique remote location history can remain shared while its physical body is current");
+  engine.roadEvents.set(7 as never, roadEvent);
+  assert.throws(() => engine.snapshotAttachmentSourceObservation(asteroid.id), /non-string key/,
+    "a raw non-string map key cannot silently become an authored anchor");
+  engine.roadEvents.clear();
+  delete (repository.snapshot.locations[1].fields as Record<string, unknown>).roadEvents;
+  engine.sleepingCreatures = [];
   const keeperId = engine.localPlayerId(), currentOrigin = engine.world.locationScope.locationId;
   const heldOrb = captureIntoOrb(createEmptyCaptureOrb("current-deployed"), {
     schema: 1, entityId: "current-deployed-specimen", kind: "peelop", health: 5, maxHealth: 7,

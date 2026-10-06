@@ -1,27 +1,27 @@
-/* DIGBOTS layer for the self-hosted Blockwild (MIT, (c) Noah Hicks, see LICENSE).
-   1) Shows the DIGBOTS name instead of Blockwild.
+/* MINECRAFT layer for the self-hosted Blockwild (MIT, (c) Noah Hicks, see LICENSE).
+   1) Shows the MINECRAFT name instead of Blockwild / DIGBOTS.
    2) With ?quickstart=1, skips the menus: Create New World -> Generate World.
    3) Hides the Continue button and the splash text. */
 (function () {
-  var NAME = 'DIGBOTS';
-  function fix(t) { return t.replace(/BLOCKWILD/g, NAME).replace(/Blockwild/g, NAME); }
+  var NAME = 'MINECRAFT';
+  function fix(t) { return t.replace(/BLOCKWILD/g, NAME).replace(/Blockwild/g, NAME).replace(/DIGBOTS/g, NAME).replace(/Digbots/g, NAME); }
   function fixTree(root) {
     if (!root) return;
-    if (root.nodeType === 3) { if (/lockwild|LOCKWILD/.test(root.nodeValue)) root.nodeValue = fix(root.nodeValue); return; }
+    if (root.nodeType === 3) { if (/lockwild|LOCKWILD|digbots|DIGBOTS/.test(root.nodeValue)) root.nodeValue = fix(root.nodeValue); return; }
     if (root.nodeType !== 1 || root.tagName === 'SCRIPT' || root.tagName === 'STYLE') return;
     var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), n;
-    while ((n = w.nextNode())) if (/lockwild|LOCKWILD/.test(n.nodeValue) && n.parentNode && n.parentNode.tagName !== 'SCRIPT' && n.parentNode.tagName !== 'STYLE') n.nodeValue = fix(n.nodeValue);
+    while ((n = w.nextNode())) if (/lockwild|LOCKWILD|digbots|DIGBOTS/.test(n.nodeValue) && n.parentNode && n.parentNode.tagName !== 'SCRIPT' && n.parentNode.tagName !== 'STYLE') n.nodeValue = fix(n.nodeValue);
   }
   function brand() {
     fixTree(document.body);
-    if (/lockwild/i.test(document.title)) document.title = fix(document.title);
+    if (/lockwild|digbots/i.test(document.title)) document.title = fix(document.title);
     new MutationObserver(function (list) {
       for (var i = 0; i < list.length; i++) {
         var r = list[i];
         if (r.type === 'characterData') fixTree(r.target);
         else for (var j = 0; j < r.addedNodes.length; j++) fixTree(r.addedNodes[j]);
       }
-      if (/lockwild/i.test(document.title)) document.title = fix(document.title);
+      if (/lockwild|digbots/i.test(document.title)) document.title = fix(document.title);
     }).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
   }
 
@@ -50,7 +50,7 @@
     })();
   }
 
-  function hideBits() { // no Continue button, no splash text
+  function hideBits() {
     var css = document.createElement('style');
     css.textContent = '.title-main-menu .primary-menu-button, .splash-text { display: none !important; }';
     (document.head || document.documentElement).appendChild(css);

@@ -1,29 +1,54 @@
-/* DIGBOTS quick-start: when opened with ?quickstart=1, skip the menus.
-   Returning players: presses Continue. New players: Create New World -> Generate World. */
+/* DIGBOTS layer for the self-hosted Blockwild (MIT, (c) Noah Hicks, see LICENSE).
+   1) Shows the DIGBOTS name instead of Blockwild.
+   2) With ?quickstart=1, skips the menus: Continue for returning players, otherwise Create New World -> Generate World. */
 (function () {
-  if (!/[?&]quickstart=1\b/.test(location.search)) return;
-  var started = Date.now(), stage = 'menu', lastClick = 0;
-  function btn(label) {
-    var list = document.querySelectorAll('button');
-    for (var i = 0; i < list.length; i++) {
-      var b = list[i], t = (b.textContent || '').replace(/\s+/g, ' ').trim();
-      if (t.indexOf(label) === 0 && !b.disabled && b.offsetParent !== null) return b;
-    }
-    return null;
+  var NAME = 'DIGBOTS';
+  function fix(t) { return t.replace(/BLOCKWILD/g, NAME).replace(/Blockwild/g, NAME); }
+  function fixTree(root) {
+    if (!root) return;
+    if (root.nodeType === 3) { if (/lockwild|LOCKWILD/.test(root.nodeValue)) root.nodeValue = fix(root.nodeValue); return; }
+    if (root.nodeType !== 1 || root.tagName === 'SCRIPT' || root.tagName === 'STYLE') return;
+    var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), n;
+    while ((n = w.nextNode())) if (/lockwild|LOCKWILD/.test(n.nodeValue) && n.parentNode && n.parentNode.tagName !== 'SCRIPT' && n.parentNode.tagName !== 'STYLE') n.nodeValue = fix(n.nodeValue);
   }
-  function tick() {
-    if (Date.now() - started > 90000) return;
-    var now = Date.now();
-    if (now - lastClick > 700) {
-      var b;
-      if (stage === 'menu') {
-        if ((b = btn('Continue'))) { b.click(); lastClick = now; stage = 'done'; return; }
-        if ((b = btn('Create New World'))) { b.click(); lastClick = now; stage = 'new'; }
-      } else if (stage === 'new') {
-        if ((b = btn('Generate World'))) { b.click(); lastClick = now; stage = 'done'; return; }
+  function brand() {
+    fixTree(document.body);
+    if (/lockwild/i.test(document.title)) document.title = fix(document.title);
+    new MutationObserver(function (list) {
+      for (var i = 0; i < list.length; i++) {
+        var r = list[i];
+        if (r.type === 'characterData') fixTree(r.target);
+        else for (var j = 0; j < r.addedNodes.length; j++) fixTree(r.addedNodes[j]);
       }
-    }
-    setTimeout(tick, 250);
+      if (/lockwild/i.test(document.title)) document.title = fix(document.title);
+    }).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
   }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tick); else tick();
+
+  function quickstart() {
+    if (!/[?&]quickstart=1\b/.test(location.search)) return;
+    var started = Date.now(), stage = 'menu', lastClick = 0;
+    function btn(label) {
+      var list = document.querySelectorAll('button');
+      for (var i = 0; i < list.length; i++) {
+        var b = list[i], t = (b.textContent || '').replace(/\s+/g, ' ').trim();
+        if (t.indexOf(label) === 0 && !b.disabled && b.offsetParent !== null) return b;
+      }
+      return null;
+    }
+    (function tick() {
+      if (Date.now() - started > 90000) return;
+      var now = Date.now(), b;
+      if (now - lastClick > 700) {
+        if (stage === 'menu') {
+          if ((b = btn('Create New World'))) { b.click(); lastClick = now; stage = 'new'; }
+        } else if (stage === 'new') {
+          if ((b = btn('Generate World'))) { b.click(); lastClick = now; return; }
+        }
+      }
+      setTimeout(tick, 250);
+    })();
+  }
+
+  function start() { brand(); quickstart(); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();

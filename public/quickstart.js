@@ -2,7 +2,7 @@
    1) Start screen: adds a simple welcome line where the game logo was.
    2) Shows DIGBOTS instead of Blockwild anywhere else in the game text.
    3) With ?quickstart=1, skips the menus: Create New World -> Generate World.
-   4) Lifts the loading cover (styled in app/digbots.css) once the background world has loaded.
+   4) Live loading bar (styled in app/digbots.css) until the background world has loaded.
    The old logo, splash and Continue button are hidden by app/digbots.css before the first paint. */
 (function () {
   var NAME = 'DIGBOTS';
@@ -63,19 +63,40 @@
     })();
   }
 
-  function liftCover() {
-    // Lift the cover once the background world has settled: frame times calm down after the heavy world build.
-    // Never earlier than 1.2s; the stylesheet lifts it by itself after 9s if this never runs.
-    var t0 = performance.now(), last = t0, calm = 0;
+  function progressBar() {
+    // Live loading bar. Progress follows real loading stages and moves smoothly between them:
+    // page parsed 30%, game engine canvas 60%, world rendering 85%, world settled 100% (then the bar fades out).
+    var el = document.createElement('div');
+    el.id = 'dg-load';
+    el.innerHTML = '<div class="box"><div class="track"><div class="fill"></div></div><div class="row"><span>LOADING WORLD</span><span class="pct">0%</span></div></div>';
+    (document.body || document.documentElement).appendChild(el);
+    document.documentElement.classList.add('dg-js');
+    var fill = el.querySelector('.fill'), pct = el.querySelector('.pct');
+    var shown = 0, target = 30, t0 = performance.now(), last = t0, calm = 0, rendering = 0, finished = false;
+    function finish() {
+      if (finished) return; finished = true; shown = 100; draw();
+      setTimeout(function () { el.classList.add('done'); document.documentElement.classList.add('dg-ready'); }, 250);
+      setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 900);
+    }
+    function draw() { fill.style.width = shown.toFixed(1) + '%'; pct.textContent = Math.floor(shown) + '%'; }
     function frame(now) {
+      if (finished) return;
       var dt = now - last; last = now;
-      calm = (document.querySelector('canvas') && dt < 34) ? calm + 1 : 0;
-      if ((now - t0 > 1200 && calm >= 24) || now - t0 > 9000) { document.documentElement.classList.add('dg-ready'); return; }
+      var canvas = document.querySelector('canvas');
+      if (canvas && target < 60) target = 60;
+      if (canvas) { rendering++; if (rendering > 10 && target < 85) target = 85; }
+      calm = (canvas && dt < 34) ? calm + 1 : 0;
+      // Ease toward the current stage, never quite reaching it until the stage completes.
+      var cap = target - 1;
+      if (shown < cap) shown += Math.max(0.15, (cap - shown) * 0.06);
+      if (shown > cap) shown = cap;
+      draw();
+      if ((now - t0 > 1200 && calm >= 24) || now - t0 > 11000) return finish();
       requestAnimationFrame(frame);
     }
-    requestAnimationFrame(frame);
+    draw(); requestAnimationFrame(frame);
   }
 
-  function start() { liftCover(); brand(); quickstart(); }
+  function start() { progressBar(); brand(); quickstart(); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();

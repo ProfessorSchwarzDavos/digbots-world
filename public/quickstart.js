@@ -4,24 +4,25 @@
    3) Hides the Continue button and the splash text. */
 (function () {
   var NAME = 'MINECRAFT';
-  function fix(t) { return t.replace(/BLOCKWILD/g, NAME).replace(/Blockwild/g, NAME).replace(/DIGBOTS/g, NAME).replace(/Digbots/g, NAME); }
+  document.title = 'Minecraft';
+  function fix(t) { return t.replace(/BLOCKWILD/g, NAME).replace(/Blockwild/g, NAME).replace(/DIGBOTS/g, NAME).replace(/Digbots/g, NAME).replace(/MINECLANK/g, NAME).replace(/Mineclank/g, NAME); }
   function fixTree(root) {
     if (!root) return;
-    if (root.nodeType === 3) { if (/lockwild|LOCKWILD|digbots|DIGBOTS/.test(root.nodeValue)) root.nodeValue = fix(root.nodeValue); return; }
+    if (root.nodeType === 3) { if (/lockwild|LOCKWILD|digbots|DIGBOTS|mineclank|MINECLANK/.test(root.nodeValue)) root.nodeValue = fix(root.nodeValue); return; }
     if (root.nodeType !== 1 || root.tagName === 'SCRIPT' || root.tagName === 'STYLE') return;
     var w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT), n;
-    while ((n = w.nextNode())) if (/lockwild|LOCKWILD|digbots|DIGBOTS/.test(n.nodeValue) && n.parentNode && n.parentNode.tagName !== 'SCRIPT' && n.parentNode.tagName !== 'STYLE') n.nodeValue = fix(n.nodeValue);
+    while ((n = w.nextNode())) if (/lockwild|LOCKWILD|digbots|DIGBOTS|mineclank|MINECLANK/.test(n.nodeValue) && n.parentNode && n.parentNode.tagName !== 'SCRIPT' && n.parentNode.tagName !== 'STYLE') n.nodeValue = fix(n.nodeValue);
   }
   function brand() {
+    document.title = 'Minecraft';
     fixTree(document.body);
-    if (/lockwild|digbots/i.test(document.title)) document.title = fix(document.title);
     new MutationObserver(function (list) {
       for (var i = 0; i < list.length; i++) {
         var r = list[i];
         if (r.type === 'characterData') fixTree(r.target);
         else for (var j = 0; j < r.addedNodes.length; j++) fixTree(r.addedNodes[j]);
       }
-      if (/lockwild|digbots/i.test(document.title)) document.title = fix(document.title);
+      if (document.title !== 'Minecraft') document.title = 'Minecraft';
     }).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
   }
 

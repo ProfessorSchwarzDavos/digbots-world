@@ -1,0 +1,18 @@
+/* DIGBOTS start screen (loaded before first paint, so the old title never shows). */
+.block-logo, .logo-subtitle, .splash-text, .title-main-menu .primary-menu-button { display: none !important; }
+
+.dg-welcome { text-align: center; color: #F2F4EA; text-shadow: 0 3px 0 #1d211c, 0 0 24px rgba(0, 0, 0, .35); margin: 0 0 6px; }
+.dg-welcome h2 { margin: 0; font-family: inherit; font-size: clamp(34px, 5.5vw, 68px); font-weight: 900; letter-spacing: .06em; line-height: 1; }
+.dg-welcome p { margin: 12px 0 0; font-size: clamp(12px, 1.4vw, 16px); letter-spacing: .22em; text-transform: uppercase; opacity: .9; }
+
+/* Loading cover: on from the first frame, lifted by quickstart.js when the world is ready (or after 9s on its own). */
+html::after {
+  content: "LOADING WORLD";
+  position: fixed; inset: 0; z-index: 2147483000;
+  display: flex; align-items: center; justify-content: center;
+  background: #0B0D11; color: #F2F4EA;
+  font: 600 14px/1 ui-monospace, Menlo, Consolas, monospace; letter-spacing: .3em;
+  animation: dg-cover-out .6s ease 9s forwards;
+}
+html.dg-ready::after { animation: dg-cover-out .6s ease forwards; }
+@keyframes dg-cover-out { to { opacity: 0; visibility: hidden; } }

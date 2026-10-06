@@ -1,19 +1,11 @@
 /* DIGBOTS layer for the self-hosted Blockwild (MIT, (c) Noah Hicks, see LICENSE).
-   1) Start screen: no game logo; a simple welcome line instead. No flash of the old title.
+   1) Start screen: adds a simple welcome line where the game logo was.
    2) Shows DIGBOTS instead of Blockwild anywhere else in the game text.
    3) With ?quickstart=1, skips the menus: Create New World -> Generate World.
-   4) Hides the Continue button and the splash text.
-   5) Loading cover: hides the start screen until the background world has loaded, so only one start screen shows. */
+   4) Lifts the loading cover (styled in app/digbots.css) once the background world has loaded.
+   The old logo, splash and Continue button are hidden by app/digbots.css before the first paint. */
 (function () {
   var NAME = 'DIGBOTS';
-  var css = document.createElement('style');
-  css.textContent =
-    '.block-logo, .logo-subtitle, .splash-text, .title-main-menu .primary-menu-button { display: none !important; }' +
-    '.dg-welcome { text-align: center; color: #F2F4EA; text-shadow: 0 3px 0 #1d211c, 0 0 24px rgba(0,0,0,.35); margin: 0 0 6px; }' +
-    '.dg-welcome h2 { margin: 0; font-family: inherit; font-size: clamp(34px, 5.5vw, 68px); font-weight: 900; letter-spacing: .06em; line-height: 1; }' +
-    '.dg-welcome p { margin: 12px 0 0; font-size: clamp(12px, 1.4vw, 16px); letter-spacing: .22em; text-transform: uppercase; opacity: .9; }';
-  (document.head || document.documentElement).appendChild(css);
-
   function fix(t) { return t.replace(/BLOCKWILD/g, NAME).replace(/Blockwild/g, NAME); }
   function welcome() {
     var wraps = document.querySelectorAll('.logo-wrap');
@@ -71,34 +63,19 @@
     })();
   }
 
-  function loadingCover() {
-    var cover = document.createElement('div');
-    cover.id = 'dg-cover';
-    cover.innerHTML = '<div><b>LOADING WORLD</b><i></i></div>';
-    var st = document.createElement('style');
-    st.textContent = '#dg-cover{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;background:#0B0D11;transition:opacity .6s ease;font-family:ui-monospace,Menlo,Consolas,monospace}' +
-      '#dg-cover div{text-align:center;color:#F2F4EA;letter-spacing:.3em;font-size:14px}' +
-      '#dg-cover i{display:block;width:160px;height:4px;margin:14px auto 0;background:linear-gradient(90deg,#2EF0E0 0 30%,#1f2630 30%);background-size:200% 100%;animation:dgbar 1.1s linear infinite}' +
-      '@keyframes dgbar{from{background-position:100% 0}to{background-position:-100% 0}}' +
-      '#dg-cover.done{opacity:0;pointer-events:none}';
-    (document.head || document.documentElement).appendChild(st);
-    (document.body || document.documentElement).appendChild(cover);
-    // Reveal once the background world has settled: frame times calm down after the heavy world build.
-    // Never earlier than 1.2s, never later than 9s.
-    var t0 = performance.now(), last = t0, calm = 0, done = false;
-    function finish() { if (done) return; done = true; cover.classList.add('done'); setTimeout(function () { if (cover.parentNode) cover.parentNode.removeChild(cover); }, 700); }
+  function liftCover() {
+    // Lift the cover once the background world has settled: frame times calm down after the heavy world build.
+    // Never earlier than 1.2s; the stylesheet lifts it by itself after 9s if this never runs.
+    var t0 = performance.now(), last = t0, calm = 0;
     function frame(now) {
-      if (done) return;
       var dt = now - last; last = now;
-      var hasCanvas = !!document.querySelector('canvas');
-      calm = (hasCanvas && dt < 34) ? calm + 1 : 0;
-      var elapsed = now - t0;
-      if ((elapsed > 1200 && calm >= 24) || elapsed > 9000) return finish();
+      calm = (document.querySelector('canvas') && dt < 34) ? calm + 1 : 0;
+      if ((now - t0 > 1200 && calm >= 24) || now - t0 > 9000) { document.documentElement.classList.add('dg-ready'); return; }
       requestAnimationFrame(frame);
     }
     requestAnimationFrame(frame);
   }
 
-  function start() { loadingCover(); brand(); quickstart(); }
+  function start() { liftCover(); brand(); quickstart(); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();

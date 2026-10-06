@@ -2,7 +2,8 @@
    1) Start screen: no game logo; a simple welcome line instead. No flash of the old title.
    2) Shows DIGBOTS instead of Blockwild anywhere else in the game text.
    3) With ?quickstart=1, skips the menus: Create New World -> Generate World.
-   4) Hides the Continue button and the splash text. */
+   4) Hides the Continue button and the splash text.
+   5) Loading cover: hides the start screen until the background world has loaded, so only one start screen shows. */
 (function () {
   var NAME = 'DIGBOTS';
   var css = document.createElement('style');
@@ -70,6 +71,34 @@
     })();
   }
 
-  function start() { brand(); quickstart(); }
+  function loadingCover() {
+    var cover = document.createElement('div');
+    cover.id = 'dg-cover';
+    cover.innerHTML = '<div><b>LOADING WORLD</b><i></i></div>';
+    var st = document.createElement('style');
+    st.textContent = '#dg-cover{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;background:#0B0D11;transition:opacity .6s ease;font-family:ui-monospace,Menlo,Consolas,monospace}' +
+      '#dg-cover div{text-align:center;color:#F2F4EA;letter-spacing:.3em;font-size:14px}' +
+      '#dg-cover i{display:block;width:160px;height:4px;margin:14px auto 0;background:linear-gradient(90deg,#2EF0E0 0 30%,#1f2630 30%);background-size:200% 100%;animation:dgbar 1.1s linear infinite}' +
+      '@keyframes dgbar{from{background-position:100% 0}to{background-position:-100% 0}}' +
+      '#dg-cover.done{opacity:0;pointer-events:none}';
+    (document.head || document.documentElement).appendChild(st);
+    (document.body || document.documentElement).appendChild(cover);
+    // Reveal once the background world has settled: frame times calm down after the heavy world build.
+    // Never earlier than 1.2s, never later than 9s.
+    var t0 = performance.now(), last = t0, calm = 0, done = false;
+    function finish() { if (done) return; done = true; cover.classList.add('done'); setTimeout(function () { if (cover.parentNode) cover.parentNode.removeChild(cover); }, 700); }
+    function frame(now) {
+      if (done) return;
+      var dt = now - last; last = now;
+      var hasCanvas = !!document.querySelector('canvas');
+      calm = (hasCanvas && dt < 34) ? calm + 1 : 0;
+      var elapsed = now - t0;
+      if ((elapsed > 1200 && calm >= 24) || elapsed > 9000) return finish();
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  function start() { loadingCover(); brand(); quickstart(); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();

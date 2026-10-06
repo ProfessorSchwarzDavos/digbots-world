@@ -44,9 +44,12 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        {/* DIGBOTS loading bar: loads before the game code so the bar shows right away */}
+        <script src="/quickstart.js" />
+      </head>
       <body suppressHydrationWarning className="antialiased">
         {children}
-        <script src="/quickstart.js" async />
       </body>
     </html>
   );

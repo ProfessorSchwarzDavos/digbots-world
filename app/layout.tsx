@@ -45,6 +45,7 @@ export default function RootLayout({
     <html lang="en">
       <body suppressHydrationWarning className="antialiased">
         {children}
+        <script src="/quickstart.js" async />
       </body>
     </html>
   );

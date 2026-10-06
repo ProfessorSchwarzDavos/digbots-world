@@ -1,6 +1,7 @@
 /* DIGBOTS layer for the self-hosted Blockwild (MIT, (c) Noah Hicks, see LICENSE).
    1) Shows the DIGBOTS name instead of Blockwild.
-   2) With ?quickstart=1, skips the menus: Continue for returning players, otherwise Create New World -> Generate World. */
+   2) With ?quickstart=1, skips the menus: Create New World -> Generate World.
+   3) Hides the Continue button and the splash text. */
 (function () {
   var NAME = 'DIGBOTS';
   function fix(t) { return t.replace(/BLOCKWILD/g, NAME).replace(/Blockwild/g, NAME); }
@@ -49,6 +50,12 @@
     })();
   }
 
-  function start() { brand(); quickstart(); }
+  function hideBits() { // no Continue button, no splash text
+    var css = document.createElement('style');
+    css.textContent = '.title-main-menu .primary-menu-button, .splash-text { display: none !important; }';
+    (document.head || document.documentElement).appendChild(css);
+  }
+
+  function start() { hideBits(); brand(); quickstart(); }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
 })();
